@@ -12,3 +12,4 @@
 /home/pedro/RiderProjects/Numerical/Meshing/obj/Release/net9.0/refint/Meshing.dll
 /home/pedro/RiderProjects/Numerical/Meshing/obj/Release/net9.0/Meshing.pdb
 /home/pedro/RiderProjects/Numerical/Meshing/obj/Release/net9.0/ref/Meshing.dll
+/home/pedro/RiderProjects/Numerical/Meshing/obj/Release/net9.0/Meshing.sourcelink.json

@@ -14,3 +14,4 @@
 /home/pedro/RiderProjects/Numerical/Postprocess/obj/Release/net9.0/refint/Postprocess.dll
 /home/pedro/RiderProjects/Numerical/Postprocess/obj/Release/net9.0/Postprocess.pdb
 /home/pedro/RiderProjects/Numerical/Postprocess/obj/Release/net9.0/ref/Postprocess.dll
+/home/pedro/RiderProjects/Numerical/Postprocess/obj/Release/net9.0/Postprocess.sourcelink.json
