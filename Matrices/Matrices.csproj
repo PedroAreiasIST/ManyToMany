@@ -1,0 +1,176 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net9.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>latest</LangVersion>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <RootNamespace>Numerical</RootNamespace>
+
+        <!-- Force 64-bit only - NO 32-bit support -->
+        <PlatformTarget>x64</PlatformTarget>
+        <Platforms>x64;64</Platforms>
+        <Prefer32Bit>false</Prefer32Bit>
+        <RuntimeIdentifiers>win-x64;linux-x64;osx-x64;osx-arm64</RuntimeIdentifiers>
+
+        <!-- Allow very large objects (>2GB arrays) -->
+        <gcAllowVeryLargeObjects>true</gcAllowVeryLargeObjects>
+
+        <!-- Runtime options for vectorization and intrinsics -->
+        <EnableAVX2>true</EnableAVX2>
+        <EnableFMA>true</EnableFMA>
+        <EnableSSE41>true</EnableSSE41>
+        <EnableSSE42>true</EnableSSE42>
+        <Configurations>Debug;Release</Configurations>
+    </PropertyGroup>
+
+    <!-- ============================================ -->
+    <!-- DEBUG CONFIGURATION                          -->
+    <!-- ============================================ -->
+    <PropertyGroup Condition="'$(Configuration)'=='Debug'">
+        <DefineConstants>DEBUG;TRACE;X64</DefineConstants>
+        <DebugType>full</DebugType>
+        <DebugSymbols>true</DebugSymbols>
+        <Optimize>false</Optimize>
+
+        <!-- 64-bit Platform -->
+        <PlatformTarget>x64</PlatformTarget>
+        <Prefer32Bit>false</Prefer32Bit>
+
+        <!-- Enhanced debugging experience -->
+        <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
+        <WarningLevel>5</WarningLevel>
+        <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+
+        <!-- Use workstation GC for better debugging -->
+        <ServerGarbageCollection>false</ServerGarbageCollection>
+        <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+    </PropertyGroup>
+
+    <!-- ============================================ -->
+    <!-- RELEASE CONFIGURATION - MAXIMUM OPTIMIZATION -->
+    <!-- ============================================ -->
+    <PropertyGroup Condition="'$(Configuration)'=='Release'">
+        <DefineConstants>TRACE;X64;AGGRESSIVE_INLINE</DefineConstants>
+        <DebugType>none</DebugType>
+        <DebugSymbols>false</DebugSymbols>
+        <Optimize>true</Optimize>
+
+        <!-- 64-bit Platform -->
+        <PlatformTarget>x64</PlatformTarget>
+        <Prefer32Bit>false</Prefer32Bit>
+
+        <!-- ======================================== -->
+        <!-- JIT COMPILATION OPTIMIZATIONS            -->
+        <!-- ======================================== -->
+
+        <!-- Enable tiered JIT compilation for adaptive optimization -->
+        <TieredCompilation>true</TieredCompilation>
+
+        <!-- Disable quick JIT to favor full optimization from the start -->
+        <!-- This is crucial for high-performance numerical code that runs repeatedly -->
+        <TieredCompilationQuickJit>false</TieredCompilationQuickJit>
+        <TieredCompilationQuickJitForLoops>false</TieredCompilationQuickJitForLoops>
+
+        <!-- Enable dynamic profile-guided optimization (PGO) -->
+        <!-- This allows the JIT to optimize based on actual runtime behavior -->
+        <TieredPGO>true</TieredPGO>
+
+        <!-- ======================================== -->
+        <!-- GARBAGE COLLECTION OPTIMIZATIONS         -->
+        <!-- ======================================== -->
+
+        <!-- Use server GC for high-throughput workloads -->
+        <!-- Essential for parallel numerical computations -->
+        <ServerGarbageCollection>true</ServerGarbageCollection>
+
+        <!-- Enable concurrent GC to reduce pause times -->
+        <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+
+        <!-- Retain VM for faster subsequent allocations -->
+        <RetainVMGarbageCollection>true</RetainVMGarbageCollection>
+
+        <!-- ======================================== -->
+        <!-- CODE GENERATION OPTIMIZATIONS            -->
+        <!-- ======================================== -->
+
+        <!-- Aggressive Inlining and Optimizations -->
+        <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
+        <IlcInstructionSet>x86-x64-v3</IlcInstructionSet>
+
+        <!-- ======================================== -->
+        <!-- RUNTIME OPTIMIZATIONS                    -->
+        <!-- ======================================== -->
+
+        <!-- Run in globalization-invariant mode to reduce overhead -->
+        <!-- Safe for numerical/scientific computing that doesn't need localization -->
+        <InvariantGlobalization>true</InvariantGlobalization>
+
+        <!-- Disable overflow checking for performance -->
+        <CheckForOverflowUnderflow>false</CheckForOverflowUnderflow>
+
+        <!-- ======================================== -->
+        <!-- COMPILER WARNINGS AND DIAGNOSTICS        -->
+        <!-- ======================================== -->
+
+        <!-- Maximum warning level for production code -->
+        <WarningLevel>5</WarningLevel>
+
+        <!-- Deterministic build for reproducibility -->
+        <Deterministic>true</Deterministic>
+        <ContinuousIntegrationBuild>false</ContinuousIntegrationBuild>
+    </PropertyGroup>
+
+    <!-- ============================================ -->
+    <!-- PACKAGE REFERENCES                           -->
+    <!-- ============================================ -->
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Extensions.ObjectPool" Version="9.0.0"/>
+
+        <!-- Intel MKL: Official native library packages for CPU acceleration -->
+        <!-- Includes MKL Sparse BLAS and PARDISO solver with native binaries -->
+
+        <!-- Windows: Use NuGet package (automatic) -->
+        <PackageReference Include="Intel.oneAPI.MKL.redist.win" Version="2024.2.1" Condition="$([MSBuild]::IsOSPlatform('Windows'))"/>
+
+        <!-- Linux/macOS: Install via system package manager (NuGet packages don't exist) -->
+        <!--   Linux:  sudo apt-get install intel-mkl   -->
+        <!--   macOS:  brew install intel-mkl            -->
+        <!-- The library will be auto-detected by NativeLibraryConfig.cs -->
+    </ItemGroup>
+
+    <!-- ============================================ -->
+    <!-- RUNTIME CONFIGURATION                        -->
+    <!-- ============================================ -->
+    <ItemGroup>
+        <!-- JIT Optimizations -->
+        <RuntimeHostConfigurationOption Include="System.Runtime.TieredCompilation" Value="true"/>
+        <RuntimeHostConfigurationOption Include="System.Runtime.TieredCompilation.QuickJit" Value="false"/>
+        <RuntimeHostConfigurationOption Include="System.Runtime.TieredPGO" Value="true"/>
+        <RuntimeHostConfigurationOption Include="System.Runtime.TieredCompilation.QuickJitForLoops" Value="false"/>
+
+        <!-- Garbage Collection - Server GC for throughput -->
+        <RuntimeHostConfigurationOption Include="System.GC.Server" Value="true"/>
+        <RuntimeHostConfigurationOption Include="System.GC.Concurrent" Value="true"/>
+        <RuntimeHostConfigurationOption Include="System.GC.RetainVM" Value="true"/>
+
+        <!-- Allow very large objects (>2GB) -->
+        <RuntimeHostConfigurationOption Include="System.GC.AllowVeryLargeObjects" Value="true"/>
+    </ItemGroup>
+    <ItemGroup>
+        <ProjectReference Include="..\Relations\Relations.csproj"/>
+    </ItemGroup>
+
+    <!-- Conditional AOT Compilation for Native Performance -->
+    <PropertyGroup Condition="'$(PublishAot)' == 'true'">
+        <PublishAot>true</PublishAot>
+        <StripSymbols>true</StripSymbols>
+        <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
+        <IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
+        <EventSourceSupport>false</EventSourceSupport>
+        <UseSystemResourceKeys>true</UseSystemResourceKeys>
+        <InvariantGlobalization>true</InvariantGlobalization>
+    </PropertyGroup>
+
+</Project>

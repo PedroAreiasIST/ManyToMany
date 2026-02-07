@@ -1,0 +1,22 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Matrices", "..\Matrices\Matrices.csproj", "{63C46CBA-5E11-46CC-A155-B3581DE09D75}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MatricesTests", "MatricesTests\MatricesTests.csproj", "{B736913B-0601-4BCD-8FFD-3AA6F6DA2611}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{63C46CBA-5E11-46CC-A155-B3581DE09D75}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{63C46CBA-5E11-46CC-A155-B3581DE09D75}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{63C46CBA-5E11-46CC-A155-B3581DE09D75}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{63C46CBA-5E11-46CC-A155-B3581DE09D75}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B736913B-0601-4BCD-8FFD-3AA6F6DA2611}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B736913B-0601-4BCD-8FFD-3AA6F6DA2611}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B736913B-0601-4BCD-8FFD-3AA6F6DA2611}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B736913B-0601-4BCD-8FFD-3AA6F6DA2611}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

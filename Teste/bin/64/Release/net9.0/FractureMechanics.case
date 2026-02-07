@@ -1,0 +1,16 @@
+FORMAT
+type: ensight
+
+GEOMETRY
+model: 1 4 FractureMechanics_****.geo
+
+TIME
+time set: 1
+number of steps: 4
+filename start number: 0
+filename increment: 1
+time values:
+       0.0000
+       1.0000
+       2.0000
+       3.0000

@@ -1,0 +1,46 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Matrices", "Matrices\Matrices.csproj", "{63C46CBA-5E11-46CC-A155-B3581DE09D75}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Nonlinear", "Nonlinear\Nonlinear.csproj", "{8D31B4E7-1722-432F-A719-5CA1FFF20691}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Teste", "Teste\Teste.csproj", "{32D571D2-ADFA-4E03-8FEA-358875CE157C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Relations", "Relations\Relations.csproj", "{6B20BD34-A52B-4D09-91D4-07610AC10ECD}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Postprocess", "Postprocess\Postprocess.csproj", "{5EBD8D3F-B3B6-44E1-BB60-1DB5CC9D0F20}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Meshing", "Meshing\Meshing.csproj", "{783456A4-393A-490A-8E7B-92E77443BE93}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Release|64 = Release|64
+		Debug|64 = Debug|64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{63C46CBA-5E11-46CC-A155-B3581DE09D75}.Release|64.ActiveCfg = Release|64
+		{63C46CBA-5E11-46CC-A155-B3581DE09D75}.Release|64.Build.0 = Release|64
+		{63C46CBA-5E11-46CC-A155-B3581DE09D75}.Debug|64.ActiveCfg = Debug|64
+		{63C46CBA-5E11-46CC-A155-B3581DE09D75}.Debug|64.Build.0 = Debug|64
+		{8D31B4E7-1722-432F-A719-5CA1FFF20691}.Release|64.ActiveCfg = Release|64
+		{8D31B4E7-1722-432F-A719-5CA1FFF20691}.Release|64.Build.0 = Release|64
+		{8D31B4E7-1722-432F-A719-5CA1FFF20691}.Debug|64.ActiveCfg = Debug|64
+		{8D31B4E7-1722-432F-A719-5CA1FFF20691}.Debug|64.Build.0 = Debug|64
+		{6B20BD34-A52B-4D09-91D4-07610AC10ECD}.Release|64.ActiveCfg = Release|64
+		{6B20BD34-A52B-4D09-91D4-07610AC10ECD}.Release|64.Build.0 = Release|64
+		{6B20BD34-A52B-4D09-91D4-07610AC10ECD}.Debug|64.ActiveCfg = Debug|64
+		{6B20BD34-A52B-4D09-91D4-07610AC10ECD}.Debug|64.Build.0 = Debug|64
+		{32D571D2-ADFA-4E03-8FEA-358875CE157C}.Release|64.ActiveCfg = Release|64
+		{32D571D2-ADFA-4E03-8FEA-358875CE157C}.Release|64.Build.0 = Release|64
+		{32D571D2-ADFA-4E03-8FEA-358875CE157C}.Debug|64.ActiveCfg = Debug|64
+		{32D571D2-ADFA-4E03-8FEA-358875CE157C}.Debug|64.Build.0 = Debug|64
+		{5EBD8D3F-B3B6-44E1-BB60-1DB5CC9D0F20}.Release|64.ActiveCfg = Release|Any CPU
+		{5EBD8D3F-B3B6-44E1-BB60-1DB5CC9D0F20}.Release|64.Build.0 = Release|Any CPU
+		{5EBD8D3F-B3B6-44E1-BB60-1DB5CC9D0F20}.Debug|64.ActiveCfg = Debug|Any CPU
+		{5EBD8D3F-B3B6-44E1-BB60-1DB5CC9D0F20}.Debug|64.Build.0 = Debug|Any CPU
+		{783456A4-393A-490A-8E7B-92E77443BE93}.Release|64.ActiveCfg = Release|Any CPU
+		{783456A4-393A-490A-8E7B-92E77443BE93}.Release|64.Build.0 = Release|Any CPU
+		{783456A4-393A-490A-8E7B-92E77443BE93}.Debug|64.ActiveCfg = Debug|Any CPU
+		{783456A4-393A-490A-8E7B-92E77443BE93}.Debug|64.Build.0 = Debug|Any CPU
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,12 @@
+/home/pedro/RiderProjects/Numerical/Relations/obj/Debug/net9.0/Relations.GeneratedMSBuildEditorConfig.editorconfig
+/home/pedro/RiderProjects/Numerical/Relations/obj/Debug/net9.0/Relations.AssemblyInfoInputs.cache
+/home/pedro/RiderProjects/Numerical/Relations/obj/Debug/net9.0/Relations.AssemblyInfo.cs
+/home/pedro/RiderProjects/Numerical/Relations/obj/Debug/net9.0/Relations.csproj.CoreCompileInputs.cache
+/home/pedro/RiderProjects/Numerical/Relations/obj/Debug/net9.0/Relations.csproj.AssemblyReference.cache
+/home/pedro/RiderProjects/Numerical/Relations/bin/Debug/net9.0/Relations.deps.json
+/home/pedro/RiderProjects/Numerical/Relations/bin/Debug/net9.0/Relations.dll
+/home/pedro/RiderProjects/Numerical/Relations/bin/Debug/net9.0/Relations.pdb
+/home/pedro/RiderProjects/Numerical/Relations/obj/Debug/net9.0/Relations.dll
+/home/pedro/RiderProjects/Numerical/Relations/obj/Debug/net9.0/refint/Relations.dll
+/home/pedro/RiderProjects/Numerical/Relations/obj/Debug/net9.0/Relations.pdb
+/home/pedro/RiderProjects/Numerical/Relations/obj/Debug/net9.0/ref/Relations.dll

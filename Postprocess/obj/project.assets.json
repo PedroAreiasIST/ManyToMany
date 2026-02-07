@@ -1,0 +1,162 @@
+{
+  "version": 3,
+  "targets": {
+    "net9.0": {
+      "Microsoft.Extensions.ObjectPool/9.0.0": {
+        "type": "package",
+        "compile": {
+          "lib/net9.0/Microsoft.Extensions.ObjectPool.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net9.0/Microsoft.Extensions.ObjectPool.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "Meshing/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "dependencies": {
+          "Topology": "4.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Meshing.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Meshing.dll": {}
+        }
+      },
+      "Topology/4.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "dependencies": {
+          "Microsoft.Extensions.ObjectPool": "9.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Topology.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Topology.dll": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "Microsoft.Extensions.ObjectPool/9.0.0": {
+      "sha512": "UbsU/gYe4nv1DeqMXIVzDfNNek7Sk2kKuAOXL/Y+sLcAR0HwFUqzg1EPiU88jeHNe0g81aPvvHbvHarQr3r9IA==",
+      "type": "package",
+      "path": "microsoft.extensions.objectpool/9.0.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "THIRD-PARTY-NOTICES.TXT",
+        "lib/net462/Microsoft.Extensions.ObjectPool.dll",
+        "lib/net462/Microsoft.Extensions.ObjectPool.xml",
+        "lib/net9.0/Microsoft.Extensions.ObjectPool.dll",
+        "lib/net9.0/Microsoft.Extensions.ObjectPool.xml",
+        "lib/netstandard2.0/Microsoft.Extensions.ObjectPool.dll",
+        "lib/netstandard2.0/Microsoft.Extensions.ObjectPool.xml",
+        "microsoft.extensions.objectpool.9.0.0.nupkg.sha512",
+        "microsoft.extensions.objectpool.nuspec"
+      ]
+    },
+    "Meshing/1.0.0": {
+      "type": "project",
+      "path": "../Meshing/Meshing.csproj",
+      "msbuildProject": "../Meshing/Meshing.csproj"
+    },
+    "Topology/4.0.0": {
+      "type": "project",
+      "path": "../Relations/Relations.csproj",
+      "msbuildProject": "../Relations/Relations.csproj"
+    }
+  },
+  "projectFileDependencyGroups": {
+    "net9.0": [
+      "Meshing >= 1.0.0",
+      "Topology >= 4.0.0"
+    ]
+  },
+  "packageFolders": {
+    "/home/pedro/.nuget/packages/": {}
+  },
+  "project": {
+    "version": "1.0.0",
+    "restore": {
+      "projectUniqueName": "/home/pedro/RiderProjects/Numerical/Postprocess/Postprocess.csproj",
+      "projectName": "Postprocess",
+      "projectPath": "/home/pedro/RiderProjects/Numerical/Postprocess/Postprocess.csproj",
+      "packagesPath": "/home/pedro/.nuget/packages/",
+      "outputPath": "/home/pedro/RiderProjects/Numerical/Postprocess/obj/",
+      "projectStyle": "PackageReference",
+      "configFilePaths": [
+        "/home/pedro/.nuget/NuGet/NuGet.Config"
+      ],
+      "originalTargetFrameworks": [
+        "net9.0"
+      ],
+      "sources": {
+        "https://api.nuget.org/v3/index.json": {}
+      },
+      "frameworks": {
+        "net9.0": {
+          "targetAlias": "net9.0",
+          "projectReferences": {
+            "/home/pedro/RiderProjects/Numerical/Meshing/Meshing.csproj": {
+              "projectPath": "/home/pedro/RiderProjects/Numerical/Meshing/Meshing.csproj"
+            },
+            "/home/pedro/RiderProjects/Numerical/Relations/Relations.csproj": {
+              "projectPath": "/home/pedro/RiderProjects/Numerical/Relations/Relations.csproj"
+            }
+          }
+        }
+      },
+      "warningProperties": {
+        "warnAsError": [
+          "NU1605"
+        ]
+      },
+      "restoreAuditProperties": {
+        "enableAudit": "true",
+        "auditLevel": "low",
+        "auditMode": "direct"
+      },
+      "SdkAnalysisLevel": "10.0.100"
+    },
+    "frameworks": {
+      "net9.0": {
+        "targetAlias": "net9.0",
+        "imports": [
+          "net461",
+          "net462",
+          "net47",
+          "net471",
+          "net472",
+          "net48",
+          "net481"
+        ],
+        "assetTargetFallback": true,
+        "warn": true,
+        "downloadDependencies": [
+          {
+            "name": "Microsoft.AspNetCore.App.Ref",
+            "version": "[9.0.11, 9.0.11]"
+          },
+          {
+            "name": "Microsoft.NETCore.App.Ref",
+            "version": "[9.0.11, 9.0.11]"
+          }
+        ],
+        "frameworkReferences": {
+          "Microsoft.NETCore.App": {
+            "privateAssets": "all"
+          }
+        },
+        "runtimeIdentifierGraphPath": "/home/pedro/.dotnet/sdk/10.0.100/PortableRuntimeIdentifierGraph.json"
+      }
+    }
+  }
+}

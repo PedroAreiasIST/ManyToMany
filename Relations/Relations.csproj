@@ -1,0 +1,136 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net9.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <LangVersion>latest</LangVersion>
+        <RootNamespace>Topology</RootNamespace>
+        <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+        <PackageId>Topology</PackageId>
+        <Version>4.0.0</Version>
+        <Authors>Pedro Areias</Authors>
+        <Description>High-performance topology library for finite element analysis and computational mechanics</Description>
+
+        <!-- Force 64-bit only - NO 32-bit support -->
+        <PlatformTarget>x64</PlatformTarget>
+        <Platforms>x64;64</Platforms>
+        <Prefer32Bit>false</Prefer32Bit>
+        <RuntimeIdentifiers>win-x64;linux-x64;osx-x64;osx-arm64</RuntimeIdentifiers>
+
+        <!-- Allow very large objects (>2GB arrays) -->
+        <gcAllowVeryLargeObjects>true</gcAllowVeryLargeObjects>
+        <Configurations>Debug;Release</Configurations>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+        <!-- Core Optimization Settings -->
+        <Optimize>true</Optimize>
+        <DebugType>none</DebugType>
+        <DebugSymbols>false</DebugSymbols>
+
+        <!-- 64-bit Platform (redundant but explicit) -->
+        <PlatformTarget>x64</PlatformTarget>
+        <Prefer32Bit>false</Prefer32Bit>
+
+        <!-- JIT Compilation Settings for Maximum Performance -->
+        <TieredCompilation>true</TieredCompilation>
+        <TieredCompilationQuickJit>false</TieredCompilationQuickJit>
+        <TieredCompilationQuickJitForLoops>false</TieredCompilationQuickJitForLoops>
+
+        <!-- Ahead-of-Time Compilation -->
+        <PublishReadyToRun>true</PublishReadyToRun>
+        <PublishReadyToRunComposite>true</PublishReadyToRunComposite>
+        <PublishReadyToRunUseCrossgen2>true</PublishReadyToRunUseCrossgen2>
+
+        <!-- Aggressive Inlining and Optimizations -->
+        <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
+        <IlcInstructionSet>x86-x64-v3</IlcInstructionSet>
+
+        <!-- Disable Runtime Checks for Performance -->
+        <CheckForOverflowUnderflow>false</CheckForOverflowUnderflow>
+        <DebuggerSupport>false</DebuggerSupport>
+
+        <!-- Trimming and Size Reduction -->
+        <PublishTrimmed>false</PublishTrimmed>
+        <TrimMode>link</TrimMode>
+
+        <!-- Additional Performance Flags -->
+        <DefineConstants>RELEASE;TRACE;X64;AGGRESSIVE_INLINE</DefineConstants>
+        <Deterministic>true</Deterministic>
+        <ContinuousIntegrationBuild>false</ContinuousIntegrationBuild>
+
+        <!-- Compiler Warnings -->
+        <WarningLevel>4</WarningLevel>
+        <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+        <NoWarn>CS8600;CS8602;CS8603;CS8604</NoWarn>
+
+        <!-- Build Output -->
+        <EmitCompilerGeneratedFiles>false</EmitCompilerGeneratedFiles>
+        <GenerateDocumentationFile>false</GenerateDocumentationFile>
+        <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+
+        <!-- Enable all CPU instruction sets for x64 -->
+        <EnablePreviewFeatures>true</EnablePreviewFeatures>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+        <Optimize>false</Optimize>
+        <DebugType>full</DebugType>
+        <DebugSymbols>true</DebugSymbols>
+        <DefineConstants>DEBUG;TRACE;X64</DefineConstants>
+        <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
+        <PlatformTarget>x64</PlatformTarget>
+        <Prefer32Bit>false</Prefer32Bit>
+    </PropertyGroup>
+
+    <!-- Runtime Configuration for Maximum Performance -->
+    <ItemGroup>
+        <!-- JIT Optimizations -->
+        <RuntimeHostConfigurationOption Include="System.Runtime.TieredCompilation" Value="true"/>
+        <RuntimeHostConfigurationOption Include="System.Runtime.TieredCompilation.QuickJit" Value="false"/>
+        <RuntimeHostConfigurationOption Include="System.Runtime.TieredPGO" Value="true"/>
+        <RuntimeHostConfigurationOption Include="System.Runtime.TieredCompilation.QuickJitForLoops" Value="false"/>
+
+        <!-- Garbage Collection - Server GC for throughput -->
+        <RuntimeHostConfigurationOption Include="System.GC.Server" Value="true"/>
+        <RuntimeHostConfigurationOption Include="System.GC.Concurrent" Value="true"/>
+        <RuntimeHostConfigurationOption Include="System.GC.RetainVM" Value="true"/>
+        <RuntimeHostConfigurationOption Include="System.GC.HeapCount" Value="0"/>
+        <RuntimeHostConfigurationOption Include="System.GC.NoAffinitize" Value="false"/>
+        <RuntimeHostConfigurationOption Include="System.GC.HeapAffinitizeMask" Value="0"/>
+
+        <!-- Allow very large objects (>2GB) -->
+        <RuntimeHostConfigurationOption Include="System.GC.AllowVeryLargeObjects" Value="true"/>
+
+        <!-- SIMD and Vector Optimizations -->
+        <RuntimeHostConfigurationOption Include="System.Numerics.Tensors.EnableTensorOperations" Value="true"/>
+
+        <!-- Thread Pool Optimization -->
+        <RuntimeHostConfigurationOption Include="System.Threading.ThreadPool.MinThreads" Value="16"/>
+        <RuntimeHostConfigurationOption Include="System.Threading.ThreadPool.MaxThreads" Value="1024"/>
+
+        <!-- Stack Size for Deep Recursion (if needed) -->
+        <RuntimeHostConfigurationOption Include="System.Threading.Thread.MaxStackSize" Value="2097152"/>
+
+        <!-- JIT Inlining Limits -->
+        <RuntimeHostConfigurationOption Include="System.Runtime.Loader.UseRidGraph" Value="true"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Extensions.ObjectPool" Version="9.0.0"/>
+    </ItemGroup>
+
+    <!-- Conditional AOT Compilation for Native Performance -->
+    <PropertyGroup Condition="'$(PublishAot)' == 'true'">
+        <PublishAot>true</PublishAot>
+        <StripSymbols>true</StripSymbols>
+        <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
+        <IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
+        <EventSourceSupport>false</EventSourceSupport>
+        <UseSystemResourceKeys>true</UseSystemResourceKeys>
+        <InvariantGlobalization>true</InvariantGlobalization>
+    </PropertyGroup>
+
+</Project>

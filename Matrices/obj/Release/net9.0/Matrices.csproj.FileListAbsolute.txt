@@ -1,0 +1,10 @@
+/home/pedro/RiderProjects/Numerical/Matrices/bin/Release/net9.0/Matrices.deps.json
+/home/pedro/RiderProjects/Numerical/Matrices/bin/Release/net9.0/Matrices.dll
+/home/pedro/RiderProjects/Numerical/Matrices/obj/Release/net9.0/Matrices.csproj.AssemblyReference.cache
+/home/pedro/RiderProjects/Numerical/Matrices/obj/Release/net9.0/Matrices.GeneratedMSBuildEditorConfig.editorconfig
+/home/pedro/RiderProjects/Numerical/Matrices/obj/Release/net9.0/Matrices.AssemblyInfoInputs.cache
+/home/pedro/RiderProjects/Numerical/Matrices/obj/Release/net9.0/Matrices.AssemblyInfo.cs
+/home/pedro/RiderProjects/Numerical/Matrices/obj/Release/net9.0/Matrices.csproj.CoreCompileInputs.cache
+/home/pedro/RiderProjects/Numerical/Matrices/obj/Release/net9.0/Matrices.dll
+/home/pedro/RiderProjects/Numerical/Matrices/obj/Release/net9.0/refint/Matrices.dll
+/home/pedro/RiderProjects/Numerical/Matrices/obj/Release/net9.0/ref/Matrices.dll

@@ -1,0 +1,609 @@
+{
+  "version": 3,
+  "targets": {
+    "net9.0": {
+      "Microsoft.Extensions.ObjectPool/9.0.0": {
+        "type": "package",
+        "compile": {
+          "lib/net9.0/Microsoft.Extensions.ObjectPool.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net9.0/Microsoft.Extensions.ObjectPool.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "Matrices/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "dependencies": {
+          "Microsoft.Extensions.ObjectPool": "9.0.0",
+          "Topology": "4.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Matrices.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Matrices.dll": {}
+        }
+      },
+      "Meshing/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "dependencies": {
+          "Topology": "4.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Meshing.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Meshing.dll": {}
+        }
+      },
+      "Nonlinear/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "compile": {
+          "bin/placeholder/Nonlinear.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Nonlinear.dll": {}
+        }
+      },
+      "Postprocess/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "dependencies": {
+          "Meshing": "1.0.0",
+          "Topology": "4.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Postprocess.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Postprocess.dll": {}
+        }
+      },
+      "Topology/4.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "dependencies": {
+          "Microsoft.Extensions.ObjectPool": "9.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Topology.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Topology.dll": {}
+        }
+      }
+    },
+    "net9.0/linux-x64": {
+      "Microsoft.Extensions.ObjectPool/9.0.0": {
+        "type": "package",
+        "compile": {
+          "lib/net9.0/Microsoft.Extensions.ObjectPool.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net9.0/Microsoft.Extensions.ObjectPool.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "Matrices/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "dependencies": {
+          "Microsoft.Extensions.ObjectPool": "9.0.0",
+          "Topology": "4.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Matrices.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Matrices.dll": {}
+        }
+      },
+      "Meshing/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "dependencies": {
+          "Topology": "4.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Meshing.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Meshing.dll": {}
+        }
+      },
+      "Nonlinear/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "compile": {
+          "bin/placeholder/Nonlinear.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Nonlinear.dll": {}
+        }
+      },
+      "Postprocess/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "dependencies": {
+          "Meshing": "1.0.0",
+          "Topology": "4.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Postprocess.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Postprocess.dll": {}
+        }
+      },
+      "Topology/4.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "dependencies": {
+          "Microsoft.Extensions.ObjectPool": "9.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Topology.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Topology.dll": {}
+        }
+      }
+    },
+    "net9.0/osx-arm64": {
+      "Microsoft.Extensions.ObjectPool/9.0.0": {
+        "type": "package",
+        "compile": {
+          "lib/net9.0/Microsoft.Extensions.ObjectPool.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net9.0/Microsoft.Extensions.ObjectPool.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "Matrices/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "dependencies": {
+          "Microsoft.Extensions.ObjectPool": "9.0.0",
+          "Topology": "4.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Matrices.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Matrices.dll": {}
+        }
+      },
+      "Meshing/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "dependencies": {
+          "Topology": "4.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Meshing.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Meshing.dll": {}
+        }
+      },
+      "Nonlinear/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "compile": {
+          "bin/placeholder/Nonlinear.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Nonlinear.dll": {}
+        }
+      },
+      "Postprocess/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "dependencies": {
+          "Meshing": "1.0.0",
+          "Topology": "4.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Postprocess.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Postprocess.dll": {}
+        }
+      },
+      "Topology/4.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "dependencies": {
+          "Microsoft.Extensions.ObjectPool": "9.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Topology.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Topology.dll": {}
+        }
+      }
+    },
+    "net9.0/osx-x64": {
+      "Microsoft.Extensions.ObjectPool/9.0.0": {
+        "type": "package",
+        "compile": {
+          "lib/net9.0/Microsoft.Extensions.ObjectPool.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net9.0/Microsoft.Extensions.ObjectPool.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "Matrices/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "dependencies": {
+          "Microsoft.Extensions.ObjectPool": "9.0.0",
+          "Topology": "4.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Matrices.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Matrices.dll": {}
+        }
+      },
+      "Meshing/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "dependencies": {
+          "Topology": "4.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Meshing.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Meshing.dll": {}
+        }
+      },
+      "Nonlinear/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "compile": {
+          "bin/placeholder/Nonlinear.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Nonlinear.dll": {}
+        }
+      },
+      "Postprocess/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "dependencies": {
+          "Meshing": "1.0.0",
+          "Topology": "4.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Postprocess.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Postprocess.dll": {}
+        }
+      },
+      "Topology/4.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "dependencies": {
+          "Microsoft.Extensions.ObjectPool": "9.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Topology.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Topology.dll": {}
+        }
+      }
+    },
+    "net9.0/win-x64": {
+      "Microsoft.Extensions.ObjectPool/9.0.0": {
+        "type": "package",
+        "compile": {
+          "lib/net9.0/Microsoft.Extensions.ObjectPool.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net9.0/Microsoft.Extensions.ObjectPool.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "Matrices/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "dependencies": {
+          "Microsoft.Extensions.ObjectPool": "9.0.0",
+          "Topology": "4.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Matrices.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Matrices.dll": {}
+        }
+      },
+      "Meshing/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "dependencies": {
+          "Topology": "4.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Meshing.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Meshing.dll": {}
+        }
+      },
+      "Nonlinear/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "compile": {
+          "bin/placeholder/Nonlinear.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Nonlinear.dll": {}
+        }
+      },
+      "Postprocess/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "dependencies": {
+          "Meshing": "1.0.0",
+          "Topology": "4.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Postprocess.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Postprocess.dll": {}
+        }
+      },
+      "Topology/4.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v9.0",
+        "dependencies": {
+          "Microsoft.Extensions.ObjectPool": "9.0.0"
+        },
+        "compile": {
+          "bin/placeholder/Topology.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Topology.dll": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "Microsoft.Extensions.ObjectPool/9.0.0": {
+      "sha512": "UbsU/gYe4nv1DeqMXIVzDfNNek7Sk2kKuAOXL/Y+sLcAR0HwFUqzg1EPiU88jeHNe0g81aPvvHbvHarQr3r9IA==",
+      "type": "package",
+      "path": "microsoft.extensions.objectpool/9.0.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "THIRD-PARTY-NOTICES.TXT",
+        "lib/net462/Microsoft.Extensions.ObjectPool.dll",
+        "lib/net462/Microsoft.Extensions.ObjectPool.xml",
+        "lib/net9.0/Microsoft.Extensions.ObjectPool.dll",
+        "lib/net9.0/Microsoft.Extensions.ObjectPool.xml",
+        "lib/netstandard2.0/Microsoft.Extensions.ObjectPool.dll",
+        "lib/netstandard2.0/Microsoft.Extensions.ObjectPool.xml",
+        "microsoft.extensions.objectpool.9.0.0.nupkg.sha512",
+        "microsoft.extensions.objectpool.nuspec"
+      ]
+    },
+    "Matrices/1.0.0": {
+      "type": "project",
+      "path": "../Matrices/Matrices.csproj",
+      "msbuildProject": "../Matrices/Matrices.csproj"
+    },
+    "Meshing/1.0.0": {
+      "type": "project",
+      "path": "../Meshing/Meshing.csproj",
+      "msbuildProject": "../Meshing/Meshing.csproj"
+    },
+    "Nonlinear/1.0.0": {
+      "type": "project",
+      "path": "../Nonlinear/Nonlinear.csproj",
+      "msbuildProject": "../Nonlinear/Nonlinear.csproj"
+    },
+    "Postprocess/1.0.0": {
+      "type": "project",
+      "path": "../Postprocess/Postprocess.csproj",
+      "msbuildProject": "../Postprocess/Postprocess.csproj"
+    },
+    "Topology/4.0.0": {
+      "type": "project",
+      "path": "../Relations/Relations.csproj",
+      "msbuildProject": "../Relations/Relations.csproj"
+    }
+  },
+  "projectFileDependencyGroups": {
+    "net9.0": [
+      "Matrices >= 1.0.0",
+      "Meshing >= 1.0.0",
+      "Nonlinear >= 1.0.0",
+      "Postprocess >= 1.0.0",
+      "Topology >= 4.0.0"
+    ]
+  },
+  "packageFolders": {
+    "/home/pedro/.nuget/packages/": {}
+  },
+  "project": {
+    "version": "1.0.0",
+    "restore": {
+      "projectUniqueName": "/home/pedro/RiderProjects/Numerical/Teste/Teste.csproj",
+      "projectName": "Teste",
+      "projectPath": "/home/pedro/RiderProjects/Numerical/Teste/Teste.csproj",
+      "packagesPath": "/home/pedro/.nuget/packages/",
+      "outputPath": "/home/pedro/RiderProjects/Numerical/Teste/obj/",
+      "projectStyle": "PackageReference",
+      "configFilePaths": [
+        "/home/pedro/.nuget/NuGet/NuGet.Config"
+      ],
+      "originalTargetFrameworks": [
+        "net9.0"
+      ],
+      "sources": {
+        "https://api.nuget.org/v3/index.json": {}
+      },
+      "frameworks": {
+        "net9.0": {
+          "targetAlias": "net9.0",
+          "projectReferences": {
+            "/home/pedro/RiderProjects/Numerical/Matrices/Matrices.csproj": {
+              "projectPath": "/home/pedro/RiderProjects/Numerical/Matrices/Matrices.csproj"
+            },
+            "/home/pedro/RiderProjects/Numerical/Meshing/Meshing.csproj": {
+              "projectPath": "/home/pedro/RiderProjects/Numerical/Meshing/Meshing.csproj"
+            },
+            "/home/pedro/RiderProjects/Numerical/Nonlinear/Nonlinear.csproj": {
+              "projectPath": "/home/pedro/RiderProjects/Numerical/Nonlinear/Nonlinear.csproj"
+            },
+            "/home/pedro/RiderProjects/Numerical/Postprocess/Postprocess.csproj": {
+              "projectPath": "/home/pedro/RiderProjects/Numerical/Postprocess/Postprocess.csproj"
+            },
+            "/home/pedro/RiderProjects/Numerical/Relations/Relations.csproj": {
+              "projectPath": "/home/pedro/RiderProjects/Numerical/Relations/Relations.csproj"
+            }
+          }
+        }
+      },
+      "warningProperties": {
+        "warnAsError": [
+          "NU1605"
+        ]
+      },
+      "restoreAuditProperties": {
+        "enableAudit": "true",
+        "auditLevel": "low",
+        "auditMode": "direct"
+      },
+      "SdkAnalysisLevel": "10.0.100"
+    },
+    "frameworks": {
+      "net9.0": {
+        "targetAlias": "net9.0",
+        "imports": [
+          "net461",
+          "net462",
+          "net47",
+          "net471",
+          "net472",
+          "net48",
+          "net481"
+        ],
+        "assetTargetFallback": true,
+        "warn": true,
+        "downloadDependencies": [
+          {
+            "name": "Microsoft.AspNetCore.App.Ref",
+            "version": "[9.0.11, 9.0.11]"
+          },
+          {
+            "name": "Microsoft.AspNetCore.App.Runtime.linux-x64",
+            "version": "[9.0.11, 9.0.11]"
+          },
+          {
+            "name": "Microsoft.AspNetCore.App.Runtime.osx-arm64",
+            "version": "[9.0.11, 9.0.11]"
+          },
+          {
+            "name": "Microsoft.AspNetCore.App.Runtime.osx-x64",
+            "version": "[9.0.11, 9.0.11]"
+          },
+          {
+            "name": "Microsoft.AspNetCore.App.Runtime.win-x64",
+            "version": "[9.0.11, 9.0.11]"
+          },
+          {
+            "name": "Microsoft.NETCore.App.Crossgen2.linux-x64",
+            "version": "[9.0.11, 9.0.11]"
+          },
+          {
+            "name": "Microsoft.NETCore.App.Host.linux-x64",
+            "version": "[9.0.11, 9.0.11]"
+          },
+          {
+            "name": "Microsoft.NETCore.App.Host.osx-arm64",
+            "version": "[9.0.11, 9.0.11]"
+          },
+          {
+            "name": "Microsoft.NETCore.App.Host.osx-x64",
+            "version": "[9.0.11, 9.0.11]"
+          },
+          {
+            "name": "Microsoft.NETCore.App.Host.win-x64",
+            "version": "[9.0.11, 9.0.11]"
+          },
+          {
+            "name": "Microsoft.NETCore.App.Ref",
+            "version": "[9.0.11, 9.0.11]"
+          },
+          {
+            "name": "Microsoft.NETCore.App.Runtime.linux-x64",
+            "version": "[9.0.11, 9.0.11]"
+          },
+          {
+            "name": "Microsoft.NETCore.App.Runtime.osx-arm64",
+            "version": "[9.0.11, 9.0.11]"
+          },
+          {
+            "name": "Microsoft.NETCore.App.Runtime.osx-x64",
+            "version": "[9.0.11, 9.0.11]"
+          },
+          {
+            "name": "Microsoft.NETCore.App.Runtime.win-x64",
+            "version": "[9.0.11, 9.0.11]"
+          }
+        ],
+        "frameworkReferences": {
+          "Microsoft.NETCore.App": {
+            "privateAssets": "all"
+          }
+        },
+        "runtimeIdentifierGraphPath": "/home/pedro/.dotnet/sdk/10.0.100/PortableRuntimeIdentifierGraph.json"
+      }
+    },
+    "runtimes": {
+      "linux-x64": {
+        "#import": []
+      },
+      "osx-arm64": {
+        "#import": []
+      },
+      "osx-x64": {
+        "#import": []
+      },
+      "win-x64": {
+        "#import": []
+      }
+    }
+  }
+}

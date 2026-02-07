@@ -1,0 +1,16 @@
+/home/pedro/RiderProjects/Numerical/Postprocess/bin/Release/net9.0/Postprocess.deps.json
+/home/pedro/RiderProjects/Numerical/Postprocess/bin/Release/net9.0/Postprocess.dll
+/home/pedro/RiderProjects/Numerical/Postprocess/bin/Release/net9.0/Postprocess.pdb
+/home/pedro/RiderProjects/Numerical/Postprocess/bin/Release/net9.0/Meshing.dll
+/home/pedro/RiderProjects/Numerical/Postprocess/bin/Release/net9.0/Relations.dll
+/home/pedro/RiderProjects/Numerical/Postprocess/bin/Release/net9.0/Meshing.pdb
+/home/pedro/RiderProjects/Numerical/Postprocess/obj/Release/net9.0/Postprocess.csproj.AssemblyReference.cache
+/home/pedro/RiderProjects/Numerical/Postprocess/obj/Release/net9.0/Postprocess.GeneratedMSBuildEditorConfig.editorconfig
+/home/pedro/RiderProjects/Numerical/Postprocess/obj/Release/net9.0/Postprocess.AssemblyInfoInputs.cache
+/home/pedro/RiderProjects/Numerical/Postprocess/obj/Release/net9.0/Postprocess.AssemblyInfo.cs
+/home/pedro/RiderProjects/Numerical/Postprocess/obj/Release/net9.0/Postprocess.csproj.CoreCompileInputs.cache
+/home/pedro/RiderProjects/Numerical/Postprocess/obj/Release/net9.0/Postproc.B5E549F8.Up2Date
+/home/pedro/RiderProjects/Numerical/Postprocess/obj/Release/net9.0/Postprocess.dll
+/home/pedro/RiderProjects/Numerical/Postprocess/obj/Release/net9.0/refint/Postprocess.dll
+/home/pedro/RiderProjects/Numerical/Postprocess/obj/Release/net9.0/Postprocess.pdb
+/home/pedro/RiderProjects/Numerical/Postprocess/obj/Release/net9.0/ref/Postprocess.dll

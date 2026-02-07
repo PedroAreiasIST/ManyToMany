@@ -1,0 +1,17 @@
+/home/pedro/RiderProjects/Numerical/Teste/obj/Release/net9.0/Teste.csproj.AssemblyReference.cache
+/home/pedro/RiderProjects/Numerical/Teste/obj/Release/net9.0/Teste.GeneratedMSBuildEditorConfig.editorconfig
+/home/pedro/RiderProjects/Numerical/Teste/obj/Release/net9.0/Teste.AssemblyInfoInputs.cache
+/home/pedro/RiderProjects/Numerical/Teste/obj/Release/net9.0/Teste.AssemblyInfo.cs
+/home/pedro/RiderProjects/Numerical/Teste/obj/Release/net9.0/Teste.csproj.CoreCompileInputs.cache
+/home/pedro/RiderProjects/Numerical/Teste/bin/Release/net9.0/Teste
+/home/pedro/RiderProjects/Numerical/Teste/bin/Release/net9.0/Teste.deps.json
+/home/pedro/RiderProjects/Numerical/Teste/bin/Release/net9.0/Teste.runtimeconfig.json
+/home/pedro/RiderProjects/Numerical/Teste/bin/Release/net9.0/Teste.dll
+/home/pedro/RiderProjects/Numerical/Teste/bin/Release/net9.0/Microsoft.Extensions.ObjectPool.dll
+/home/pedro/RiderProjects/Numerical/Teste/bin/Release/net9.0/Matrices.dll
+/home/pedro/RiderProjects/Numerical/Teste/bin/Release/net9.0/Nonlinear.dll
+/home/pedro/RiderProjects/Numerical/Teste/bin/Release/net9.0/Nonlinear.pdb
+/home/pedro/RiderProjects/Numerical/Teste/obj/Release/net9.0/Teste.csproj.Up2Date
+/home/pedro/RiderProjects/Numerical/Teste/obj/Release/net9.0/Teste.dll
+/home/pedro/RiderProjects/Numerical/Teste/obj/Release/net9.0/Teste.genruntimeconfig.cache
+/home/pedro/RiderProjects/Numerical/Teste/bin/Release/net9.0/Relations.dll

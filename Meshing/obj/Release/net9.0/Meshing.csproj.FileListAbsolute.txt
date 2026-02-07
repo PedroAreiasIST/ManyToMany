@@ -1,0 +1,14 @@
+/home/pedro/RiderProjects/Numerical/Meshing/obj/Release/net9.0/Meshing.csproj.AssemblyReference.cache
+/home/pedro/RiderProjects/Numerical/Meshing/obj/Release/net9.0/Meshing.GeneratedMSBuildEditorConfig.editorconfig
+/home/pedro/RiderProjects/Numerical/Meshing/obj/Release/net9.0/Meshing.AssemblyInfoInputs.cache
+/home/pedro/RiderProjects/Numerical/Meshing/obj/Release/net9.0/Meshing.AssemblyInfo.cs
+/home/pedro/RiderProjects/Numerical/Meshing/obj/Release/net9.0/Meshing.csproj.CoreCompileInputs.cache
+/home/pedro/RiderProjects/Numerical/Meshing/bin/Release/net9.0/Meshing.deps.json
+/home/pedro/RiderProjects/Numerical/Meshing/bin/Release/net9.0/Meshing.dll
+/home/pedro/RiderProjects/Numerical/Meshing/bin/Release/net9.0/Meshing.pdb
+/home/pedro/RiderProjects/Numerical/Meshing/bin/Release/net9.0/Relations.dll
+/home/pedro/RiderProjects/Numerical/Meshing/obj/Release/net9.0/Meshing.csproj.Up2Date
+/home/pedro/RiderProjects/Numerical/Meshing/obj/Release/net9.0/Meshing.dll
+/home/pedro/RiderProjects/Numerical/Meshing/obj/Release/net9.0/refint/Meshing.dll
+/home/pedro/RiderProjects/Numerical/Meshing/obj/Release/net9.0/Meshing.pdb
+/home/pedro/RiderProjects/Numerical/Meshing/obj/Release/net9.0/ref/Meshing.dll

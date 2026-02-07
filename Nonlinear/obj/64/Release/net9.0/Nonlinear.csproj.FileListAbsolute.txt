@@ -1,0 +1,9 @@
+/home/pedro/RiderProjects/Numerical/Nonlinear/bin/64/Release/net9.0/Nonlinear.deps.json
+/home/pedro/RiderProjects/Numerical/Nonlinear/bin/64/Release/net9.0/Nonlinear.dll
+/home/pedro/RiderProjects/Numerical/Nonlinear/obj/64/Release/net9.0/Nonlinear.GeneratedMSBuildEditorConfig.editorconfig
+/home/pedro/RiderProjects/Numerical/Nonlinear/obj/64/Release/net9.0/Nonlinear.AssemblyInfoInputs.cache
+/home/pedro/RiderProjects/Numerical/Nonlinear/obj/64/Release/net9.0/Nonlinear.AssemblyInfo.cs
+/home/pedro/RiderProjects/Numerical/Nonlinear/obj/64/Release/net9.0/Nonlinear.csproj.CoreCompileInputs.cache
+/home/pedro/RiderProjects/Numerical/Nonlinear/obj/64/Release/net9.0/Nonlinear.dll
+/home/pedro/RiderProjects/Numerical/Nonlinear/obj/64/Release/net9.0/refint/Nonlinear.dll
+/home/pedro/RiderProjects/Numerical/Nonlinear/obj/64/Release/net9.0/ref/Nonlinear.dll
