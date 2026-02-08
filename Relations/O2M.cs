@@ -1819,6 +1819,13 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
 
         var leftMaxNode = left.GetMaxNode();
 
+        // Validate dimension compatibility: left's node indices must be valid row indices in right.
+        // leftMaxNode is the largest column index in left; it must be < right.Count (the number of rows).
+        if (leftMaxNode >= right.Count && left.Count > 0 && right.Count > 0)
+            throw new InvalidOperationException(
+                $"Matrix dimension mismatch: left references node index {leftMaxNode}, " +
+                $"but right only has {right.Count} rows (valid range [0, {right.Count - 1}]).");
+
         // ADAPTIVE STRATEGY: If all nodes in left are < right.Count, we can skip bounds checks
         var product = leftMaxNode < right.Count
             ? PerformSymbolicMultiplicationUnsafe(left._adjacencies, right._adjacencies)
