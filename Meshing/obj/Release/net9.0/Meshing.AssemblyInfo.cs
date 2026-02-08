@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Meshing")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+97fab08dcb8a7ba092c1ffd7e4ef3c11f06f92ac")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+d8266b240b56708fb9b2be63aacda397645fac8e")]
 [assembly: System.Reflection.AssemblyProductAttribute("Meshing")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Meshing")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
