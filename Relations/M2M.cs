@@ -160,16 +160,9 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     private volatile bool _isInSync;
 
     /// <summary>
-    ///     Tracks whether element location cache has been computed.
-    ///     <b>INVARIANT:</b> Must be updated atomically with <see cref="_nodeLocComputed" />.
+    ///     Tracks whether position caches (element locations and node locations) have been computed.
     /// </summary>
-    private bool _elemLocComputed;
-
-    /// <summary>
-    ///     Tracks whether node location cache has been computed.
-    ///     <b>INVARIANT:</b> Must be updated atomically with <see cref="_elemLocComputed" />.
-    /// </summary>
-    private bool _nodeLocComputed;
+    private bool _positionCachesComputed;
 
     /// <summary>
     ///     Nesting level for batch operations.
@@ -559,8 +552,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     {
         _o2m = new O2M();
         _isInSync = false;
-        _elemLocComputed = false;
-        _nodeLocComputed = false;
+        _positionCachesComputed = false;
     }
 
     /// <summary>
@@ -578,8 +570,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         ArgumentOutOfRangeException.ThrowIfNegative(reservedCapacity);
         _o2m = new O2M(reservedCapacity);
         _isInSync = false;
-        _elemLocComputed = false;
-        _nodeLocComputed = false;
+        _positionCachesComputed = false;
     }
 
     /// <summary>
@@ -596,8 +587,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         ArgumentNullException.ThrowIfNull(adjacencies);
         _o2m = new O2M(adjacencies);
         _isInSync = false;
-        _elemLocComputed = false;
-        _nodeLocComputed = false;
+        _positionCachesComputed = false;
     }
 
     /// <summary>
@@ -614,8 +604,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         ArgumentNullException.ThrowIfNull(o2m);
         _o2m = (O2M)o2m.Clone();
         _isInSync = false;
-        _elemLocComputed = false;
-        _nodeLocComputed = false;
+        _positionCachesComputed = false;
     }
 
     /// <summary>
@@ -631,8 +620,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         Debug.Assert(takeOwnership, "This constructor takes ownership — pass true");
         _o2m = o2m;
         _isInSync = false;
-        _elemLocComputed = false;
-        _nodeLocComputed = false;
+        _positionCachesComputed = false;
     }
 
     #endregion
@@ -935,8 +923,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
             _elemeloc = null;
             _nodeloc = null;
             _isInSync = false;
-            _elemLocComputed = false;
-            _nodeLocComputed = false;
+            _positionCachesComputed = false;
         }
         finally
         {
@@ -2115,7 +2102,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     {
         // Fast path: everything already computed
         _rwLock.EnterReadLock();
-        if (_isInSync && _elemLocComputed && _nodeLocComputed)
+        if (_isInSync && _positionCachesComputed)
             return; // Read lock held, all caches valid
         _rwLock.ExitReadLock();
 
@@ -2130,7 +2117,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
             // If we're in a batch (_batchNesting > 0), we cannot synchronize, so we must skip
             // position cache computation. The caller will get the read lock but with stale caches,
             // which is acceptable since batch operations should not rely on position caches.
-            if (_isInSync && (!_elemLocComputed || !_nodeLocComputed))
+            if (_isInSync && !_positionCachesComputed)
                 ComputePositionCaches();
         }
         finally
@@ -2139,41 +2126,6 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
             _rwLock.ExitWriteLock();
         }
         // Returns with read lock held
-    }
-
-    /// <summary>
-    ///     Ensures position caches are computed (requires transpose to be synchronized first).
-    /// </summary>
-    private void EnsurePositionCachesComputed()
-    {
-        EnsureSynchronized(); // First ensure transpose is ready
-
-        // Fast path: check if already computed
-        _rwLock.EnterReadLock();
-        try
-        {
-            if (_elemLocComputed && _nodeLocComputed)
-                return;
-        }
-        finally
-        {
-            _rwLock.ExitReadLock();
-        }
-
-        // Slow path: compute position caches
-        _rwLock.EnterWriteLock();
-        try
-        {
-            // Double-check
-            if (_elemLocComputed && _nodeLocComputed)
-                return;
-
-            ComputePositionCaches();
-        }
-        finally
-        {
-            _rwLock.ExitWriteLock();
-        }
     }
 
     /// <summary>
@@ -2193,8 +2145,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         _isInSync = true;
 
         // Mark position caches as invalid since structure changed
-        _elemLocComputed = false;
-        _nodeLocComputed = false;
+        _positionCachesComputed = false;
         _elemeloc = null;
         _nodeloc = null;
     }
@@ -2222,8 +2173,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
             nodeLocList.Add(nodePositions[i].AsReadOnly());
         _nodeloc = nodeLocList.AsReadOnly();
 
-        _elemLocComputed = true;
-        _nodeLocComputed = true;
+        _positionCachesComputed = true;
     }
 
     /// <summary>
@@ -2242,8 +2192,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     {
         Debug.Assert(_rwLock.IsWriteLockHeld, "InvalidateCache must be called under write lock");
         _isInSync = false;
-        _elemLocComputed = false;
-        _nodeLocComputed = false;
+        _positionCachesComputed = false;
 
         // FIX: Release references to potentially large cached structures
         // This allows GC to reclaim memory for large meshes
@@ -2275,7 +2224,6 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void ThrowIfInBatch()
     {
-        ThrowIfDisposed();
         _rwLock.EnterReadLock();
         try
         {
@@ -2325,12 +2273,11 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
             }
 
             // Copy position caches if computed
-            if (_elemLocComputed && _nodeLocComputed)
+            if (_positionCachesComputed)
             {
                 cloned._elemeloc = _elemeloc; // ReadOnlyCollection, safe to share
                 cloned._nodeloc = _nodeloc; // ReadOnlyCollection, safe to share
-                cloned._elemLocComputed = true;
-                cloned._nodeLocComputed = true;
+                cloned._positionCachesComputed = true;
             }
 
             return cloned;
