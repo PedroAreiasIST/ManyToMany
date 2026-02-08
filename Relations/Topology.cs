@@ -7,6 +7,10 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
+// Topology is the primary consumer of MM2M and intentionally uses the [Obsolete] indexer
+// throughout, because it controls the lifecycle and holds _rwLock to prevent stale references.
+#pragma warning disable CS0618 // MM2M indexer marked obsolete for external callers
+
 namespace Numerical;
 
 /// <summary>
@@ -1809,11 +1813,18 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public IReadOnlyList<int> Neighbors<TElement, TNode>(int element, bool sorted = true)
     {
         ThrowIfDisposed();
-
-        // v3: Use M2M's optimized neighbor method with optional sorting
-        // Note: M2M.GetElementNeighbors already excludes self (elem != element check)
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        return m2m.GetElementNeighbors(element, sorted);
+        _rwLock.EnterReadLock();
+        try
+        {
+            // v3: Use M2M's optimized neighbor method with optional sorting
+            // Note: M2M.GetElementNeighbors already excludes self (elem != element check)
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            return m2m.GetElementNeighbors(element, sorted);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -1847,8 +1858,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public List<int> GetElementsWithNodes<TElement, TNode>(List<int> nodes)
     {
         ThrowIfDisposed();
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        return m2m.GetElementsWithNodes(nodes);
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            return m2m.GetElementsWithNodes(nodes);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -1867,8 +1886,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public List<int> GetElementsContainingAnyNode<TElement, TNode>(List<int> nodes)
     {
         ThrowIfDisposed();
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        return m2m.GetElementsContainingAnyNode(nodes);
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            return m2m.GetElementsContainingAnyNode(nodes);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -1887,8 +1914,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public List<int> GetElementsFromNodes<TElement, TNode>(List<int> nodes)
     {
         ThrowIfDisposed();
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        return m2m.GetElementsFromNodes(nodes);
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            return m2m.GetElementsFromNodes(nodes);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     #endregion
@@ -1904,32 +1939,40 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
         if (nodes.Length == 0)
             return [];
 
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-
-        var result = new HashSet<int>();
-        m2m.WithElementsForNodeSpan(nodes[0], span =>
+        _rwLock.EnterReadLock();
+        try
         {
-            for (var i = 0; i < span.Length; i++)
-                result.Add(span[i]);
-        });
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
 
-        if (nodes.Length == 1 || result.Count == 0)
-            return Utils.ToList(result);
-
-        var scratch = new HashSet<int>();
-        for (var iNode = 1; iNode < nodes.Length && result.Count > 0; iNode++)
-        {
-            scratch.Clear();
-            m2m.WithElementsForNodeSpan(nodes[iNode], span =>
+            var result = new HashSet<int>();
+            m2m.WithElementsForNodeSpan(nodes[0], span =>
             {
                 for (var i = 0; i < span.Length; i++)
-                    scratch.Add(span[i]);
+                    result.Add(span[i]);
             });
 
-            result.IntersectWith(scratch);
-        }
+            if (nodes.Length == 1 || result.Count == 0)
+                return Utils.ToList(result);
 
-        return Utils.ToList(result);
+            var scratch = new HashSet<int>();
+            for (var iNode = 1; iNode < nodes.Length && result.Count > 0; iNode++)
+            {
+                scratch.Clear();
+                m2m.WithElementsForNodeSpan(nodes[iNode], span =>
+                {
+                    for (var i = 0; i < span.Length; i++)
+                        scratch.Add(span[i]);
+                });
+
+                result.IntersectWith(scratch);
+            }
+
+            return Utils.ToList(result);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -1941,19 +1984,27 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
         if (nodes.Length == 0)
             return [];
 
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-
-        var result = new HashSet<int>();
-        foreach (var node in nodes)
+        _rwLock.EnterReadLock();
+        try
         {
-            m2m.WithElementsForNodeSpan(node, span =>
-            {
-                for (var i = 0; i < span.Length; i++)
-                    result.Add(span[i]);
-            });
-        }
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
 
-        return Utils.ToList(result);
+            var result = new HashSet<int>();
+            foreach (var node in nodes)
+            {
+                m2m.WithElementsForNodeSpan(node, span =>
+                {
+                    for (var i = 0; i < span.Length; i++)
+                        result.Add(span[i]);
+                });
+            }
+
+            return Utils.ToList(result);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -1968,28 +2019,36 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
         if (include.Length == 0)
             return [];
 
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-
-        var result = new HashSet<int>();
-        foreach (var node in include)
+        _rwLock.EnterReadLock();
+        try
         {
-            m2m.WithElementsForNodeSpan(node, span =>
-            {
-                for (var i = 0; i < span.Length; i++)
-                    result.Add(span[i]);
-            });
-        }
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
 
-        foreach (var node in exclude)
+            var result = new HashSet<int>();
+            foreach (var node in include)
+            {
+                m2m.WithElementsForNodeSpan(node, span =>
+                {
+                    for (var i = 0; i < span.Length; i++)
+                        result.Add(span[i]);
+                });
+            }
+
+            foreach (var node in exclude)
+            {
+                m2m.WithElementsForNodeSpan(node, span =>
+                {
+                    for (var i = 0; i < span.Length; i++)
+                        result.Remove(span[i]);
+                });
+            }
+
+            return Utils.ToList(result);
+        }
+        finally
         {
-            m2m.WithElementsForNodeSpan(node, span =>
-            {
-                for (var i = 0; i < span.Length; i++)
-                    result.Remove(span[i]);
-            });
+            _rwLock.ExitReadLock();
         }
-
-        return Utils.ToList(result);
     }
 
     #endregion
@@ -2985,14 +3044,22 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public IReadOnlyList<int> GetDependencies<TEntity>()
     {
         ThrowIfDisposed();
-        var entityType = GetTypeIndex<TEntity>();
-        var deps = new List<int>();
+        _rwLock.EnterReadLock();
+        try
+        {
+            var entityType = GetTypeIndex<TEntity>();
+            var deps = new List<int>();
 
-        for (var t = 0; t < _types.Count; t++)
-            if (t != entityType && _adjacency[entityType, t].Count > 0)
-                deps.Add(t);
+            for (var t = 0; t < _types.Count; t++)
+                if (t != entityType && _adjacency[entityType, t].Count > 0)
+                    deps.Add(t);
 
-        return deps;
+            return deps;
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -3001,14 +3068,22 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public IReadOnlyList<int> GetDependents<TEntity>()
     {
         ThrowIfDisposed();
-        var entityType = GetTypeIndex<TEntity>();
-        var deps = new List<int>();
+        _rwLock.EnterReadLock();
+        try
+        {
+            var entityType = GetTypeIndex<TEntity>();
+            var deps = new List<int>();
 
-        for (var t = 0; t < _types.Count; t++)
-            if (t != entityType && _adjacency[t, entityType].Count > 0)
-                deps.Add(t);
+            for (var t = 0; t < _types.Count; t++)
+                if (t != entityType && _adjacency[t, entityType].Count > 0)
+                    deps.Add(t);
 
-        return deps;
+            return deps;
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -3303,15 +3378,23 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     /// <param name="action">Action to execute with the span.</param>
     /// <remarks>
     ///     Thread-safe zero-copy access for high-performance inner loops.
-    ///     The action is executed under read lock, ensuring safety.
+    ///     The action is executed under Topology read lock + M2M read lock, ensuring safety.
     ///     Typical speedup: 5-10% in tight loops vs. list allocation.
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void WithNodesSpan<TElement, TNode>(int element, Action<ReadOnlySpan<int>> action)
     {
         ThrowIfDisposed();
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        m2m.WithNodesSpan(element, action);
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            m2m.WithNodesSpan(element, action);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -3325,15 +3408,23 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     /// <returns>The result of the function.</returns>
     /// <remarks>
     ///     Thread-safe zero-copy access for high-performance inner loops.
-    ///     The function is executed under read lock, ensuring safety.
+    ///     The function is executed under Topology read lock + M2M read lock, ensuring safety.
     ///     Typical speedup: 5-10% in tight loops vs. list allocation.
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public TResult WithNodesSpan<TElement, TNode, TResult>(int element, Func<ReadOnlySpan<int>, TResult> func)
     {
         ThrowIfDisposed();
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        return m2m.WithNodesSpan(element, func);
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            return m2m.WithNodesSpan(element, func);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     #endregion
@@ -3456,20 +3547,28 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     {
         ArgumentOutOfRangeException.ThrowIfNegative(entityIndex);
 
-        var entityTypeIndex = GetTypeIndex<TEntity>();
-        var relatedTypeIndex = GetTypeIndex<TRelated>();
-        var m2m = _adjacency[entityTypeIndex, relatedTypeIndex];
-
-        var neighbors = m2m.GetElementNeighbors(entityIndex, sorted); // v3: Pass sorting parameter
-
-        if (includeSelf)
+        _rwLock.EnterReadLock();
+        try
         {
-            neighbors.Add(entityIndex);
-            if (sorted) // v3: Only sort if requested
-                neighbors.Sort();
-        }
+            var entityTypeIndex = GetTypeIndex<TEntity>();
+            var relatedTypeIndex = GetTypeIndex<TRelated>();
+            var m2m = _adjacency[entityTypeIndex, relatedTypeIndex];
 
-        return neighbors;
+            var neighbors = m2m.GetElementNeighbors(entityIndex, sorted); // v3: Pass sorting parameter
+
+            if (includeSelf)
+            {
+                neighbors.Add(entityIndex);
+                if (sorted) // v3: Only sort if requested
+                    neighbors.Sort();
+            }
+
+            return neighbors;
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -3483,40 +3582,48 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
         ArgumentOutOfRangeException.ThrowIfNegative(entityIndex);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(exactCount);
 
-        var entityTypeIndex = GetTypeIndex<TEntity>();
-        var relatedTypeIndex = GetTypeIndex<TRelated>();
-        var m2m = _adjacency[entityTypeIndex, relatedTypeIndex];
-
-        var myRelations = m2m[entityIndex];
-
-        if (myRelations.Count < exactCount)
-            return new List<int>();
-
-        var sharedCounts = new Dictionary<int, int>();
-
-        foreach (var relation in myRelations)
+        _rwLock.EnterReadLock();
+        try
         {
-                        m2m.WithElementsForNodeSpan(relation, span =>
+            var entityTypeIndex = GetTypeIndex<TEntity>();
+            var relatedTypeIndex = GetTypeIndex<TRelated>();
+            var m2m = _adjacency[entityTypeIndex, relatedTypeIndex];
+
+            var myRelations = m2m[entityIndex];
+
+            if (myRelations.Count < exactCount)
+                return new List<int>();
+
+            var sharedCounts = new Dictionary<int, int>();
+
+            foreach (var relation in myRelations)
             {
-                for (var i = 0; i < span.Length; i++)
+                m2m.WithElementsForNodeSpan(relation, span =>
                 {
-                    var entity = span[i];
-                    if (entity == entityIndex && !includeSelf)
-                        continue;
+                    for (var i = 0; i < span.Length; i++)
+                    {
+                        var entity = span[i];
+                        if (entity == entityIndex && !includeSelf)
+                            continue;
 
-                    sharedCounts.TryGetValue(entity, out var count);
-                    sharedCounts[entity] = count + 1;
-                }
-            });
+                        sharedCounts.TryGetValue(entity, out var count);
+                        sharedCounts[entity] = count + 1;
+                    }
+                });
+            }
+
+            var result = new List<int>();
+            foreach (var kvp in sharedCounts)
+                if (kvp.Value == exactCount)
+                    result.Add(kvp.Key);
+
+            result.Sort();
+            return result;
         }
-
-        var result = new List<int>();
-        foreach (var kvp in sharedCounts)
-            if (kvp.Value == exactCount)
-                result.Add(kvp.Key);
-
-        result.Sort();
-        return result;
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -3533,36 +3640,44 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
         if (minCount == 1)
             return GetDirectNeighbors<TEntity, TRelated>(entityIndex, includeSelf);
 
-        var entityTypeIndex = GetTypeIndex<TEntity>();
-        var relatedTypeIndex = GetTypeIndex<TRelated>();
-        var m2m = _adjacency[entityTypeIndex, relatedTypeIndex];
-
-        var myRelations = m2m[entityIndex];
-        var sharedCounts = new Dictionary<int, int>();
-
-        foreach (var relation in myRelations)
+        _rwLock.EnterReadLock();
+        try
         {
-                        m2m.WithElementsForNodeSpan(relation, span =>
+            var entityTypeIndex = GetTypeIndex<TEntity>();
+            var relatedTypeIndex = GetTypeIndex<TRelated>();
+            var m2m = _adjacency[entityTypeIndex, relatedTypeIndex];
+
+            var myRelations = m2m[entityIndex];
+            var sharedCounts = new Dictionary<int, int>();
+
+            foreach (var relation in myRelations)
             {
-                for (var i = 0; i < span.Length; i++)
+                m2m.WithElementsForNodeSpan(relation, span =>
                 {
-                    var entity = span[i];
-                    if (entity == entityIndex && !includeSelf)
-                        continue;
+                    for (var i = 0; i < span.Length; i++)
+                    {
+                        var entity = span[i];
+                        if (entity == entityIndex && !includeSelf)
+                            continue;
 
-                    sharedCounts.TryGetValue(entity, out var count);
-                    sharedCounts[entity] = count + 1;
-                }
-            });
+                        sharedCounts.TryGetValue(entity, out var count);
+                        sharedCounts[entity] = count + 1;
+                    }
+                });
+            }
+
+            var result = new List<int>();
+            foreach (var kvp in sharedCounts)
+                if (kvp.Value >= minCount)
+                    result.Add(kvp.Key);
+
+            result.Sort();
+            return result;
         }
-
-        var result = new List<int>();
-        foreach (var kvp in sharedCounts)
-            if (kvp.Value >= minCount)
-                result.Add(kvp.Key);
-
-        result.Sort();
-        return result;
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -3576,36 +3691,44 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
         ArgumentOutOfRangeException.ThrowIfNegative(entityIndex);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(minCount);
 
-        var entityTypeIndex = GetTypeIndex<TEntity>();
-        var relatedTypeIndex = GetTypeIndex<TRelated>();
-        var m2m = _adjacency[entityTypeIndex, relatedTypeIndex];
-
-        var myRelations = m2m[entityIndex];
-        var sharedCounts = new Dictionary<int, int>();
-
-        foreach (var relation in myRelations)
+        _rwLock.EnterReadLock();
+        try
         {
-                        m2m.WithElementsForNodeSpan(relation, span =>
+            var entityTypeIndex = GetTypeIndex<TEntity>();
+            var relatedTypeIndex = GetTypeIndex<TRelated>();
+            var m2m = _adjacency[entityTypeIndex, relatedTypeIndex];
+
+            var myRelations = m2m[entityIndex];
+            var sharedCounts = new Dictionary<int, int>();
+
+            foreach (var relation in myRelations)
             {
-                for (var i = 0; i < span.Length; i++)
+                m2m.WithElementsForNodeSpan(relation, span =>
                 {
-                    var entity = span[i];
-                    if (entity == entityIndex && !includeSelf)
-                        continue;
+                    for (var i = 0; i < span.Length; i++)
+                    {
+                        var entity = span[i];
+                        if (entity == entityIndex && !includeSelf)
+                            continue;
 
-                    sharedCounts.TryGetValue(entity, out var count);
-                    sharedCounts[entity] = count + 1;
-                }
-            });
+                        sharedCounts.TryGetValue(entity, out var count);
+                        sharedCounts[entity] = count + 1;
+                    }
+                });
+            }
+
+            var result = new List<(int EntityIndex, int SharedCount)>();
+            foreach (var kvp in sharedCounts)
+                if (kvp.Value >= minCount)
+                    result.Add((kvp.Key, kvp.Value));
+
+            result.Sort();
+            return result;
         }
-
-        var result = new List<(int EntityIndex, int SharedCount)>();
-        foreach (var kvp in sharedCounts)
-            if (kvp.Value >= minCount)
-                result.Add((kvp.Key, kvp.Value));
-
-        result.Sort();
-        return result;
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -3618,11 +3741,19 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
         if (relationships.Count == 0)
             return new List<int>();
 
-        var entityTypeIndex = GetTypeIndex<TEntity>();
-        var relatedTypeIndex = GetTypeIndex<TRelated>();
-        var m2m = _adjacency[entityTypeIndex, relatedTypeIndex];
+        _rwLock.EnterReadLock();
+        try
+        {
+            var entityTypeIndex = GetTypeIndex<TEntity>();
+            var relatedTypeIndex = GetTypeIndex<TRelated>();
+            var m2m = _adjacency[entityTypeIndex, relatedTypeIndex];
 
-        return m2m.GetElementsWithNodes(relationships);
+            return m2m.GetElementsWithNodes(relationships);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -3646,11 +3777,19 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
         if (relationships.Count == 0)
             return new List<int>();
 
-        var entityTypeIndex = GetTypeIndex<TEntity>();
-        var relatedTypeIndex = GetTypeIndex<TRelated>();
-        var m2m = _adjacency[entityTypeIndex, relatedTypeIndex];
+        _rwLock.EnterReadLock();
+        try
+        {
+            var entityTypeIndex = GetTypeIndex<TEntity>();
+            var relatedTypeIndex = GetTypeIndex<TRelated>();
+            var m2m = _adjacency[entityTypeIndex, relatedTypeIndex];
 
-        return m2m.GetElementsContainingAnyNode(relationships);
+            return m2m.GetElementsContainingAnyNode(relationships);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -3673,41 +3812,49 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
         if (k == 0)
             return result;
 
-        var entityTypeIndex = GetTypeIndex<TEntity>();
-        var relatedTypeIndex = GetTypeIndex<TRelated>();
-        var m2m = _adjacency[entityTypeIndex, relatedTypeIndex];
-
-        var visited = new HashSet<int> { seedEntity };
-        List<int> currentHop = [seedEntity];
-
-        for (var hop = 1; hop <= k; hop++)
+        _rwLock.EnterReadLock();
+        try
         {
-            var nextHop = new List<int>();
+            var entityTypeIndex = GetTypeIndex<TEntity>();
+            var relatedTypeIndex = GetTypeIndex<TRelated>();
+            var m2m = _adjacency[entityTypeIndex, relatedTypeIndex];
 
-            foreach (var entity in currentHop)
+            var visited = new HashSet<int> { seedEntity };
+            List<int> currentHop = [seedEntity];
+
+            for (var hop = 1; hop <= k; hop++)
             {
-                List<int> neighbors;
+                var nextHop = new List<int>();
 
-                if (minSharedForConnection == 1)
-                    neighbors = m2m.GetElementNeighbors(entity, false); // v3: unsorted for BFS
-                else
-                    neighbors = GetEntitiesWithMinSharedCount<TEntity, TRelated>(
-                        entity, minSharedForConnection);
+                foreach (var entity in currentHop)
+                {
+                    List<int> neighbors;
 
-                foreach (var neighbor in neighbors)
-                    if (visited.Add(neighbor))
-                    {
-                        result[neighbor] = hop;
-                        nextHop.Add(neighbor);
-                    }
+                    if (minSharedForConnection == 1)
+                        neighbors = m2m.GetElementNeighbors(entity, false); // v3: unsorted for BFS
+                    else
+                        neighbors = GetEntitiesWithMinSharedCount<TEntity, TRelated>(
+                            entity, minSharedForConnection);
+
+                    foreach (var neighbor in neighbors)
+                        if (visited.Add(neighbor))
+                        {
+                            result[neighbor] = hop;
+                            nextHop.Add(neighbor);
+                        }
+                }
+
+                currentHop = nextHop;
+                if (currentHop.Count == 0)
+                    break;
             }
 
-            currentHop = nextHop;
-            if (currentHop.Count == 0)
-                break;
+            return result;
         }
-
-        return result;
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -3916,8 +4063,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public List<int> GetElementNeighbors<TElement, TNode>(int element, bool sorted = true)
     {
         ThrowIfDisposed();
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        return m2m.GetElementNeighbors(element, sorted);
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            return m2m.GetElementNeighbors(element, sorted);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -3936,8 +4091,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public List<int> GetNodeNeighbors<TElement, TNode>(int node, bool sorted = true)
     {
         ThrowIfDisposed();
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        return m2m.GetNodeNeighbors(node, sorted);
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            return m2m.GetNodeNeighbors(node, sorted);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     #endregion
@@ -3951,44 +4114,52 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(minSharedForConnection);
 
-        var entityCount = Count<TEntity>();
-        var entityTypeIndex = GetTypeIndex<TEntity>();
-        var relatedTypeIndex = GetTypeIndex<TRelated>();
-        var m2m = _adjacency[entityTypeIndex, relatedTypeIndex];
-
-        var visited = new HashSet<int>();
-        var components = new List<List<int>>();
-
-        for (var i = 0; i < entityCount; i++)
+        _rwLock.EnterReadLock();
+        try
         {
-            if (visited.Contains(i)) continue;
+            var entityCount = Count<TEntity>();
+            var entityTypeIndex = GetTypeIndex<TEntity>();
+            var relatedTypeIndex = GetTypeIndex<TRelated>();
+            var m2m = _adjacency[entityTypeIndex, relatedTypeIndex];
 
-            var component = new List<int>();
-            var queue = new Queue<int>();
-            queue.Enqueue(i);
-            visited.Add(i);
+            var visited = new HashSet<int>();
+            var components = new List<List<int>>();
 
-            while (queue.Count > 0)
+            for (var i = 0; i < entityCount; i++)
             {
-                var current = queue.Dequeue();
-                component.Add(current);
+                if (visited.Contains(i)) continue;
 
-                List<int> neighbors;
-                if (minSharedForConnection == 1)
-                    neighbors = m2m.GetElementNeighbors(current, false); // v3: unsorted for BFS
-                else
-                    neighbors = GetEntitiesWithMinSharedCount<TEntity, TRelated>(
-                        current, minSharedForConnection);
+                var component = new List<int>();
+                var queue = new Queue<int>();
+                queue.Enqueue(i);
+                visited.Add(i);
 
-                foreach (var neighbor in neighbors)
-                    if (visited.Add(neighbor))
-                        queue.Enqueue(neighbor);
+                while (queue.Count > 0)
+                {
+                    var current = queue.Dequeue();
+                    component.Add(current);
+
+                    List<int> neighbors;
+                    if (minSharedForConnection == 1)
+                        neighbors = m2m.GetElementNeighbors(current, false); // v3: unsorted for BFS
+                    else
+                        neighbors = GetEntitiesWithMinSharedCount<TEntity, TRelated>(
+                            current, minSharedForConnection);
+
+                    foreach (var neighbor in neighbors)
+                        if (visited.Add(neighbor))
+                            queue.Enqueue(neighbor);
+                }
+
+                components.Add(component);
             }
 
-            components.Add(component);
+            return components;
         }
-
-        return components;
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -3996,16 +4167,24 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     /// </summary>
     public Dictionary<int, int> ComputeDegrees<TEntity, TRelated>()
     {
-        var entityCount = Count<TEntity>();
-        var entityTypeIndex = GetTypeIndex<TEntity>();
-        var relatedTypeIndex = GetTypeIndex<TRelated>();
-        var m2m = _adjacency[entityTypeIndex, relatedTypeIndex];
+        _rwLock.EnterReadLock();
+        try
+        {
+            var entityCount = Count<TEntity>();
+            var entityTypeIndex = GetTypeIndex<TEntity>();
+            var relatedTypeIndex = GetTypeIndex<TRelated>();
+            var m2m = _adjacency[entityTypeIndex, relatedTypeIndex];
 
-        var degrees = new Dictionary<int, int>(entityCount);
+            var degrees = new Dictionary<int, int>(entityCount);
 
-        for (var i = 0; i < entityCount; i++) degrees[i] = m2m[i].Count;
+            for (var i = 0; i < entityCount; i++) degrees[i] = m2m[i].Count;
 
-        return degrees;
+            return degrees;
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -4057,8 +4236,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public O2M GetElementToElementGraph<TElement, TNode>()
     {
         ThrowIfDisposed();
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        return m2m.GetElementsToElements();
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            return m2m.GetElementsToElements();
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -4082,8 +4269,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public O2M GetNodeToNodeGraph<TElement, TNode>()
     {
         ThrowIfDisposed();
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        return m2m.GetNodesToNodes();
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            return m2m.GetNodesToNodes();
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     #endregion
@@ -5506,8 +5701,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public List<List<int>> GetCliques<TElement, TNode>()
     {
         ThrowIfDisposed();
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        return m2m.GetCliques();
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            return m2m.GetCliques();
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -5529,8 +5732,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public (int[] RowPtr, int[] ColumnIndices) ToCsr<TElement, TNode>()
     {
         ThrowIfDisposed();
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        return m2m.ToCsr();
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            return m2m.ToCsr();
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -6416,28 +6627,35 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public DualGraph BuildFaceNeighborGraph<TElement, TNode>()
     {
         ThrowIfDisposed();
-
-        // Determine nodes per element
-        var elementTypeIdx = GetTypeIndex<TElement>();
-        var nodeTypeIdx = GetTypeIndex<TNode>();
-        var m2m = _adjacency[elementTypeIdx, nodeTypeIdx];
-
-        if (m2m.Count == 0)
-            return new DualGraph(new List<List<int>>(), new Dictionary<(int, int), int>(), 0);
-
-        var nodesPerElement = m2m[0].Count;
-
-        // Face neighbors share N-1 nodes (or N-2 for volume elements with quad faces)
-        var minShared = nodesPerElement switch
+        _rwLock.EnterReadLock();
+        try
         {
-            3 => 2, // Tri3: edge = 2 nodes
-            4 => 3, // Tet4: face = 3 nodes (assumes Tet4, not Quad4)
-            6 => 3, // Wedge6: triangular face = 3 nodes
-            8 => 4, // Hex8: quad face = 4 nodes
-            _ => Math.Max(1, nodesPerElement - 1)
-        };
+            // Determine nodes per element
+            var elementTypeIdx = GetTypeIndex<TElement>();
+            var nodeTypeIdx = GetTypeIndex<TNode>();
+            var m2m = _adjacency[elementTypeIdx, nodeTypeIdx];
 
-        return BuildDualGraph<TElement, TNode>(minShared);
+            if (m2m.Count == 0)
+                return new DualGraph(new List<List<int>>(), new Dictionary<(int, int), int>(), 0);
+
+            var nodesPerElement = m2m[0].Count;
+
+            // Face neighbors share N-1 nodes (or N-2 for volume elements with quad faces)
+            var minShared = nodesPerElement switch
+            {
+                3 => 2, // Tri3: edge = 2 nodes
+                4 => 3, // Tet4: face = 3 nodes (assumes Tet4, not Quad4)
+                6 => 3, // Wedge6: triangular face = 3 nodes
+                8 => 4, // Hex8: quad face = 4 nodes
+                _ => Math.Max(1, nodesPerElement - 1)
+            };
+
+            return BuildDualGraph<TElement, TNode>(minShared);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -6472,38 +6690,46 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public long EstimateMemoryUsage()
     {
         ThrowIfDisposed();
-        long bytes = 64;
-
-        for (var e = 0; e < _types.Count; e++)
-        for (var n = 0; n < _types.Count; n++)
+        _rwLock.EnterReadLock();
+        try
         {
-            var m2m = _adjacency[e, n];
-            var count = m2m.Count;
-            for (var i = 0; i < count; i++)
+            long bytes = 64;
+
+            for (var e = 0; e < _types.Count; e++)
+            for (var n = 0; n < _types.Count; n++)
             {
-                bytes += 24;
-                bytes += m2m[i].Count * 4;
+                var m2m = _adjacency[e, n];
+                var count = m2m.Count;
+                for (var i = 0; i < count; i++)
+                {
+                    bytes += 24;
+                    bytes += m2m[i].Count * 4;
+                }
             }
-        }
 
-        foreach (var kvp in _data)
+            foreach (var kvp in _data)
+            {
+                var listType = kvp.Value.GetType();
+                var countProp = GetCachedProperty(listType, "Count");
+                var count = (int)countProp.GetValue(kvp.Value)!;
+                var elementType = listType.GetGenericArguments()[0];
+
+                bytes += 24;
+                bytes += count * GetTypeSize(elementType);
+            }
+
+            foreach (var kvp in _canonicalIndex)
+            {
+                bytes += 48;
+                bytes += kvp.Value.Count * 16;
+            }
+
+            return bytes;
+        }
+        finally
         {
-            var listType = kvp.Value.GetType();
-            var countProp = GetCachedProperty(listType, "Count");
-            var count = (int)countProp.GetValue(kvp.Value)!;
-            var elementType = listType.GetGenericArguments()[0];
-
-            bytes += 24;
-            bytes += count * GetTypeSize(elementType);
+            _rwLock.ExitReadLock();
         }
-
-        foreach (var kvp in _canonicalIndex)
-        {
-            bytes += 48;
-            bytes += kvp.Value.Count * 16;
-        }
-
-        return bytes;
     }
 
     private static int GetTypeSize(Type type)
@@ -7525,8 +7751,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public bool HasElement<TElement, TNode>(int elementIndex)
     {
         ThrowIfDisposed();
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        return m2m.HasElement(elementIndex);
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            return m2m.HasElement(elementIndex);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -7539,8 +7773,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public bool HasNode<TElement, TNode>(int nodeIndex)
     {
         ThrowIfDisposed();
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        return m2m.HasNode(nodeIndex);
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            return m2m.HasNode(nodeIndex);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -7554,8 +7796,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public bool ElementContainsNode<TElement, TNode>(int elementIndex, int nodeIndex)
     {
         ThrowIfDisposed();
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        return m2m.ElementContainsNode(elementIndex, nodeIndex);
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            return m2m.ElementContainsNode(elementIndex, nodeIndex);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -7571,8 +7821,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public int GetTransposeNodeCount<TElement, TNode>()
     {
         ThrowIfDisposed();
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        return m2m.GetTransposeNodeCount();
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            return m2m.GetTransposeNodeCount();
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -7593,8 +7851,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(action);
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        m2m.WithElementsForNodeSpan(nodeIndex, action);
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            m2m.WithElementsForNodeSpan(nodeIndex, action);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -7614,8 +7880,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(action);
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        m2m.WithElementsFromNode(action);
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            m2m.WithElementsFromNode(action);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -7630,8 +7904,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(func);
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        return m2m.WithElementsFromNode(func);
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            return m2m.WithElementsFromNode(func);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -7648,8 +7930,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public async Task<O2M> GetTransposeAsync<TElement, TNode>(CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        return await m2m.ElementsFromNodeAsync(cancellationToken).ConfigureAwait(false);
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            return await m2m.ElementsFromNodeAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -7664,8 +7954,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public void EnsureSynchronized<TElement, TNode>()
     {
         ThrowIfDisposed();
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        m2m.Synchronize();
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            m2m.Synchronize();
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -7677,8 +7975,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public bool IsValidRelationship<TElement, TNode>()
     {
         ThrowIfDisposed();
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        return m2m.IsValid();
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            return m2m.IsValid();
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -7692,9 +7998,17 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(other);
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        var otherM2m = other._adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        return m2m.IsPermutationOf(otherM2m);
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            var otherM2m = other._adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            return m2m.IsPermutationOf(otherM2m);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     #endregion
@@ -7710,8 +8024,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public int GetMaxNodeIndex<TElement, TNode>()
     {
         ThrowIfDisposed();
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        return m2m.GetMaxNode();
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            return m2m.GetMaxNode();
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -7836,8 +8158,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public O2M GetTranspose<TElement, TNode>()
     {
         ThrowIfDisposed();
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        return m2m.ElementsFromNode;
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            return m2m.ElementsFromNode;
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -7871,8 +8201,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public O2M GetForwardStructure<TElement, TNode>()
     {
         ThrowIfDisposed();
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        return m2m.NodesFromElement;
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            return m2m.NodesFromElement;
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -8066,8 +8404,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
         GetPositionCaches<TElement, TNode>()
     {
         ThrowIfDisposed();
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        return (m2m.ElementLocations, m2m.NodeLocations);
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            return (m2m.ElementLocations, m2m.NodeLocations);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -8079,10 +8425,18 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public List<List<int>> ComputeNodePositions<TElement, TNode>()
     {
         ThrowIfDisposed();
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        var forward = m2m.NodesFromElement;
-        var transpose = m2m.ElementsFromNode;
-        return O2M.GetNodePositions(forward, transpose);
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            var forward = m2m.NodesFromElement;
+            var transpose = m2m.ElementsFromNode;
+            return O2M.GetNodePositions(forward, transpose);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -8094,10 +8448,18 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     public List<List<int>> ComputeElementPositions<TElement, TNode>()
     {
         ThrowIfDisposed();
-        var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
-        var forward = m2m.NodesFromElement;
-        var transpose = m2m.ElementsFromNode;
-        return O2M.GetElementPositions(forward, transpose);
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            var forward = m2m.NodesFromElement;
+            var transpose = m2m.ElementsFromNode;
+            return O2M.GetElementPositions(forward, transpose);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     #endregion
