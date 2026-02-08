@@ -3402,6 +3402,7 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
                     for (var le = 0; le < elements.Length; le++)
                     {
                         var element = elements[le];
+                        if ((uint)element >= (uint)nodesFromElement.Count) continue;
                         var elementNodes = CollectionsMarshal.AsSpan(nodesFromElement._adjacencies[element]);
 
                         // Linear search for node's position within element
@@ -3428,6 +3429,7 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
                 for (var le = 0; le < elements.Length; le++)
                 {
                     var element = elements[le];
+                    if ((uint)element >= (uint)nodesFromElement.Count) continue;
                     var elementNodes = CollectionsMarshal.AsSpan(nodesFromElement._adjacencies[element]);
 
                     var pos = -1;

@@ -557,7 +557,11 @@ public sealed class MM2M : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int GetNodeRangeForTypeUnlocked(int nodeType)
     {
-        var maxNode = 0;
+        // FIX: Initialize to -1 so we can distinguish "no nodes found" from "only node 0 exists".
+        // Previously initialized to 0, which caused node index 0 to be indistinguishable
+        // from the empty case, and the return value was maxNode instead of maxNode + 1,
+        // causing GetAllElements(nodeType) to skip the highest-indexed node.
+        var maxNode = -1;
         for (var et = 0; et < NumberOfTypes; et++)
         {
             var block = _mat[et, nodeType];
@@ -569,7 +573,9 @@ public sealed class MM2M : IDisposable
             }
         }
 
-        return maxNode;
+        // Return maxNode + 1 to match documented behavior: "the effective range [0, result)"
+        // When no nodes exist, returns 0 (-1 + 1 = 0). Otherwise returns maxIndex + 1.
+        return maxNode + 1;
     }
 
     /// <summary>
