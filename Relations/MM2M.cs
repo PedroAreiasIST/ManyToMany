@@ -1690,7 +1690,8 @@ public sealed class MM2M : IDisposable
                 if (!lockAcquired)
                     Debug.WriteLine(
                         "WARNING: MM2M.Dispose() could not acquire write lock within timeout. " +
-                        "Proceeding with disposal - concurrent operations may fail.");
+                        "Skipping child M2M disposal to avoid corrupting concurrent readers. " +
+                        "Child M2M instances will be reclaimed by GC.");
             }
             catch (ObjectDisposedException)
             {
@@ -1699,17 +1700,20 @@ public sealed class MM2M : IDisposable
 
             try
             {
-                // STEP 2: Dispose all contained M2M instances FIRST (while we have exclusivity)
-                for (var i = 0; i < NumberOfTypes; i++)
-                for (var j = 0; j < NumberOfTypes; j++)
-                    try
-                    {
-                        _mat[i, j].Dispose();
-                    }
-                    catch
-                    {
-                        /* Continue disposing others */
-                    }
+                // STEP 2: Only dispose child M2M instances if we have exclusive access.
+                // Without the write lock, concurrent readers may still be using the M2M
+                // instances; disposing them would cause ObjectDisposedException in those readers.
+                if (lockAcquired)
+                    for (var i = 0; i < NumberOfTypes; i++)
+                    for (var j = 0; j < NumberOfTypes; j++)
+                        try
+                        {
+                            _mat[i, j].Dispose();
+                        }
+                        catch
+                        {
+                            /* Continue disposing others */
+                        }
             }
             finally
             {
@@ -1813,7 +1817,7 @@ public sealed class MM2M : IDisposable
                         {
                             var neighborM2M = _mat[neighborType, nodeType];
                             if (neighborM2M.Count == 0) continue;
-                            if (node >= neighborM2M.GetMaxNode()) continue;
+                            if (node > neighborM2M.GetMaxNode()) continue;
 
                             // FIX (Issue 6): Use GetElementsForNode to avoid per-node list allocation
                             var connectedElems = neighborM2M.GetElementsForNode(node);
@@ -1886,7 +1890,7 @@ public sealed class MM2M : IDisposable
                         {
                             var neighborM2M = _mat[neighborType, nodeType];
                             if (neighborM2M.Count == 0) continue;
-                            if (node >= neighborM2M.GetMaxNode()) continue;
+                            if (node > neighborM2M.GetMaxNode()) continue;
 
                             // FIX (Issue 6): Use GetElementsForNode to avoid per-node list allocation
                             var connectedElems = neighborM2M.GetElementsForNode(node);
@@ -1987,7 +1991,7 @@ public sealed class MM2M : IDisposable
                         {
                             var neighborM2M = _mat[neighborType, nodeType];
                             if (neighborM2M.Count == 0) continue;
-                            if (node >= neighborM2M.GetMaxNode()) continue;
+                            if (node > neighborM2M.GetMaxNode()) continue;
 
                             // FIX (Issue 6): Use GetElementsForNode to avoid per-node list allocation
                             var connectedElems = neighborM2M.GetElementsForNode(node);

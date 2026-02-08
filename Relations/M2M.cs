@@ -2303,6 +2303,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     public object Clone()
     {
         ThrowIfDisposed();
+        ThrowIfInBatch();
         _rwLock.EnterReadLock();
         try
         {
@@ -2845,16 +2846,12 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     /// <param name="disposing">True if called from Dispose(), false if called from finalizer.</param>
     private void Dispose(bool disposing)
     {
-        // If disposal was previously incomplete, allow retry
-        if (_disposalIncomplete)
+        // First-time disposal: atomically mark as disposed
+        if (Interlocked.CompareExchange(ref _disposed, 1, 0) != 0)
         {
-            _disposalIncomplete = false;
-            // Fall through to retry disposal
-        }
-        else
-        {
-            // Atomic check-and-set to ensure disposal happens only once
-            if (Interlocked.CompareExchange(ref _disposed, 1, 0) != 0)
+            // Already marked disposed. Allow retry only if previous disposal was incomplete.
+            // This handles the case where the write lock timed out on the first attempt.
+            if (!Volatile.Read(ref _disposalIncomplete))
                 return;
         }
 
@@ -2871,8 +2868,9 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
                 if (!lockAcquired)
                 {
                     // Mark disposal as incomplete - object is disposed but not fully cleaned up
-                    // The object remains marked as disposed to prevent further use
-                    _disposalIncomplete = true;
+                    // The object remains marked as disposed to prevent further use.
+                    // Use Volatile.Write for cross-thread visibility of the retry flag.
+                    Volatile.Write(ref _disposalIncomplete, true);
                     
                     // Log warning for debugging - visible in debug output
                     Debug.WriteLine(
@@ -2889,7 +2887,9 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
                 return;
             }
 
-            // Lock was acquired - safe to dispose
+            // Lock was acquired - cleanup succeeded, clear incomplete flag
+            Volatile.Write(ref _disposalIncomplete, false);
+
             try
             {
                 _rwLock.ExitWriteLock();
