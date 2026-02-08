@@ -2037,10 +2037,6 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     {
         ThrowIfDisposed();
 
-        var elementCount = Count<TElement>();
-        if (elementCount == 0)
-            return (0, 0, 0);
-
         var totalExtracted = 0;
         var uniqueAdded = 0;
         var duplicatesSkipped = 0;
@@ -2053,6 +2049,13 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
             var elementTypeIdx = GetTypeIndex<TElement>();
             var nodeTypeIdx = GetTypeIndex<TNode>();
             var subEntityTypeIdx = GetTypeIndex<TSubEntity>();
+
+            // FIX: Read element count inside write lock to prevent TOCTOU race.
+            // Previously read outside the lock, which could become stale if another
+            // thread modified elements between the count read and lock acquisition.
+            var elementCount = _adjacency.GetNumberOfElements(elementTypeIdx);
+            if (elementCount == 0)
+                return (0, 0, 0);
 
             for (var elemIdx = 0; elemIdx < elementCount; elemIdx++)
             {

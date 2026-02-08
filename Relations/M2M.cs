@@ -2125,7 +2125,12 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         {
             if (!_isInSync && _batchNesting == 0)
                 SynchronizeTranspose();
-            if (!_elemLocComputed || !_nodeLocComputed)
+            // FIX: Guard against calling ComputePositionCaches when transpose is not synchronized.
+            // ComputePositionCaches requires _isInSync (asserted via Debug.Assert).
+            // If we're in a batch (_batchNesting > 0), we cannot synchronize, so we must skip
+            // position cache computation. The caller will get the read lock but with stale caches,
+            // which is acceptable since batch operations should not rely on position caches.
+            if (_isInSync && (!_elemLocComputed || !_nodeLocComputed))
                 ComputePositionCaches();
         }
         finally
