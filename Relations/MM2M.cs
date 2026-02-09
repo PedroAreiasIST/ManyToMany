@@ -67,7 +67,7 @@ public sealed class MM2M : IDisposable
 
         NumberOfTypes = numberOfTypes;
 
-        _listOfMarked = new Dictionary<int, HashSet<int>>(numberOfTypes);
+        _listOfMarked = new HashSet<int>[numberOfTypes];
         for (var i = 0; i < numberOfTypes; i++)
             _listOfMarked[i] = new HashSet<int>();
     }
@@ -76,9 +76,9 @@ public sealed class MM2M : IDisposable
 
     #region Fields
 
-    private readonly Dictionary<int, HashSet<int>> _listOfMarked;
+    private readonly HashSet<int>[] _listOfMarked;
     private readonly M2M[,] _mat;
-    private readonly ReaderWriterLockSlim _rwLock = new(LockRecursionPolicy.SupportsRecursion);
+    private readonly ReaderWriterLockSlim _rwLock = new();
 
     /// <summary>
     ///     Monotonically increasing version number. Incremented on structural changes
@@ -151,9 +151,9 @@ public sealed class MM2M : IDisposable
             _rwLock.EnterReadLock();
             try
             {
-                var result = new Dictionary<int, IReadOnlySet<int>>(_listOfMarked.Count);
-                foreach (var kvp in _listOfMarked)
-                    result[kvp.Key] = new HashSet<int>(kvp.Value);
+                var result = new Dictionary<int, IReadOnlySet<int>>(_listOfMarked.Length);
+                for (var i = 0; i < _listOfMarked.Length; i++)
+                    result[i] = new HashSet<int>(_listOfMarked[i]);
                 return result;
             }
             finally
@@ -947,8 +947,8 @@ public sealed class MM2M : IDisposable
 
             // Check if there's anything to compress
             var hasMarkedElements = false;
-            foreach (var kvp in _listOfMarked)
-                if (kvp.Value.Count > 0)
+            for (var mi = 0; mi < _listOfMarked.Length; mi++)
+                if (_listOfMarked[mi].Count > 0)
                 {
                     hasMarkedElements = true;
                     break;
@@ -1040,15 +1040,19 @@ public sealed class MM2M : IDisposable
                     "Marked elements were not cleared - fix the issue and retry.", ex);
             }
 
-            // PHASE 4: Atomic swap - all clones succeeded, now swap into place
-            // Dispose old matrices and replace with new ones
+            // PHASE 4: Swap references (pure reference assignments, cannot throw),
+            // then dispose old matrices separately for exception safety.
+            var oldMat = new M2M[NumberOfTypes, NumberOfTypes];
             for (var i = 0; i < NumberOfTypes; i++)
             for (var j = 0; j < NumberOfTypes; j++)
             {
-                var old = _mat[i, j];
+                oldMat[i, j] = _mat[i, j];
                 _mat[i, j] = clonedMat[i, j];
-                old.Dispose();
             }
+
+            for (var i = 0; i < NumberOfTypes; i++)
+            for (var j = 0; j < NumberOfTypes; j++)
+                oldMat[i, j].Dispose();
 
             // Increment version to signal stale reference invalidation
             // Any consumers with cached M2M references should check Version before use
@@ -1056,8 +1060,8 @@ public sealed class MM2M : IDisposable
 
             // PHASE 5: Cleanup (only after successful compression)
             // Clear all marked lists
-            foreach (var kvp in _listOfMarked)
-                kvp.Value.Clear();
+            for (var mi = 0; mi < _listOfMarked.Length; mi++)
+                _listOfMarked[mi].Clear();
 
             // NEW: Optional memory shrinking after compression
             if (shrinkMemory)
@@ -1111,7 +1115,7 @@ public sealed class MM2M : IDisposable
             }
 
             // Validate type-level dependencies are acyclic
-            return AreTypesAcyclic();
+            return AreTypesAcyclicUnlocked();
         }
         finally
         {
@@ -1316,19 +1320,7 @@ public sealed class MM2M : IDisposable
         _rwLock.EnterReadLock();
         try
         {
-            var typeDeps = new O2M(NumberOfTypes);
-            for (var e = 0; e < NumberOfTypes; e++)
-                typeDeps.AppendElement([]);
-
-            var hasDeps = false;
-            for (var e = 0; e < NumberOfTypes; e++)
-            for (var n = 0; n < NumberOfTypes; n++)
-                if (n != e && _mat[e, n].Count > 0)
-                {
-                    typeDeps.AppendNodeToElement(e, n);
-                    hasDeps = true;
-                }
-
+            var (typeDeps, hasDeps) = BuildTypeDependencyGraphUnlocked();
             return hasDeps ? typeDeps.GetTopOrder() : CreateRangeList(NumberOfTypes);
         }
         finally
@@ -1349,25 +1341,42 @@ public sealed class MM2M : IDisposable
         _rwLock.EnterReadLock();
         try
         {
-            var typeDeps = new O2M(NumberOfTypes);
-            for (var e = 0; e < NumberOfTypes; e++)
-                typeDeps.AppendElement([]);
-
-            var hasDeps = false;
-            for (var e = 0; e < NumberOfTypes; e++)
-            for (var n = 0; n < NumberOfTypes; n++)
-                if (n != e && _mat[e, n].Count > 0)
-                {
-                    typeDeps.AppendNodeToElement(e, n);
-                    hasDeps = true;
-                }
-
-            return !hasDeps || typeDeps.IsAcyclic();
+            return AreTypesAcyclicUnlocked();
         }
         finally
         {
             _rwLock.ExitReadLock();
         }
+    }
+
+    /// <summary>
+    ///     Builds the type-level dependency graph (caller must hold read lock).
+    /// </summary>
+    private (O2M TypeDeps, bool HasDeps) BuildTypeDependencyGraphUnlocked()
+    {
+        var typeDeps = new O2M(NumberOfTypes);
+        for (var e = 0; e < NumberOfTypes; e++)
+            typeDeps.AppendElement([]);
+
+        var hasDeps = false;
+        for (var e = 0; e < NumberOfTypes; e++)
+        for (var n = 0; n < NumberOfTypes; n++)
+            if (n != e && _mat[e, n].Count > 0)
+            {
+                typeDeps.AppendNodeToElement(e, n);
+                hasDeps = true;
+            }
+
+        return (typeDeps, hasDeps);
+    }
+
+    /// <summary>
+    ///     Checks acyclicity without acquiring lock (caller must hold read lock).
+    /// </summary>
+    private bool AreTypesAcyclicUnlocked()
+    {
+        var (typeDeps, hasDeps) = BuildTypeDependencyGraphUnlocked();
+        return !hasDeps || typeDeps.IsAcyclic();
     }
 
     /// <summary>
@@ -1426,6 +1435,8 @@ public sealed class MM2M : IDisposable
         _rwLock.EnterReadLock();
         try
         {
+            if (_mat[elementType, elementType].Count == 0)
+                return CreateRangeList(GetNumberOfElementsUnlocked(elementType));
             return _mat[elementType, elementType].GetSortOrder();
         }
         finally

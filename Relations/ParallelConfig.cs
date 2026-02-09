@@ -15,11 +15,11 @@ public static class ParallelConfig
     // ========================================================================
 
     private static readonly object _lock = new();
-    private static int _maxDegreeOfParallelism = Environment.ProcessorCount;
+    private static volatile int _maxDegreeOfParallelism = Environment.ProcessorCount;
 
     // GPU caching
     private static bool? _isGPUAvailable;
-    private static bool _skipGPUCheck; // Skip GPU check entirely if it causes crashes
+    private static volatile bool _skipGPUCheck; // Skip GPU check entirely if it causes crashes
 
     // MKL state
     private static int _mklNumThreads = Environment.ProcessorCount;
@@ -506,6 +506,9 @@ public static class ParallelConfig
     {
         MaxDegreeOfParallelism = Environment.ProcessorCount;
         EnableGPU = true;
+        EnableDebugOutput = false;
+        _skipGPUCheck = false;
+        _isGPUAvailable = null;
         MKLNumThreads = Environment.ProcessorCount;
     }
 

@@ -2775,7 +2775,13 @@ internal sealed class DataList<T> : IDataList
 
     public void AddItem(object? item)
     {
-        Items.Add((T)item!);
+        if (item is T typedValue)
+            Items.Add(typedValue);
+        else if (item == null && (!typeof(T).IsValueType || Nullable.GetUnderlyingType(typeof(T)) != null))
+            Items.Add(default!);
+        else
+            throw new ArgumentException(
+                $"Cannot add {item?.GetType().Name ?? "null"} to DataList<{typeof(T).Name}>.");
     }
 
     public void Clear()
@@ -2812,11 +2818,10 @@ internal sealed class DataList<T> : IDataList
         }
 
         var temp = new T[newCount];
-        var mappingSpan = CollectionsMarshal.AsSpan(oldFromNew);
 
         for (var newIdx = 0; newIdx < newCount; newIdx++)
         {
-            var oldIdx = mappingSpan[newIdx];
+            var oldIdx = span[newIdx];
             temp[newIdx] = Items[oldIdx];
         }
 
@@ -2830,13 +2835,22 @@ internal sealed class DataList<T> : IDataList
         if (inverse.Length == 0 || Items.Count == 0) return;
 
         var count = Items.Count;
+        if (inverse.Length < count)
+            throw new ArgumentException(
+                $"Inverse permutation length {inverse.Length} is less than item count {count}.",
+                nameof(inverse));
+
         var temp = new T[count];
 
-        for (var newIdx = 0; newIdx < count && newIdx < inverse.Length; newIdx++)
+        for (var newIdx = 0; newIdx < count; newIdx++)
         {
             var oldIdx = inverse[newIdx];
-            if (oldIdx >= 0 && oldIdx < count)
-                temp[newIdx] = Items[oldIdx];
+            if (oldIdx < 0 || oldIdx >= count)
+                throw new ArgumentOutOfRangeException(
+                    nameof(inverse),
+                    $"Inverse permutation at index {newIdx} points to invalid source index {oldIdx}. " +
+                    $"Valid range is [0, {count}).");
+            temp[newIdx] = Items[oldIdx];
         }
 
         for (var i = 0; i < count; i++)
@@ -3387,15 +3401,6 @@ public static class Utils
     {
         ArgumentNullException.ThrowIfNull(source);
         var result = new List<T>(source.Count);
-        for (var i = 0; i < source.Count; i++)
-            result.Add(source[i]);
-        return result;
-    }
-
-    public static List<int> Copy(List<int> source)
-    {
-        ArgumentNullException.ThrowIfNull(source);
-        var result = new List<int>(source.Count);
         for (var i = 0; i < source.Count; i++)
             result.Add(source[i]);
         return result;

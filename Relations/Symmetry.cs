@@ -62,13 +62,7 @@ public sealed class Symmetry
 
         var nodeCount = permutations[0].Count;
 
-        foreach (var perm in permutations)
-            if (perm.Count != nodeCount)
-                throw new ArgumentException(
-                    "All permutations must have the same length.",
-                    nameof(permutations));
-
-        // Validate each permutation is well-formed
+        // Validate each permutation is well-formed (includes length check)
         foreach (var perm in permutations) ValidatePermutation(perm, nodeCount);
 
         // Verify identity permutation is present
@@ -149,12 +143,8 @@ public sealed class Symmetry
 
             seen[idx] = true;
         }
-
-        for (var i = 0; i < nodeCount; i++)
-            if (!seen[i])
-                throw new ArgumentException(
-                    $"Permutation is missing index {i}.",
-                    nameof(perm));
+        // By pigeonhole: nodeCount values in [0, nodeCount) with no duplicates
+        // guarantees all indices are present -- no further check needed.
     }
 
     /// <summary>
@@ -477,6 +467,7 @@ public sealed class Symmetry
         if (n < 1)
             throw new ArgumentException("Node count must be at least 1.", nameof(n));
 
+        var seen = new HashSet<string>();
         var perms = new List<List<int>>();
 
         // Rotations
@@ -485,7 +476,9 @@ public sealed class Symmetry
             var perm = new List<int>(n);
             for (var i = 0; i < n; i++)
                 perm.Add((i + r) % n);
-            perms.Add(perm);
+            var key = string.Join(",", perm);
+            if (seen.Add(key))
+                perms.Add(perm);
         }
 
         // Reflections
@@ -494,7 +487,9 @@ public sealed class Symmetry
             var perm = new List<int>(n);
             for (var i = 0; i < n; i++)
                 perm.Add((r - i + n) % n);
-            perms.Add(perm);
+            var key = string.Join(",", perm);
+            if (seen.Add(key))
+                perms.Add(perm);
         }
 
         return new Symmetry(perms);
@@ -558,6 +553,11 @@ public sealed class Symmetry
             throw new ArgumentException("Must provide at least one generator.", nameof(generators));
 
         var n = generators[0].Count;
+
+        // Validate all generators are well-formed permutations before costly closure
+        foreach (var gen in generators)
+            ValidatePermutation(gen, n);
+
         var identity = new List<int>(n);
         for (var i = 0; i < n; i++)
             identity.Add(i);

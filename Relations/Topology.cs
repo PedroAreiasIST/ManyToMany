@@ -2231,6 +2231,8 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
             var transpose = m2m.ElementsFromNode;
 
             // Start with node having smallest incident count (optimization)
+            if (nodes[0] >= transpose.Count)
+                return new List<int>(); // Node doesn't exist
             var minNode = nodes[0];
             var minCount = transpose[minNode].Length;
             for (var i = 1; i < nodes.Length; i++)
@@ -2451,8 +2453,7 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
 
             foreach (var nodes in connectivityList)
             {
-                var toStore = GetCanonicalOrOriginal<TElement>(nodes);
-                var index = _adjacency.AppendElement(elementType, nodeType, toStore);
+                var index = AddInternal<TElement, TNode>(nodes);
                 indices.Add(index);
             }
 
@@ -3886,10 +3887,19 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     /// </summary>
     public List<(int TypeIndex, int EntityIndex)> MultiTypeDFS<TNode>(int nodeIndex)
     {
+        ThrowIfDisposed();
         ArgumentOutOfRangeException.ThrowIfNegative(nodeIndex);
 
-        var nodeTypeIndex = GetTypeIndex<TNode>();
-        return _adjacency.DepthFirstSearchFromANode(nodeTypeIndex, nodeIndex);
+        _rwLock.EnterReadLock();
+        try
+        {
+            var nodeTypeIndex = GetTypeIndex<TNode>();
+            return _adjacency.DepthFirstSearchFromANode(nodeTypeIndex, nodeIndex);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -3897,10 +3907,19 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     /// </summary>
     public List<(int TypeIndex, int EntityIndex)> GetAllEntitiesAtNode<TNode>(int nodeIndex)
     {
+        ThrowIfDisposed();
         ArgumentOutOfRangeException.ThrowIfNegative(nodeIndex);
 
-        var nodeTypeIndex = GetTypeIndex<TNode>();
-        return _adjacency.GetAllElements(nodeTypeIndex, nodeIndex);
+        _rwLock.EnterReadLock();
+        try
+        {
+            var nodeTypeIndex = GetTypeIndex<TNode>();
+            return _adjacency.GetAllElements(nodeTypeIndex, nodeIndex);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -3908,10 +3927,19 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     /// </summary>
     public List<(int TypeIndex, int NodeIndex)> GetAllNodesOfEntity<TEntity>(int entityIndex)
     {
+        ThrowIfDisposed();
         ArgumentOutOfRangeException.ThrowIfNegative(entityIndex);
 
-        var entityTypeIndex = GetTypeIndex<TEntity>();
-        return _adjacency.GetAllNodes(entityTypeIndex, entityIndex);
+        _rwLock.EnterReadLock();
+        try
+        {
+            var entityTypeIndex = GetTypeIndex<TEntity>();
+            return _adjacency.GetAllNodes(entityTypeIndex, entityIndex);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -3967,7 +3995,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     /// </summary>
     public List<int> GetTypeTopologicalOrder()
     {
-        return _adjacency.GetTypeTopOrder();
+        ThrowIfDisposed();
+        _rwLock.EnterReadLock();
+        try
+        {
+            return _adjacency.GetTypeTopOrder();
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -3975,7 +4012,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     /// </summary>
     public bool IsTypeHierarchyAcyclic()
     {
-        return _adjacency.AreTypesAcyclic();
+        ThrowIfDisposed();
+        _rwLock.EnterReadLock();
+        try
+        {
+            return _adjacency.AreTypesAcyclic();
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     #endregion
@@ -4382,16 +4428,17 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
             foreach (var kvp in _data)
                 // Use IDataList.Count directly (no reflection needed)
                 dataCounts[kvp.Key.Entity] = kvp.Value.Count;
+
+            var symmetryTypes = new List<Type>();
+            foreach (var k in _symmetries.Keys)
+                symmetryTypes.Add(k);
+
+            return new TopologyStats(entityCounts, dataCounts, symmetryTypes);
         }
         finally
         {
             _rwLock.ExitReadLock();
         }
-
-        var symmetryTypes = new List<Type>();
-        foreach (var k in _symmetries.Keys)
-            symmetryTypes.Add(k);
-        return new TopologyStats(entityCounts, dataCounts, symmetryTypes);
     }
 
     #endregion
@@ -5968,7 +6015,8 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
             }
             else
             {
-                var sortedNodes = referencedNodes.OrderBy(n => n).ToList();
+                var sortedNodes = new List<int>(referencedNodes);
+                sortedNodes.Sort();
                 nodeMapping = new int[sortedNodes.Count];
                 for (var newIdx = 0; newIdx < sortedNodes.Count; newIdx++)
                 {
@@ -5995,7 +6043,25 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
                 foreach (var oldNode in oldNodes)
                     newNodes.Add(oldToNewNode[oldNode]);
 
-                result._adjacency.AppendElement(elementTypeIdx, nodeTypeIdx, newNodes);
+                var elemIndex = result._adjacency.AppendElement(elementTypeIdx, nodeTypeIdx, newNodes);
+
+                // Populate canonical index for Find/Exists support
+                if (result._symmetries.TryGetValue(typeof(TElement), out var sym))
+                {
+                    var (canonical, key) = result.GetCanonicalWithKey<TElement>(
+                        System.Runtime.InteropServices.CollectionsMarshal.AsSpan(newNodes));
+
+                    if (!result._canonicalIndex.TryGetValue(typeof(TElement), out var typeIndex))
+                    {
+                        typeIndex = new Dictionary<long, List<(int Index, List<int> Nodes)>>();
+                        result._canonicalIndex[typeof(TElement)] = typeIndex;
+                    }
+
+                    if (typeIndex.TryGetValue(key, out var collisionChain))
+                        collisionChain.Add((elemIndex, canonical));
+                    else
+                        typeIndex[key] = new List<(int Index, List<int> Nodes)> { (elemIndex, canonical) };
+                }
             }
 
             // Copy per-entity data for kept elements
@@ -6148,37 +6214,12 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
 
             foreach (var kvp in _data)
                 if (kvp.Key.Entity == typeof(TNode))
-                    ReorderDataByPermutation(kvp.Value, inverse);
+                    kvp.Value.ReorderByInversePermutation(inverse);
         }
         finally
         {
             _rwLock.ExitWriteLock();
         }
-    }
-
-    private static void ReorderDataByPermutation(object listObject, int[] inverse)
-    {
-        var listType = listObject.GetType();
-        if (!listType.IsGenericType || listType.GetGenericTypeDefinition() != typeof(List<>))
-            return;
-
-        var elementType = listType.GetGenericArguments()[0];
-        var count = (int)GetCachedProperty(listType, "Count").GetValue(listObject)!;
-
-        if (count == 0 || inverse.Length == 0) return;
-
-        var indexer = GetCachedProperty(listType, "Item");
-        var tempArray = Array.CreateInstance(elementType, count);
-
-        for (var newIdx = 0; newIdx < count; newIdx++)
-        {
-            var oldIdx = inverse[newIdx];
-            if (oldIdx >= 0 && oldIdx < count)
-                tempArray.SetValue(indexer.GetValue(listObject, [oldIdx]), newIdx);
-        }
-
-        for (var i = 0; i < count; i++)
-            indexer.SetValue(listObject, tempArray.GetValue(i), [i]);
     }
 
     #endregion
@@ -7444,7 +7485,6 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
         try
         {
             ThrowIfDisposed();
-            var typeIndex = GetTypeIndex<TEntity>();
             var neighbors = Neighbors<TEntity, TEntity>(entityIndex, sorted);
             return new EntityCirculator<TEntity>(neighbors);
         }

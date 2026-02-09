@@ -529,13 +529,6 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
     /// </summary>
     public bool TransposeSkipsInvalidNodes { get; set; } = true;
 
-    /// <summary>
-    ///     Maximum size for marker arrays in parallel operations (Issue #5 fix).
-    ///     Arrays larger than this use HashSet fallback to avoid excessive memory usage.
-    ///     Default: 1M elements = 4MB per worker array. With 32 workers = ~128MB total.
-    /// </summary>
-    private const int MAX_MARKER_ARRAY_SIZE = 1_000_000;
-
     #endregion
 
     #region Constructor
@@ -1093,10 +1086,11 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
     /// </remarks>
     public string? ValidateStrict()
     {
+        var seen = new HashSet<int>();
         for (var i = 0; i < _adjacencies.Count; i++)
         {
+            seen.Clear();
             var span = CollectionsMarshal.AsSpan(_adjacencies[i]);
-            var seen = new HashSet<int>();
 
             for (var j = 0; j < span.Length; j++)
             {
@@ -1653,7 +1647,7 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
                 reordered[oldToNewElementMap[oldIdx]] = _adjacencies[oldIdx];
 
         _adjacencies = new List<List<int>>(reordered);
-        _maxNodeIndexCache = null;
+        // _maxNodeIndexCache remains valid: node values are unchanged by element reordering
     }
 
     /// <summary>
@@ -2368,7 +2362,7 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
                     var marker = ArrayPool<int>.Shared.Rent(markerSize);
                     Array.Clear(marker, 0, markerSize); // Initial clear only once per worker
                     var touched = ArrayPool<int>.Shared.Rent(markerSize);
-                    return (marker, touched, touchedCount: 0);
+                    return (marker, touched);
                 },
                 (ra, loopState, state) =>
                 {
@@ -2394,7 +2388,7 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
                     // P0.4 FIX: Clear only touched indices instead of entire marker
                     for (var i = 0; i < len; i++)
                         marker[touched[i]] = 0;
-                    return (marker, touched, touchedCount: 0);
+                    return (marker, touched);
                 },
                 state =>
                 {
@@ -2450,7 +2444,7 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
                     var marker = ArrayPool<int>.Shared.Rent(markerSize);
                     Array.Clear(marker, 0, markerSize); // Initial clear only once per worker
                     var touched = ArrayPool<int>.Shared.Rent(markerSize);
-                    return (marker, touched, touchedCount: 0);
+                    return (marker, touched);
                 },
                 (ra, loopState, state) =>
                 {
@@ -2477,7 +2471,7 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
                     // P0.4 FIX: Clear only touched indices
                     for (var i = 0; i < len; i++)
                         marker[touched[i]] = 0;
-                    return (marker, touched, touchedCount: 0);
+                    return (marker, touched);
                 },
                 state =>
                 {
@@ -2734,15 +2728,10 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
     [MethodImpl(AggressiveOptimization | AggressiveInlining)]
     private static List<int> GetIntersectionHashSet(List<int> leftRow, List<int> rightRow)
     {
-        // Build HashSet from smaller list to reduce memory and construction time
-        var (smallerList, largerList) = leftRow.Count < rightRow.Count
-            ? (leftRow, rightRow)
-            : (rightRow, leftRow);
-
-        var hashSet = new HashSet<int>(smallerList);
+        // Build HashSet from rightRow; iterate leftRow to preserve its ordering in the output
+        var hashSet = new HashSet<int>(rightRow);
         var result = new List<int>();
 
-        // Iterate through left row to preserve its ordering in the output
         foreach (var node in leftRow)
             if (hashSet.Contains(node))
                 result.Add(node);
@@ -3714,14 +3703,11 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
         }
 
         // P0.2 FIX: Estimate max neighborhood size for touched buffer sizing.
-        // For FEM meshes, each node's neighborhood is typically small (≤ ~20 unique node2 values).
-        // We size the touched buffer based on observed maximum element arity × max sharing degree.
-        // The marker/markerGen arrays are still nodeCount-sized for O(1) lookup, but they are
-        // cleared via touched-index tracking (proportional to local neighborhood, not nodeCount).
+        // The marker/markerGen arrays are nodeCount-sized for O(1) lookup, and the
+        // touched buffer must also be nodeCount-sized since a hub node's 1-ring neighborhood
+        // can contain up to nodeCount unique node2 values.
         const int PoolThreshold = 50000;
-        // Estimate max touched: for each element containing node1, we see up to esize node2 values.
-        // Worst case = maxElementsPerNode × maxNodesPerElement, but typically much less.
-        var maxTouchedEstimate = Math.Min(nodeCount, 8192); // Conservative upper bound
+        var maxTouchedEstimate = nodeCount;
 
         if (nodeCount >= nodesFromElement.ParallelizationThreshold)
         {
@@ -3888,27 +3874,6 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
                 }
             }
         }
-    }
-
-    /// <summary>
-    ///     Legacy overload without touched tracking — redirects to new signature.
-    /// </summary>
-    [MethodImpl(AggressiveOptimization | AggressiveInlining)]
-    private static void ProcessNode1ForCliques(
-        int node1,
-        O2M nodesFromElement,
-        O2M elementsFromNode,
-        List<List<int>> nodeLocation,
-        List<List<int>> cliques,
-        int[] marker,
-        int[] markerGen)
-    {
-        // Small stack buffer for touched tracking
-        var touched = new int[nodesFromElement.Count > 0
-            ? Math.Min(nodesFromElement.GetMaxNode() + 1, 8192)
-            : 64];
-        ProcessNode1ForCliques(node1, nodesFromElement, elementsFromNode,
-            nodeLocation, cliques, marker, markerGen, touched, out _);
     }
 
     #endregion
