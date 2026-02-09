@@ -166,6 +166,8 @@ public sealed class Symmetry
     /// <exception cref="ArgumentException">Thrown when node count doesn't match.</exception>
     public List<int> Canonical(params int[] nodes)
     {
+        ArgumentNullException.ThrowIfNull(nodes);
+
         if (nodes.Length != NodeCount)
             throw new ArgumentException($"Expected {NodeCount} nodes, got {nodes.Length}.", nameof(nodes));
 
@@ -177,6 +179,8 @@ public sealed class Symmetry
     /// </summary>
     public List<int> Canonical(List<int> nodes)
     {
+        ArgumentNullException.ThrowIfNull(nodes);
+
         if (nodes.Count != NodeCount)
             throw new ArgumentException($"Expected {NodeCount} nodes, got {nodes.Count}.", nameof(nodes));
 
@@ -188,6 +192,8 @@ public sealed class Symmetry
     /// </summary>
     public List<int> Canonical(IReadOnlyList<int> nodes)
     {
+        ArgumentNullException.ThrowIfNull(nodes);
+
         if (nodes.Count != NodeCount)
             throw new ArgumentException($"Expected {NodeCount} nodes, got {nodes.Count}.", nameof(nodes));
 
@@ -273,6 +279,9 @@ public sealed class Symmetry
     /// </summary>
     public bool AreEquivalent(int[] a, int[] b)
     {
+        ArgumentNullException.ThrowIfNull(a);
+        ArgumentNullException.ThrowIfNull(b);
+
         if (a.Length != NodeCount || b.Length != NodeCount)
             return false;
 
@@ -286,6 +295,9 @@ public sealed class Symmetry
     /// </summary>
     public bool AreEquivalent(List<int> a, List<int> b)
     {
+        ArgumentNullException.ThrowIfNull(a);
+        ArgumentNullException.ThrowIfNull(b);
+
         if (a.Count != NodeCount || b.Count != NodeCount)
             return false;
 
@@ -299,6 +311,9 @@ public sealed class Symmetry
     /// </summary>
     public bool AreEquivalent(IReadOnlyList<int> a, IReadOnlyList<int> b)
     {
+        ArgumentNullException.ThrowIfNull(a);
+        ArgumentNullException.ThrowIfNull(b);
+
         if (a.Count != NodeCount || b.Count != NodeCount)
             return false;
 

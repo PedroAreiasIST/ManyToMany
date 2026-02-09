@@ -114,6 +114,9 @@ public static class ParallelConfig
             if (value)
                 // Clear cached value so it won't be checked
                 _isGPUAvailable = false;
+            else
+                // Allow re-checking after GPU checks are re-enabled
+                _isGPUAvailable = null;
         }
     }
 
