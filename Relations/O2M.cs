@@ -3391,7 +3391,11 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
                     for (var le = 0; le < elements.Length; le++)
                     {
                         var element = elements[le];
-                        if ((uint)element >= (uint)nodesFromElement.Count) continue;
+                        if ((uint)element >= (uint)nodesFromElement.Count)
+                        {
+                            positions[le] = -1;
+                            continue;
+                        }
                         var elementNodes = CollectionsMarshal.AsSpan(nodesFromElement._adjacencies[element]);
 
                         // Linear search for node's position within element
@@ -3418,7 +3422,11 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
                 for (var le = 0; le < elements.Length; le++)
                 {
                     var element = elements[le];
-                    if ((uint)element >= (uint)nodesFromElement.Count) continue;
+                    if ((uint)element >= (uint)nodesFromElement.Count)
+                    {
+                        positions[le] = -1;
+                        continue;
+                    }
                     var elementNodes = CollectionsMarshal.AsSpan(nodesFromElement._adjacencies[element]);
 
                     var pos = -1;
@@ -3464,7 +3472,11 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
             for (var j = 0; j < nodes.Length; j++)
             {
                 var n = nodes[j];
-                if ((uint)n >= (uint)elementsFromNode.Count) continue;
+                if ((uint)n >= (uint)elementsFromNode.Count)
+                {
+                    positions[j] = -1;
+                    continue;
+                }
 
                 var pos = elementsFromNode._adjacencies[n].BinarySearch(e);
                 if (pos < 0)
