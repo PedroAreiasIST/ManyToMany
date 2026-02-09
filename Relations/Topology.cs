@@ -8007,6 +8007,30 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     }
 
     /// <summary>
+    ///     Forces synchronization of the transpose and position caches for a specific relationship.
+    /// </summary>
+    /// <typeparam name="TElement">The element type.</typeparam>
+    /// <typeparam name="TNode">The node type.</typeparam>
+    /// <remarks>
+    ///     Call this before hot-path queries that use <see cref="GetPositionCaches{TElement, TNode}" />
+    ///     to avoid cache computation under contention.
+    /// </remarks>
+    public void EnsurePositionCaches<TElement, TNode>()
+    {
+        ThrowIfDisposed();
+        _rwLock.EnterReadLock();
+        try
+        {
+            var m2m = _adjacency[GetTypeIndex<TElement>(), GetTypeIndex<TNode>()];
+            m2m.EnsurePositionCaches();
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
+    }
+
+    /// <summary>
     ///     Checks if a specific relationship block is valid (element/node/position checks).
     /// </summary>
     /// <typeparam name="TElement">The element type.</typeparam>

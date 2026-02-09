@@ -1955,6 +1955,35 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     }
 
     /// <summary>
+    ///     Forces synchronization of the transpose and position caches.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Thrown when called during a batch update.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown if the object has been disposed.</exception>
+    /// <remarks>
+    ///     Thread Safety: Thread-safe with write lock.
+    ///     Time Complexity: O(n × m) for transpose + position cache computation.
+    ///     Use this method to pre-compute all caches before running hot-path queries
+    ///     that rely on <see cref="ElementLocations" /> or <see cref="NodeLocations" />.
+    /// </remarks>
+    public void EnsurePositionCaches()
+    {
+        ThrowIfDisposed();
+        ThrowIfInBatch();
+        _rwLock.EnterWriteLock();
+        try
+        {
+            if (!_isInSync)
+                SynchronizeTranspose();
+            if (!_positionCachesComputed)
+                ComputePositionCaches();
+        }
+        finally
+        {
+            _rwLock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>
     ///     Internal batch update scope that manages nesting counter.
     /// </summary>
     /// <remarks>
