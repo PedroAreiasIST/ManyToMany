@@ -135,10 +135,15 @@ public static class UnifiedMesher
             { xMin, yMax, 0 }
         };
 
-        // Use sizeGradation=0 to use boundary-based sizing
-        var sizeGradation = targetEdgeLength > 0 ? 0 : 1.3;
+        // If targetEdgeLength is provided, convert it to maxArea so TriangulateWithHoles
+        // picks fixed sizing and reproduces the requested edge size
+        if (targetEdgeLength > 0)
+        {
+            var maxArea = 0.5 * targetEdgeLength * targetEdgeLength;
+            return Triangulate(boundary, null, true, maxArea, 0, convertToQuads);
+        }
 
-        return Triangulate(boundary, null, true, 0, sizeGradation, convertToQuads);
+        return Triangulate(boundary, null, true, 0, 1.3, convertToQuads);
     }
 
     /// <summary>
