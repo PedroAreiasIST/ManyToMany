@@ -1633,6 +1633,11 @@ public sealed class CliqueSystem : IDisposable
         _isDisposed = true;
     }
 
+    ~CliqueSystem()
+    {
+        Dispose(false);
+    }
+
     #endregion
 }
 
