@@ -3493,7 +3493,105 @@ public static class CSRIterativeSolvers
 
     public static double[] SmallestEigenvalues(this CSR matrix, int m, double tolerance = 1e-8, int maxIterations = 100)
     {
-        throw new NotImplementedException("Full eigenvalue computation requires specialized libraries like ARPACK.");
+        ArgumentNullException.ThrowIfNull(matrix);
+        matrix.ThrowIfDisposed();
+
+        if (matrix.Rows != matrix.Columns)
+            throw new InvalidOperationException("Eigenvalue computation requires a square matrix.");
+        if (m <= 0)
+            throw new ArgumentOutOfRangeException(nameof(m), "Number of requested eigenvalues must be positive.");
+        if (m > matrix.Rows)
+            throw new ArgumentOutOfRangeException(nameof(m),
+                $"Cannot request {m} eigenvalues from a {matrix.Rows}x{matrix.Columns} matrix.");
+        if (tolerance <= 0)
+            throw new ArgumentOutOfRangeException(nameof(tolerance), "Tolerance must be positive.");
+        if (maxIterations <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maxIterations), "Maximum iterations must be positive.");
+
+        var n = matrix.Rows;
+        var basis = new double[m][];
+        var current = new double[m][];
+        var eigenvalues = new double[m];
+
+        // Deterministic initialization to keep behavior reproducible.
+        for (var k = 0; k < m; k++)
+        {
+            var v = new double[n];
+            for (var i = 0; i < n; i++) v[i] = Math.Sin((k + 1) * (i + 1));
+            basis[k] = v;
+            current[k] = new double[n];
+        }
+
+        OrthogonalizeAndNormalize(basis, m, n);
+
+        for (var iteration = 0; iteration < maxIterations; iteration++)
+        {
+            var maxLambdaDelta = 0.0;
+
+            for (var k = 0; k < m; k++)
+            {
+                var solve = matrix.TrySolve(basis[k], tolerance * 0.1, Math.Max(200, matrix.Rows * 2));
+                if (!solve.Converged)
+                    throw new SolverException(
+                        $"Inverse iteration failed while computing eigenvalue #{k + 1}: {solve.Message ?? "solver did not converge"}");
+
+                Array.Copy(solve.Solution, current[k], n);
+            }
+
+            OrthogonalizeAndNormalize(current, m, n);
+
+            for (var k = 0; k < m; k++)
+            {
+                var Av = matrix.Multiply(current[k]);
+                var numerator = Dot(current[k], Av, n);
+                var denominator = Dot(current[k], current[k], n);
+
+                if (Math.Abs(denominator) <= DEFAULT_TOLERANCE)
+                    throw new SolverException("Encountered near-zero eigenvector norm during eigenvalue estimation.");
+
+                var lambda = numerator / denominator;
+                maxLambdaDelta = Math.Max(maxLambdaDelta, Math.Abs(lambda - eigenvalues[k]));
+                eigenvalues[k] = lambda;
+            }
+
+            // Keep iteration basis updated.
+            for (var k = 0; k < m; k++) Array.Copy(current[k], basis[k], n);
+
+            if (maxLambdaDelta < tolerance) break;
+        }
+
+        Array.Sort(eigenvalues);
+        return eigenvalues;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static double Dot(double[] a, double[] b, int n)
+    {
+        var sum = 0.0;
+        for (var i = 0; i < n; i++) sum += a[i] * b[i];
+        return sum;
+    }
+
+    private static void OrthogonalizeAndNormalize(double[][] vectors, int count, int length)
+    {
+        for (var i = 0; i < count; i++)
+        {
+            var vi = vectors[i];
+
+            for (var j = 0; j < i; j++)
+            {
+                var vj = vectors[j];
+                var projection = Dot(vi, vj, length);
+                for (var p = 0; p < length; p++) vi[p] -= projection * vj[p];
+            }
+
+            var norm = Math.Sqrt(Dot(vi, vi, length));
+            if (norm <= DEFAULT_TOLERANCE)
+                throw new SolverException("Failed to build a stable orthonormal basis for eigenvalue computation.");
+
+            var invNorm = 1.0 / norm;
+            for (var p = 0; p < length; p++) vi[p] *= invNorm;
+        }
     }
 }
 
