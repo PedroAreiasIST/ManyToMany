@@ -207,6 +207,13 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
 
     public CSR(List<List<int>> rows, bool sorted = false, bool enableGpu = false)
     {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        for (var i = 0; i < rows.Count; i++)
+            if (rows[i] == null)
+                throw new ArgumentException($"Row {i} is null. Rows collection must not contain null entries.",
+                    nameof(rows));
+
         nrows = rows.Count;
         ncols = rows.Count > 0 ? rows.Max(r => r.Count > 0 ? r.Max() + 1 : 0) : 0;
 
@@ -231,6 +238,11 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
             for (var j = 0; j < rowSpan.Length; j++)
                 columnIndices[pos++] = rowSpan[j];
         }
+
+        // Keep this constructor's validation behavior aligned with the primary constructor.
+        // This is required for safety because SIMD code paths use unsafe pointers.
+        ValidateCSRStructure(rowPointers, columnIndices, nrows, ncols);
+        constructedWithSkipValidation = false;
 
         if (enableGpu)
             try
