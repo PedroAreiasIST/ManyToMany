@@ -22,6 +22,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
+using static Numerical.MeshGeometry;
 
 namespace Numerical;
 
@@ -131,7 +132,6 @@ public static class SimplexRemesher
 
     /// <summary>
     /// Save mesh to Gmsh .msh (MSH 2.2 ASCII) format.
-    /// </summary>
     /// </summary>
     public static void SaveMSH(SimplexMesh mesh, double[,] coordinates, string path)
     {
@@ -413,10 +413,6 @@ public static class SimplexRemesher
         Console.WriteLine($"  Tri3: {mesh.Count<Tri3>()}");
         Console.WriteLine($"  Tet4: {mesh.Count<Tet4>()}");
     }
-    /// <summary>
-    /// Interpolates coordinates for midpoint nodes created during refinement.
-    /// </summary>
-    
     // ═══════════════════════════════════════════════════════════════════════════
     // REMOVED: InterpolateCoordinates() Function (now in MeshRefinement.cs)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -805,8 +801,6 @@ public static class SimplexRemesher
         // Build node array (GiD uses 1-based, need to map to 0-based)
         int maxNodeId = nodeCoords.Keys.Max();
         int minNodeId = nodeCoords.Keys.Min();
-        bool isOneBased = minNodeId == 1;
-        
         int numNodes = nodeCoords.Count;
         var coordinates = new double[numNodes, 3];
         var nodeIdMap = new Dictionary<int, int>(); // old id -> new 0-based id
@@ -1338,35 +1332,34 @@ public static class SimplexRemesher
         var refinedMesh = mesh;
         var refinedCoords = coordinates;
         
-        for (int pass = 0; pass < 1; pass++)  // Single pass per crack
         {
             // Cache signed field values for all nodes (avoid recomputation)
             var cachedFieldValues = new double[refinedMesh.Count<Node>()];
             var cachedRegionValues = new double[refinedMesh.Count<Node>()];
-            
+
             for (int i = 0; i < refinedMesh.Count<Node>(); i++)
             {
                 cachedFieldValues[i] = signedField(refinedCoords[i, 0], refinedCoords[i, 1], GetZ(refinedCoords, i));
                 if (regionField != null)
                     cachedRegionValues[i] = regionField(refinedCoords[i, 0], refinedCoords[i, 1], GetZ(refinedCoords, i));
             }
-            
+
             // Find edges to refine in current mesh
             var currentEdgesToRefine = new HashSet<(int, int)>();
-            
+
             for (int i = 0; i < refinedMesh.Count<Tri3>(); i++)
             {
                 var n = refinedMesh.NodesOf<Tri3, Node>(i);
                 int n1 = n[0], n2 = n[1], n3 = n[2];
-                
+
                 double f1 = cachedFieldValues[n1];
                 double f2 = cachedFieldValues[n2];
                 double f3 = cachedFieldValues[n3];
-                
+
                 // Check region constraint
                 bool checkRegion = (regionField != null);
                 bool refineEdge12 = false, refineEdge23 = false, refineEdge31 = false;
-                
+
                 if (f1 * f2 <= 0)
                 {
                     if (checkRegion)
@@ -1377,7 +1370,7 @@ public static class SimplexRemesher
                     }
                     else refineEdge12 = true;
                 }
-                
+
                 if (f2 * f3 <= 0)
                 {
                     if (checkRegion)
@@ -1388,7 +1381,7 @@ public static class SimplexRemesher
                     }
                     else refineEdge23 = true;
                 }
-                
+
                 if (f3 * f1 <= 0)
                 {
                     if (checkRegion)
@@ -1399,21 +1392,18 @@ public static class SimplexRemesher
                     }
                     else refineEdge31 = true;
                 }
-                
+
                 if (refineEdge12) currentEdgesToRefine.Add(n1 < n2 ? (n1, n2) : (n2, n1));
                 if (refineEdge23) currentEdgesToRefine.Add(n2 < n3 ? (n2, n3) : (n3, n2));
                 if (refineEdge31) currentEdgesToRefine.Add(n1 < n3 ? (n1, n3) : (n3, n1));
             }
-            
-            if (currentEdgesToRefine.Count == 0)
+
+            if (currentEdgesToRefine.Count > 0)
             {
-                Console.WriteLine($"  → Pass {pass + 1}: No more edges to refine");
-                break;
+                Console.WriteLine($"  → Refining {currentEdgesToRefine.Count} edges");
+                (refinedMesh, _) = MeshRefinement.Refine(refinedMesh, currentEdgesToRefine.ToList());
+                refinedCoords = MeshRefinement.InterpolateCoordinates(refinedMesh, refinedCoords);
             }
-            
-            Console.WriteLine($"  → Pass {pass + 1}: Refining {currentEdgesToRefine.Count} edges");
-            (refinedMesh, _) = MeshRefinement.Refine(refinedMesh, currentEdgesToRefine.ToList());
-            refinedCoords = MeshRefinement.InterpolateCoordinates(refinedMesh, refinedCoords);
         }
         
         // Step 3: Snap new crack nodes to EXACT zero-crossing (surface = 0)
@@ -1663,10 +1653,6 @@ public static class SimplexRemesher
     }
     
     /// <summary>
-    /// Duplicate crack nodes CAREFULLY to avoid creating holes.
-    /// Uses consistent side classification: each crack node is assigned to ONE side based on its neighbors.
-    /// </summary>
-    /// <summary>
     /// Duplicate crack nodes to create discontinuity.
     /// Element-based approach: for each element, determine which side based on non-crack nodes.
     /// </summary>
@@ -1875,15 +1861,17 @@ public static class SimplexRemesher
                     foreach (var elemId in incidentTris)
                     {
                         var n = crackedMesh.NodesOf<Tri3, Node>(elemId);
-                        
-                        // Check area with new position
-                        double[,] testCoords = (double[,])smoothedCoords.Clone();
-                        for (int d = 0; d < coordDim; d++)
-                            testCoords[nodeId, d] = newPos[d];
-                        
-                        double area2 = (testCoords[n[1],0] - testCoords[n[0],0]) * (testCoords[n[2],1] - testCoords[n[0],1]) -
-                                      (testCoords[n[1],1] - testCoords[n[0],1]) * (testCoords[n[2],0] - testCoords[n[0],0]);
-                        
+
+                        // Compute area with newPos substituted for nodeId (avoids full array clone)
+                        double x0 = n[0] == nodeId ? newPos[0] : smoothedCoords[n[0], 0];
+                        double y0 = n[0] == nodeId ? newPos[1] : smoothedCoords[n[0], 1];
+                        double x1 = n[1] == nodeId ? newPos[0] : smoothedCoords[n[1], 0];
+                        double y1 = n[1] == nodeId ? newPos[1] : smoothedCoords[n[1], 1];
+                        double x2 = n[2] == nodeId ? newPos[0] : smoothedCoords[n[2], 0];
+                        double y2 = n[2] == nodeId ? newPos[1] : smoothedCoords[n[2], 1];
+
+                        double area2 = (x1 - x0) * (y2 - y0) - (y1 - y0) * (x2 - x0);
+
                         if (area2 <= 0)
                         {
                             valid = false;
@@ -1911,27 +1899,6 @@ public static class SimplexRemesher
     }
     
     /// <summary>
-    /// Determine side of crack node using local crack geometry when neighbors don't provide clear answer.
-    /// Simplified version - just return NEGATIVE to avoid expensive computation.
-    /// </summary>
-    private static string DetermineSideByCrackNormal(
-        SimplexMesh mesh,
-        double[,] coords,
-        int crackNode,
-        double[] surfaceValues)
-    {
-        // Simplified: Default to NEGATIVE side for isolated crack nodes
-        // This avoids expensive O(n) search through all triangles
-        return "NEGATIVE";
-    }
-    
-    /// <summary>
-    /// Duplicate crack nodes to create topological discontinuity.
-    /// Uses element-side classification: if most nodes (except new node) are positive, use duplicate.
-    /// Tips (nodes at region boundary, not on mesh boundary) are NOT duplicated.
-    /// </summary>
-    
-    /// <summary>
     /// Find boundary nodes (nodes that share boundary edges).
     /// </summary>
     public static HashSet<int> FindBoundaryNodes(SimplexMesh mesh)
@@ -1954,407 +1921,8 @@ public static class SimplexRemesher
         return boundaryNodes;
     }
     
-    /// <summary>
-    /// Duplicate nodes from a given set to create crack topology.
-    /// </summary>
-    /// Duplicate crack nodes to create topological discontinuity.
-    /// Internal method used by CreateCrackFromSignedField.
-    /// </summary>
-    private static (SimplexMesh, double[,]) DuplicateNewNodes(
-        SimplexMesh mesh,
-        double[,] coords,
-        int originalNodeCount,
-        List<(int, int)> originalCutEdges,
-        SimplexMesh originalMesh,
-        SignedFieldFunction? signedField,
-        double[,]? originalCoords,
-        double visualizationOffset)
-    {
-        // NO NODE DUPLICATION - just return refined mesh with crack nodes
-        Console.WriteLine($"  → Skipping node duplication (disabled)");
-        return (mesh, coords);
-    }
-    
-    /// <summary>
-    /// Compute opening direction for crack nodes based on local crack geometry.
-    /// For 2D: perpendicular to crack edges (in xy-plane)
-    /// For 3D: perpendicular to crack surface (using triangle normals)
-    /// </summary>
-    private static Dictionary<int, (double, double, double)> ComputeOpeningDirections(
-        SimplexMesh mesh,
-        double[,] coords,
-        HashSet<int> newNodes,
-        HashSet<int> nodesToDuplicate)
-    {
-        var openingDirection = new Dictionary<int, (double, double, double)>();
-        
-        // Determine if mesh is 2D or 3D by checking z-coordinate variation
-        double minZ = double.MaxValue, maxZ = double.MinValue;
-        for (int i = 0; i < mesh.Count<Node>(); i++)
-        {
-            double z = GetZ(coords, i);
-            if (z < minZ) minZ = z;
-            if (z > maxZ) maxZ = z;
-        }
-        bool is2D = (maxZ - minZ) < 1e-6;
-        
-        foreach (int nodeId in nodesToDuplicate)
-        {
-            double sumNX = 0, sumNY = 0, sumNZ = 0;
-            int count = 0;
-            
-            if (is2D)
-            {
-                // 2D: Use edge normals in xy-plane
-                for (int i = 0; i < mesh.Count<Edge>(); i++)
-                {
-                    var edgeNodes = mesh.NodesOf<Edge, Node>(i);
-                    
-                    if (edgeNodes[0] == nodeId || edgeNodes[1] == nodeId)
-                    {
-                        int other = (edgeNodes[0] == nodeId) ? edgeNodes[1] : edgeNodes[0];
-                        
-                        if (newNodes.Contains(other))
-                        {
-                            double x1 = coords[nodeId, 0], y1 = coords[nodeId, 1];
-                            double x2 = coords[other, 0], y2 = coords[other, 1];
-                            
-                            double tx = x2 - x1, ty = y2 - y1;
-                            double len = Math.Sqrt(tx * tx + ty * ty);
-                            
-                            if (len > 1e-10)
-                            {
-                                tx /= len;
-                                ty /= len;
-                                
-                                // Normal = rotate tangent 90° in xy-plane
-                                double nx = -ty, ny = tx;
-                                
-                                sumNX += nx;
-                                sumNY += ny;
-                                count++;
-                            }
-                        }
-                    }
-                }
-            }
-            else
-            {
-                // 3D: Use crack surface triangle normals
-                for (int i = 0; i < mesh.Count<Tri3>(); i++)
-                {
-                    var triNodes = mesh.NodesOf<Tri3, Node>(i);
-                    
-                    // Check if this triangle is on the crack surface
-                    bool hasThisNode = (triNodes[0] == nodeId) || (triNodes[1] == nodeId) || (triNodes[2] == nodeId);
-                    bool allNewNodes = newNodes.Contains(triNodes[0]) && 
-                                      newNodes.Contains(triNodes[1]) && 
-                                      newNodes.Contains(triNodes[2]);
-                    
-                    if (hasThisNode && allNewNodes)
-                    {
-                        // This is a crack surface triangle
-                        double x0 = coords[triNodes[0], 0], y0 = coords[triNodes[0], 1], z0 = GetZ(coords, triNodes[0]);
-                        double x1 = coords[triNodes[1], 0], y1 = coords[triNodes[1], 1], z1 = GetZ(coords, triNodes[1]);
-                        double x2 = coords[triNodes[2], 0], y2 = coords[triNodes[2], 1], z2 = GetZ(coords, triNodes[2]);
-                        
-                        // Compute triangle normal via cross product
-                        double v1x = x1 - x0, v1y = y1 - y0, v1z = z1 - z0;
-                        double v2x = x2 - x0, v2y = y2 - y0, v2z = z2 - z0;
-                        
-                        double nx = v1y * v2z - v1z * v2y;
-                        double ny = v1z * v2x - v1x * v2z;
-                        double nz = v1x * v2y - v1y * v2x;
-                        
-                        double len = Math.Sqrt(nx * nx + ny * ny + nz * nz);
-                        if (len > 1e-10)
-                        {
-                            nx /= len;
-                            ny /= len;
-                            nz /= len;
-                            
-                            sumNX += nx;
-                            sumNY += ny;
-                            sumNZ += nz;
-                            count++;
-                        }
-                    }
-                }
-            }
-            
-            if (count > 0)
-            {
-                sumNX /= count;
-                sumNY /= count;
-                sumNZ /= count;
-                
-                double normLen = Math.Sqrt(sumNX * sumNX + sumNY * sumNY + sumNZ * sumNZ);
-                if (normLen > 1e-10)
-                {
-                    sumNX /= normLen;
-                    sumNY /= normLen;
-                    sumNZ /= normLen;
-                }
-                
-                openingDirection[nodeId] = (sumNX, sumNY, sumNZ);
-            }
-            else
-            {
-                // Fallback: use Y for 2D, Z for 3D
-                openingDirection[nodeId] = is2D ? (0, 1, 0) : (0, 0, 1);
-            }
-        }
-        
-        return openingDirection;
-    }
-    
-    /// <summary>
-    /// Copy all elements, using duplicate nodes for elements on positive side.
-    /// Rule: If ALL non-crack nodes are positive → use duplicates.
-    /// </summary>
-    private static void CopyElementsWithCrackNodes(
-        SimplexMesh newMesh,
-        SimplexMesh mesh,
-        HashSet<int> newNodes,
-        Dictionary<int, bool> nodeIsPositive,
-        Dictionary<int, int> nodeIdMap,
-        Dictionary<int, int> duplicateMap)
-    {
-        newMesh.WithBatch(() =>
-        {
-            // Points
-            for (int i = 0; i < mesh.Count<Point>(); i++)
-            {
-                var nodes = mesh.NodesOf<Point, Node>(i);
-                int nodeId = nodes[0];
-                
-                int newNodeId = (duplicateMap.ContainsKey(nodeId)) ? 
-                    duplicateMap[nodeId] : nodeIdMap[nodeId];
-                
-                int idx = newMesh.Add<Point, Node>(newNodeId);
-                var orig = mesh.Get<Point, OriginalElement>(i);
-                newMesh.Set<Point, OriginalElement>(idx, orig);
-            }
-            
-            // Bar2
-            for (int i = 0; i < mesh.Count<Bar2>(); i++)
-            {
-                var nodes = mesh.NodesOf<Bar2, Node>(i);
-                
-                bool allOtherNodesPositive = CheckAllNonCrackNodesPositive(
-                    nodes, newNodes, nodeIsPositive);
-                
-                int n0 = (allOtherNodesPositive && duplicateMap.ContainsKey(nodes[0])) ? 
-                    duplicateMap[nodes[0]] : nodeIdMap[nodes[0]];
-                int n1 = (allOtherNodesPositive && duplicateMap.ContainsKey(nodes[1])) ? 
-                    duplicateMap[nodes[1]] : nodeIdMap[nodes[1]];
-                
-                int idx = newMesh.Add<Bar2, Node>(n0, n1);
-                var orig = mesh.Get<Bar2, OriginalElement>(i);
-                newMesh.Set<Bar2, OriginalElement>(idx, orig);
-            }
-            
-            // Tri3
-            for (int i = 0; i < mesh.Count<Tri3>(); i++)
-            {
-                var nodes = mesh.NodesOf<Tri3, Node>(i);
-                
-                bool allOtherNodesPositive = CheckAllNonCrackNodesPositive(
-                    nodes, newNodes, nodeIsPositive);
-                
-                int n0 = (allOtherNodesPositive && duplicateMap.ContainsKey(nodes[0])) ? 
-                    duplicateMap[nodes[0]] : nodeIdMap[nodes[0]];
-                int n1 = (allOtherNodesPositive && duplicateMap.ContainsKey(nodes[1])) ? 
-                    duplicateMap[nodes[1]] : nodeIdMap[nodes[1]];
-                int n2 = (allOtherNodesPositive && duplicateMap.ContainsKey(nodes[2])) ? 
-                    duplicateMap[nodes[2]] : nodeIdMap[nodes[2]];
-                
-                int idx = newMesh.Add<Tri3, Node>(n0, n1, n2);
-                var orig = mesh.Get<Tri3, OriginalElement>(i);
-                newMesh.Set<Tri3, OriginalElement>(idx, orig);
-            }
-            
-            // Tet4
-            for (int i = 0; i < mesh.Count<Tet4>(); i++)
-            {
-                var nodes = mesh.NodesOf<Tet4, Node>(i);
-                
-                bool allOtherNodesPositive = CheckAllNonCrackNodesPositive(
-                    nodes, newNodes, nodeIsPositive);
-                
-                int n0 = (allOtherNodesPositive && duplicateMap.ContainsKey(nodes[0])) ? 
-                    duplicateMap[nodes[0]] : nodeIdMap[nodes[0]];
-                int n1 = (allOtherNodesPositive && duplicateMap.ContainsKey(nodes[1])) ? 
-                    duplicateMap[nodes[1]] : nodeIdMap[nodes[1]];
-                int n2 = (allOtherNodesPositive && duplicateMap.ContainsKey(nodes[2])) ? 
-                    duplicateMap[nodes[2]] : nodeIdMap[nodes[2]];
-                int n3 = (allOtherNodesPositive && duplicateMap.ContainsKey(nodes[3])) ? 
-                    duplicateMap[nodes[3]] : nodeIdMap[nodes[3]];
-                
-                int idx = newMesh.Add<Tet4, Node>(n0, n1, n2, n3);
-                var orig = mesh.Get<Tet4, OriginalElement>(i);
-                newMesh.Set<Tet4, OriginalElement>(idx, orig);
-            }
-        });
-    }
-    
-    /// <summary>
-    /// Check if all non-crack nodes in element are on positive side.
-    /// </summary>
-    private static bool CheckAllNonCrackNodesPositive(
-        IReadOnlyList<int> nodes,
-        HashSet<int> newNodes,
-        Dictionary<int, bool> nodeIsPositive)
-    {
-        foreach (int nodeId in nodes)
-        {
-            if (!newNodes.Contains(nodeId))
-            {
-                if (!nodeIsPositive.ContainsKey(nodeId) || !nodeIsPositive[nodeId])
-                {
-                    return false;
-                }
-            }
-        }
-        return true;
-    }
-    
-    /// <summary>
-    /// Verify element quality and reduce crack opening if needed to maintain positive Jacobians.
-    /// </summary>
-    /// <summary>
-    /// Verify element quality and reduce crack opening if needed to maintain positive Jacobians.
-    /// Works for both 2D (Tri3) and 3D (Tet4) meshes.
-    /// </summary>
-    private static void VerifyAndFixJacobians(
-        SimplexMesh mesh,
-        double[,] coords,
-        double[,] originalCoords,
-        Dictionary<int, int> duplicateMap,
-        Dictionary<int, (double, double, double)> openingDirection,
-        double openingMagnitude)
-    {
-        int negativeJacCount = 0;
-        
-        // Check triangles
-        for (int i = 0; i < mesh.Count<Tri3>(); i++)
-        {
-            var nodes = mesh.NodesOf<Tri3, Node>(i);
-            double jac = ComputeTriangleJacobian(coords, nodes[0], nodes[1], nodes[2]);
-            
-            if (jac < 0)
-            {
-                negativeJacCount++;
-            }
-        }
-        
-        // Check tetrahedra
-        for (int i = 0; i < mesh.Count<Tet4>(); i++)
-        {
-            var nodes = mesh.NodesOf<Tet4, Node>(i);
-            double jac = ComputeTetrahedronJacobian(coords, nodes[0], nodes[1], nodes[2], nodes[3]);
-            
-            if (jac < 0)
-            {
-                negativeJacCount++;
-            }
-        }
-        
-        if (negativeJacCount > 0)
-        {
-            // Reduce opening gradually until all Jacobians are positive
-            double[] reductionFactors = { 0.5, 0.25, 0.1, 0.05, 0.0 };
-            
-            foreach (double factor in reductionFactors)
-            {
-                // Apply reduced opening
-                foreach (var (oldId, newId) in duplicateMap)
-                {
-                    if (openingDirection.ContainsKey(oldId))
-                    {
-                        var (nx, ny, nz) = openingDirection[oldId];
-                        coords[newId, 0] = originalCoords[oldId, 0] + openingMagnitude * factor * nx;
-                        coords[newId, 1] = originalCoords[oldId, 1] + openingMagnitude * factor * ny;
-                        if (coords.GetLength(1) == 3)
-                            coords[newId, 2] = originalCoords[oldId, 2] + openingMagnitude * factor * nz;
-                    }
-                }
-                
-                // Recheck all elements
-                int stillNegative = 0;
-                
-                for (int i = 0; i < mesh.Count<Tri3>(); i++)
-                {
-                    var nodes = mesh.NodesOf<Tri3, Node>(i);
-                    double jac = ComputeTriangleJacobian(coords, nodes[0], nodes[1], nodes[2]);
-                    if (jac < 0) stillNegative++;
-                }
-                
-                for (int i = 0; i < mesh.Count<Tet4>(); i++)
-                {
-                    var nodes = mesh.NodesOf<Tet4, Node>(i);
-                    double jac = ComputeTetrahedronJacobian(coords, nodes[0], nodes[1], nodes[2], nodes[3]);
-                    if (jac < 0) stillNegative++;
-                }
-                
-                if (stillNegative == 0)
-                {
-                    break;
-                }
-            }
-        }
-    }
-    
-    /// <summary>
-    /// Compute 2D Jacobian determinant for a triangle.
-    /// </summary>
-    private static double ComputeTriangleJacobian(double[,] coords, int n0, int n1, int n2)
-    {
-        double x0 = coords[n0, 0], y0 = coords[n0, 1];
-        double x1 = coords[n1, 0], y1 = coords[n1, 1];
-        double x2 = coords[n2, 0], y2 = coords[n2, 1];
-        
-        return (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
-    }
-    
-    /// <summary>
-    /// Compute 3D Jacobian determinant for a tetrahedron.
-    /// </summary>
-    private static double ComputeTetrahedronJacobian(double[,] coords, int n0, int n1, int n2, int n3)
-    {
-        int maxNode = coords.GetLength(0) - 1;
-        
-        // Check bounds before accessing
-        if (n0 > maxNode || n1 > maxNode || n2 > maxNode || n3 > maxNode)
-        {
-            Console.WriteLine($"ERROR: Node index out of bounds!");
-            Console.WriteLine($"  coords array size: {coords.GetLength(0)}");
-            Console.WriteLine($"  node indices: {n0}, {n1}, {n2}, {n3}");
-            Console.WriteLine($"  out of bounds: {(n0 > maxNode ? "n0" : "")}{(n1 > maxNode ? " n1" : "")}{(n2 > maxNode ? " n2" : "")}{(n3 > maxNode ? " n3" : "")}");
-            throw new IndexOutOfRangeException($"Node indices out of bounds: max={maxNode}, nodes=({n0},{n1},{n2},{n3})");
-        }
-        
-        double x0 = coords[n0, 0], y0 = coords[n0, 1], z0 = GetZ(coords, n0);
-        double x1 = coords[n1, 0], y1 = coords[n1, 1], z1 = GetZ(coords, n1);
-        double x2 = coords[n2, 0], y2 = coords[n2, 1], z2 = GetZ(coords, n2);
-        double x3 = coords[n3, 0], y3 = coords[n3, 1], z3 = GetZ(coords, n3);
-        
-        // Jacobian = det of 3x3 matrix formed by edge vectors
-        double v1x = x1 - x0, v1y = y1 - y0, v1z = z1 - z0;
-        double v2x = x2 - x0, v2y = y2 - y0, v2z = z2 - z0;
-        double v3x = x3 - x0, v3y = y3 - y0, v3z = z3 - z0;
-        
-        return v1x * (v2y * v3z - v2z * v3y) -
-               v1y * (v2x * v3z - v2z * v3x) +
-               v1z * (v2x * v3y - v2y * v3x);
-    }
-    
     #region Crack Insertion - 3D (Tetrahedral Meshes)
     
-    /// <summary>
-    /// Create a crack in a 3D tetrahedral mesh using signed distance field.
-    /// Same algorithm as 2D but for tetrahedra.
-    /// </summary>
     /// <summary>
 /// Robustly finds an intersection (root) of an implicit signed field on a line segment.
 /// This is needed for curved fields (e.g. cylinders) where the segment may intersect even if
@@ -2947,30 +2515,22 @@ if (TryFindEdgeRootOnSegment(signedField,
             crackedCoords[newId, 1] = refinedCoords[i, 1];
             crackedCoords[newId, 2] = refinedCoords[i, 2];
             
-            try
-            {
-                var parents = refinedMesh.Get<Node, ParentNodes>(i);
-                crackedMesh.Set<Node, ParentNodes>(newId, parents);
-            }
-            catch { }
+            var parents = refinedMesh.Get<Node, ParentNodes>(i);
+            crackedMesh.Set<Node, ParentNodes>(newId, parents);
         }
-        
+
         // Create duplicates
         foreach (int nodeId in nodesToDuplicate)
         {
             int dupId = crackedMesh.Add<Node>();
             duplicateMap[nodeId] = dupId;
-            
+
             crackedCoords[dupId, 0] = refinedCoords[nodeId, 0];
             crackedCoords[dupId, 1] = refinedCoords[nodeId, 1];
             crackedCoords[dupId, 2] = refinedCoords[nodeId, 2];
-            
-            try
-            {
-                var parents = refinedMesh.Get<Node, ParentNodes>(nodeId);
-                crackedMesh.Set<Node, ParentNodes>(dupId, parents);
-            }
-            catch { }
+
+            var parents = refinedMesh.Get<Node, ParentNodes>(nodeId);
+            crackedMesh.Set<Node, ParentNodes>(dupId, parents);
         }
         
         Console.WriteLine($"  → Created {totalNodes} original + {nodesToDuplicate.Count} duplicate nodes");
@@ -3245,181 +2805,6 @@ if (TryFindEdgeRootOnSegment(signedField,
         }
         
         return boundaryNodes;
-    }
-    
-    /// <summary>
-    /// Duplicate crack nodes in 3D tetrahedral mesh using consistent side classification.
-    /// </summary>
-    private static (SimplexMesh, double[,]) DuplicateNodesCarefully3D(
-        SimplexMesh mesh,
-        double[,] coords,
-        HashSet<int> nodesToDuplicate,
-        double[] surfaceValues)
-    {
-        Console.WriteLine($"  → Starting consistent side classification algorithm (3D)...");
-        
-        int totalNodes = mesh.Count<Node>();
-        
-        // STEP 1: CLASSIFY ALL NODES BY SIDE
-        Console.WriteLine($"  → Step 1: Classifying all nodes by side...");
-        
-        var side = new Dictionary<int, string>(); // "POSITIVE", "NEGATIVE", or "UNASSIGNED"
-        
-        for (int i = 0; i < totalNodes; i++)
-        {
-            if (nodesToDuplicate.Contains(i))
-            {
-                side[i] = "UNASSIGNED";  // Crack nodes - determine later
-            }
-            else
-            {
-                side[i] = (surfaceValues[i] > 0) ? "POSITIVE" : "NEGATIVE";
-            }
-        }
-        
-        // STEP 2: PROPAGATE SIDE LABELS TO CRACK NODES
-        Console.WriteLine($"  → Step 2: Propagating side labels to crack nodes...");
-        
-        // Build node-to-node connectivity (edges)
-        var nodeNeighbors = BuildNodeNeighborsTet(mesh);
-        
-        // Classify each crack node based on its non-crack neighbors
-        int positiveAssigned = 0, negativeAssigned = 0, tieBreaks = 0;
-        
-        foreach (int crackNode in nodesToDuplicate)
-        {
-            var neighbors = nodeNeighbors[crackNode];
-            
-            // Count positive and negative neighbors (excluding other crack nodes)
-            int positiveCount = 0;
-            int negativeCount = 0;
-            
-            foreach (int neighbor in neighbors)
-            {
-                if (!nodesToDuplicate.Contains(neighbor)) // Only count non-crack neighbors
-                {
-                    if (side[neighbor] == "POSITIVE")
-                        positiveCount++;
-                    else if (side[neighbor] == "NEGATIVE")
-                        negativeCount++;
-                }
-            }
-            
-            // Assign side based on majority
-            if (positiveCount > negativeCount)
-            {
-                side[crackNode] = "POSITIVE";
-                positiveAssigned++;
-            }
-            else if (negativeCount > positiveCount)
-            {
-                side[crackNode] = "NEGATIVE";
-                negativeAssigned++;
-            }
-            else
-            {
-                // TIE-BREAKER: default to NEGATIVE
-                side[crackNode] = "NEGATIVE";
-                tieBreaks++;
-            }
-        }
-        
-        Console.WriteLine($"     Assigned {positiveAssigned} to POSITIVE side");
-        Console.WriteLine($"     Assigned {negativeAssigned} to NEGATIVE side");
-        Console.WriteLine($"     Tie-breaks: {tieBreaks}");
-        
-        // STEP 3: CREATE NODE MAPPINGS
-        Console.WriteLine($"  → Step 3: Creating node mappings...");
-        
-        var crackedMesh = new SimplexMesh();
-        int finalNodeCount = totalNodes + nodesToDuplicate.Count;
-        var crackedCoords = new double[finalNodeCount, 3];
-        
-        var originalMap = new Dictionary<int, int>(); // original -> original copy
-        var duplicateMap = new Dictionary<int, int>(); // original -> duplicate copy
-        var nodeMap = new Dictionary<int, int>();      // original -> final node to use
-        
-        // Copy all nodes (originals)
-        for (int i = 0; i < totalNodes; i++)
-        {
-            int newId = crackedMesh.Add<Node>();
-            originalMap[i] = newId;
-            
-            crackedCoords[newId, 0] = coords[i, 0];
-            crackedCoords[newId, 1] = coords[i, 1];
-            if (crackedCoords.GetLength(1) == 3)
-                crackedCoords[newId, 2] = coords[i, 2];
-            
-            var parents = mesh.Get<Node, ParentNodes>(i);
-            crackedMesh.Set<Node, ParentNodes>(newId, parents);
-        }
-        
-        // Create duplicates
-        foreach (int nodeId in nodesToDuplicate)
-        {
-            int dupId = crackedMesh.Add<Node>();
-            duplicateMap[nodeId] = dupId;
-            
-            crackedCoords[dupId, 0] = coords[nodeId, 0];
-            crackedCoords[dupId, 1] = coords[nodeId, 1];
-            if (crackedCoords.GetLength(1) == 3)
-                crackedCoords[dupId, 2] = coords[nodeId, 2];
-            
-            var parents = mesh.Get<Node, ParentNodes>(nodeId);
-            crackedMesh.Set<Node, ParentNodes>(dupId, parents);
-        }
-        
-        // Build final mapping: POSITIVE crack nodes use duplicate, others use original
-        for (int i = 0; i < totalNodes; i++)
-        {
-            if (!nodesToDuplicate.Contains(i))
-            {
-                nodeMap[i] = originalMap[i];
-            }
-            else
-            {
-                if (side[i] == "POSITIVE")
-                    nodeMap[i] = duplicateMap[i];
-                else
-                    nodeMap[i] = originalMap[i];
-            }
-        }
-        
-        Console.WriteLine($"  → Copied {totalNodes} original nodes + {nodesToDuplicate.Count} duplicates");
-        
-        // STEP 4: RECREATE ALL TETRAHEDRA
-        Console.WriteLine($"  → Step 4: Recreating all tetrahedra...");
-        
-        int elementsCreated = 0;
-        
-        for (int i = 0; i < mesh.Count<Tet4>(); i++)
-        {
-            var nodes = mesh.NodesOf<Tet4, Node>(i);
-            var newNodes = new int[4];
-            
-            for (int j = 0; j < 4; j++)
-            {
-                newNodes[j] = nodeMap[nodes[j]];
-            }
-            
-            crackedMesh.AddTetrahedron(newNodes[0], newNodes[1], newNodes[2], newNodes[3]);
-            elementsCreated++;
-        }
-        
-        Console.WriteLine($"  → Created {elementsCreated} tetrahedra (expected {mesh.Count<Tet4>()})");
-        
-        if (elementsCreated != mesh.Count<Tet4>())
-        {
-            Console.WriteLine($"  ⚠️  WARNING: Element count mismatch!");
-        }
-        else
-        {
-            Console.WriteLine($"  ✓ No holes - all tetrahedra recreated successfully");
-        }
-        
-        Console.WriteLine($"  → Final mesh: {crackedMesh.Count<Node>()} nodes, {crackedMesh.Count<Tet4>()} tetrahedra");
-        
-        return (crackedMesh, crackedCoords);
     }
     
     #endregion

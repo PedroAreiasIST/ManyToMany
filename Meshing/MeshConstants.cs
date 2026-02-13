@@ -39,5 +39,5 @@ public static class MeshConstants
     /// <summary>
     ///     Hexagonal grid row spacing factor (sqrt(3)/2).
     /// </summary>
-    public const double HexRowSpacing = 0.866;
+    public const double HexRowSpacing = 0.86602540378;
 }
