@@ -9,6 +9,7 @@
 // - Uses MeshOptimization for degenerate element removal (eliminates ~150 lines)
 // - Total reduction: ~600 lines (45% smaller, ~750 lines vs 1345 original)
 using static Numerical.MeshGeometry;
+using static Numerical.MeshConstants;
 using static Numerical.MeshOptimization;
 using static Numerical.MeshRefinement;
 
@@ -20,8 +21,6 @@ namespace Numerical;
 /// </summary>
 public static class CrackDuplication
 {
-    private const double EPSILON = 1e-10;
-
     #region Mesh Renumbering
 
     /// <summary>
