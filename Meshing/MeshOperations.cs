@@ -1,11 +1,12 @@
 // MeshOperations.cs - Mesh manipulation operations
-// Consolidates: MeshOptimization.cs, MeshRefinement.cs, QuadConversion.cs
+// Consolidates: MeshOptimization.cs, QuadConversion.cs, CrackOperations.cs
 // FIXED: RemoveDegenerateTetrahedra now fully implemented
 // FIXED: Uses shared Jacobian functions instead of duplicates
 // License: GPLv3
 
 using static Numerical.MeshConstants;
 using static Numerical.MeshGeometry;
+using static Numerical.MeshRefinement;
 
 namespace Numerical;
 
@@ -800,6 +801,565 @@ public static class QuadConversion
         Console.WriteLine($"[QuadConversion] Built mesh: {newMesh.Count<Quad4>()} quads, {newMesh.Count<Tri3>()} triangles");
 
         return newMesh;
+    }
+
+    #endregion
+}
+
+#endregion
+
+#region Crack Operations (from CrackOperations.cs)
+
+/// <summary>
+///     Crack node duplication for forming cracks after edge refinement.
+///     Creates physical cracks in meshes via node duplication and level-set based side assignment.
+/// </summary>
+public static class CrackDuplication
+{
+    #region Mesh Renumbering
+
+    /// <summary>
+    ///     Renumber mesh to ensure continuous node and element numbering (no gaps).
+    /// </summary>
+    private static (SimplexMesh mesh, double[,] coords) RenumberMesh(SimplexMesh mesh, double[,] coords)
+    {
+        Console.WriteLine("[RenumberMesh] Ensuring continuous numbering...");
+
+        var nNodes = mesh.Count<Node>();
+
+        // Collect all used nodes from elements
+        var usedNodes = new HashSet<int>();
+
+        for (var i = 0; i < mesh.Count<Tri3>(); i++)
+        {
+            var nodes = mesh.NodesOf<Tri3, Node>(i);
+            usedNodes.Add(nodes[0]);
+            usedNodes.Add(nodes[1]);
+            usedNodes.Add(nodes[2]);
+        }
+
+        for (var i = 0; i < mesh.Count<Tet4>(); i++)
+        {
+            var nodes = mesh.NodesOf<Tet4, Node>(i);
+            usedNodes.Add(nodes[0]);
+            usedNodes.Add(nodes[1]);
+            usedNodes.Add(nodes[2]);
+            usedNodes.Add(nodes[3]);
+        }
+
+        for (var i = 0; i < mesh.Count<Bar2>(); i++)
+        {
+            var nodes = mesh.NodesOf<Bar2, Node>(i);
+            usedNodes.Add(nodes[0]);
+            usedNodes.Add(nodes[1]);
+        }
+
+        for (var i = 0; i < mesh.Count<Point>(); i++)
+        {
+            var nodes = mesh.NodesOf<Point, Node>(i);
+            usedNodes.Add(nodes[0]);
+        }
+
+        // Check if renumbering is needed
+        var sortedNodes = usedNodes.OrderBy(x => x).ToList();
+        var needsRenumbering = sortedNodes.Count != nNodes;
+
+        if (!needsRenumbering)
+        {
+            for (int i = 0; i < sortedNodes.Count; i++)
+            {
+                if (sortedNodes[i] != i)
+                {
+                    needsRenumbering = true;
+                    break;
+                }
+            }
+        }
+
+        if (!needsRenumbering)
+        {
+            Console.WriteLine($"[RenumberMesh] ✓ Nodes: {nNodes} (0 to {nNodes - 1}, continuous)");
+            return (mesh, coords);
+        }
+
+        for (int i = mesh.Count<Edge>() - 1; i >= 0; i--)
+            mesh.Remove<Edge>(i);
+
+        for (int i = 0; i < nNodes; i++)
+            if (!usedNodes.Contains(i))
+                mesh.Remove<Node>(i);
+
+        mesh.Compress();
+
+        var newCoords = new double[sortedNodes.Count, 3];
+        for (int i = 0; i < sortedNodes.Count; i++)
+        {
+            var oldId = sortedNodes[i];
+            newCoords[i, 0] = coords[oldId, 0];
+            newCoords[i, 1] = coords[oldId, 1];
+            newCoords[i, 2] = coords[oldId, 2];
+        }
+
+        Console.WriteLine($"[RenumberMesh] ✓ Renumbered: {nNodes} → {sortedNodes.Count} nodes (removed {nNodes - sortedNodes.Count} unused)");
+        Console.WriteLine($"[RenumberMesh] ✓ Elements: {mesh.Count<Tri3>()} tris + {mesh.Count<Tet4>()} tets");
+
+        return (mesh, newCoords);
+    }
+
+    #endregion
+
+    #region Public API
+
+    /// <summary>
+    ///     Creates a crack by refining edges, smoothing, and duplicating nodes.
+    /// </summary>
+    public static (SimplexMesh mesh, double[,] coords) CreateCrack(
+        SimplexMesh mesh,
+        double[,] coords,
+        List<(int, int)> crackEdges,
+        Func<double, double, double> levelSetFunction,
+        int smoothingIterations = 5)
+    {
+        var originalNodeCount = mesh.Count<Node>();
+
+        Console.WriteLine($"[CreateCrack] Refining {crackEdges.Count} crack edges...");
+        var (refinedMesh, _) = Refine(mesh, crackEdges);
+        var refinedCoords = InterpolateCoordinates(refinedMesh, coords);
+
+        Console.WriteLine($"[CreateCrack] After refinement: {refinedMesh.Count<Node>()} nodes");
+
+        var newNodes = IdentifyMidpointNodes(refinedMesh, originalNodeCount);
+        Console.WriteLine($"[CreateCrack] Found {newNodes.Count} new midpoint nodes");
+
+        if (smoothingIterations > 0)
+        {
+            Console.WriteLine($"[CreateCrack] Smoothing mesh ({smoothingIterations} iterations)...");
+            refinedCoords = MeshOptimization.LaplacianSmoothing(
+                refinedMesh, refinedCoords, smoothingIterations, newNodes);
+            Console.WriteLine("[CreateCrack] ✓ Smoothing complete");
+        }
+
+        var tipNodes = IdentifyTipNodes(refinedMesh, newNodes, crackEdges);
+        Console.WriteLine($"[CreateCrack] Identified {tipNodes.Count} tip nodes (will NOT be duplicated)");
+
+        var nodesToDuplicate = new HashSet<int>(newNodes);
+        nodesToDuplicate.ExceptWith(tipNodes);
+
+        Console.WriteLine($"[CreateCrack] Duplicating {nodesToDuplicate.Count} interior crack nodes...");
+
+        var (crackedMesh, crackedCoords) = DuplicateNodesAndAssignSides(
+            refinedMesh, refinedCoords, nodesToDuplicate, newNodes, levelSetFunction);
+
+        return RenumberMesh(crackedMesh, crackedCoords);
+    }
+
+    /// <summary>
+    ///     Creates a crack from an ALREADY REFINED mesh (for exact geometry).
+    /// </summary>
+    public static (SimplexMesh mesh, double[,] coords) CreateCrackFromRefinedMesh(
+        SimplexMesh refinedMesh,
+        double[,] refinedCoords,
+        int originalNodeCount,
+        List<(int, int)> crackEdges,
+        Func<double, double, double> levelSetFunction,
+        int smoothingIterations = 5)
+    {
+        Console.WriteLine("[CreateCrackFromRefinedMesh] Using pre-refined mesh with exact geometry");
+        Console.WriteLine($"[CreateCrackFromRefinedMesh] Refined mesh: {refinedMesh.Count<Node>()} nodes");
+
+        var newNodes = IdentifyMidpointNodes(refinedMesh, originalNodeCount);
+        Console.WriteLine($"[CreateCrackFromRefinedMesh] Found {newNodes.Count} crack nodes");
+
+        DiagnoseZeroAreaTriangles(refinedMesh, refinedCoords);
+
+        var nodeMapping = new Dictionary<int, int>();
+        (refinedMesh, refinedCoords, nodeMapping) = MergeDuplicateNodesWithMapping(
+            refinedMesh, refinedCoords, newNodes);
+
+        if (nodeMapping.Count > 0)
+        {
+            var updatedNewNodes = new HashSet<int>();
+            foreach (var node in newNodes)
+            {
+                var canonical = node;
+                while (nodeMapping.ContainsKey(canonical))
+                    canonical = nodeMapping[canonical];
+                updatedNewNodes.Add(canonical);
+            }
+            newNodes = updatedNewNodes;
+            Console.WriteLine($"[CreateCrackFromRefinedMesh] After merging: {newNodes.Count} unique crack nodes");
+        }
+
+        (refinedMesh, refinedCoords) = MeshOptimization.RemoveDegenerateTriangles(refinedMesh, refinedCoords);
+
+        if (smoothingIterations > 0)
+        {
+            Console.WriteLine($"[CreateCrackFromRefinedMesh] Smoothing mesh ({smoothingIterations} iterations)...");
+            refinedCoords = MeshOptimization.LaplacianSmoothing(
+                refinedMesh, refinedCoords, smoothingIterations, newNodes);
+            Console.WriteLine("[CreateCrackFromRefinedMesh] ✓ Smoothing complete");
+        }
+
+        var tipNodes = IdentifyTipNodes(refinedMesh, newNodes, crackEdges);
+        Console.WriteLine($"[CreateCrackFromRefinedMesh] Identified {tipNodes.Count} TRUE tip nodes");
+
+        var nodesToDuplicate = new HashSet<int>(newNodes);
+        nodesToDuplicate.ExceptWith(tipNodes);
+
+        Console.WriteLine($"[CreateCrackFromRefinedMesh] Duplicating {nodesToDuplicate.Count} crack nodes...");
+
+        var (crackedMesh, crackedCoords) = DuplicateNodesAndAssignSides(
+            refinedMesh, refinedCoords, nodesToDuplicate, newNodes, levelSetFunction);
+
+        return RenumberMesh(crackedMesh, crackedCoords);
+    }
+
+    #endregion
+
+    #region Crack-Specific Core Logic
+
+    private static HashSet<int> IdentifyMidpointNodes(SimplexMesh mesh, int originalNodeCount)
+    {
+        var midpointNodes = new HashSet<int>();
+        for (var i = originalNodeCount; i < mesh.Count<Node>(); i++)
+        {
+            var parents = mesh.Get<Node, ParentNodes>(i);
+            if (parents.Parent1 != parents.Parent2) midpointNodes.Add(i);
+        }
+        return midpointNodes;
+    }
+
+    private static HashSet<int> IdentifyTipNodes(
+        SimplexMesh mesh, HashSet<int> newNodes, List<(int, int)> originalCrackEdges)
+    {
+        var tipNodes = new HashSet<int>();
+        var refinedCrackEdges = new HashSet<(int, int)>();
+
+        foreach (var (n0, n1) in originalCrackEdges)
+        {
+            var nodesOnEdge = new List<int>();
+            foreach (var nodeId in newNodes)
+            {
+                var parents = mesh.Get<Node, ParentNodes>(nodeId);
+                if ((parents.Parent1 == n0 && parents.Parent2 == n1) ||
+                    (parents.Parent1 == n1 && parents.Parent2 == n0))
+                    nodesOnEdge.Add(nodeId);
+            }
+
+            if (nodesOnEdge.Count > 0)
+            {
+                nodesOnEdge.Sort();
+                for (var i = 0; i < nodesOnEdge.Count - 1; i++)
+                {
+                    var edge = (Math.Min(nodesOnEdge[i], nodesOnEdge[i + 1]),
+                        Math.Max(nodesOnEdge[i], nodesOnEdge[i + 1]));
+                    refinedCrackEdges.Add(edge);
+                }
+            }
+        }
+
+        var edgeCount = new Dictionary<int, int>();
+        foreach (var (n0, n1) in refinedCrackEdges)
+        {
+            if (newNodes.Contains(n0))
+                edgeCount[n0] = edgeCount.GetValueOrDefault(n0, 0) + 1;
+            if (newNodes.Contains(n1))
+                edgeCount[n1] = edgeCount.GetValueOrDefault(n1, 0) + 1;
+        }
+
+        foreach (var (nodeId, count) in edgeCount)
+            if (count == 1)
+                tipNodes.Add(nodeId);
+
+        Console.WriteLine($"[IdentifyTipNodes] Analyzed {refinedCrackEdges.Count} refined crack edges");
+        Console.WriteLine($"[IdentifyTipNodes] Found {tipNodes.Count} tip nodes: {string.Join(", ", tipNodes.Take(10))}");
+
+        return tipNodes;
+    }
+
+    private static (SimplexMesh mesh, double[,] coords) DuplicateNodesAndAssignSides(
+        SimplexMesh mesh, double[,] coords,
+        HashSet<int> nodesToDuplicate, HashSet<int> allCrackNodes,
+        Func<double, double, double> levelSetFunction)
+    {
+        var nNodes = mesh.Count<Node>();
+        var nNewNodes = nNodes + nodesToDuplicate.Count;
+        var newCoords = new double[nNewNodes, 3];
+
+        for (var i = 0; i < nNodes; i++)
+        {
+            newCoords[i, 0] = coords[i, 0];
+            newCoords[i, 1] = coords[i, 1];
+            newCoords[i, 2] = coords[i, 2];
+        }
+
+        var nodeDuplicates = new Dictionary<int, int>();
+        var nextId = nNodes;
+
+        foreach (var nodeId in nodesToDuplicate)
+        {
+            var dupId = nextId++;
+            nodeDuplicates[nodeId] = dupId;
+            newCoords[dupId, 0] = coords[nodeId, 0];
+            newCoords[dupId, 1] = coords[nodeId, 1];
+            newCoords[dupId, 2] = coords[nodeId, 2];
+        }
+
+        Console.WriteLine($"[DuplicateNodes] Created {nodeDuplicates.Count} duplicate nodes");
+        Console.WriteLine($"[DuplicateNodes] Total nodes: {nNodes} → {nNewNodes}");
+
+        var newMesh = new SimplexMesh();
+        newMesh.WithBatch(() =>
+        {
+            for (var i = 0; i < nNewNodes; i++) newMesh.AddNode(i);
+            CopyElementsWithSideAssignment(mesh, newMesh, allCrackNodes, nodeDuplicates, newCoords, levelSetFunction);
+        });
+
+        return (newMesh, newCoords);
+    }
+
+    private static void CopyElementsWithSideAssignment(
+        SimplexMesh mesh, SimplexMesh newMesh,
+        HashSet<int> crackNodes, Dictionary<int, int> nodeDuplicates,
+        double[,] coords, Func<double, double, double> levelSet)
+    {
+        var useOriginalCount = 0;
+        var useDuplicateCount = 0;
+        var levelSetStats = new List<(int elemId, bool useDup, double[] nodeValues)>();
+
+        bool ShouldUseDuplicates(IReadOnlyList<int> nodes, out double[] levelSetValues)
+        {
+            levelSetValues = new double[nodes.Count];
+            for (var i = 0; i < nodes.Count; i++)
+            {
+                var nodeId = nodes[i];
+                if (!crackNodes.Contains(nodeId))
+                {
+                    var phi = levelSet(coords[nodeId, 0], coords[nodeId, 1]);
+                    levelSetValues[i] = phi;
+                    if (phi <= 0) return false;
+                }
+                else
+                {
+                    levelSetValues[i] = double.NaN;
+                }
+            }
+            return true;
+        }
+
+        int RemapNode(int nodeId, bool useDup)
+        {
+            if (useDup && nodeDuplicates.ContainsKey(nodeId))
+                return nodeDuplicates[nodeId];
+            return nodeId;
+        }
+
+        for (var i = 0; i < mesh.Count<Point>(); i++)
+        {
+            var nodes = mesh.NodesOf<Point, Node>(i);
+            var idx = newMesh.AddPoint(nodes[0]);
+            newMesh.Set<Point, OriginalElement>(idx, mesh.Get<Point, OriginalElement>(i));
+        }
+
+        for (var i = 0; i < mesh.Count<Tri3>(); i++)
+        {
+            var nodes = mesh.NodesOf<Tri3, Node>(i);
+            var useDup = ShouldUseDuplicates(nodes, out var phiValues);
+            if (useDup) useDuplicateCount++; else useOriginalCount++;
+            if (levelSetStats.Count < 10) levelSetStats.Add((i, useDup, phiValues));
+
+            var idx = newMesh.AddTriangle(RemapNode(nodes[0], useDup), RemapNode(nodes[1], useDup), RemapNode(nodes[2], useDup));
+            newMesh.Set<Tri3, OriginalElement>(idx, mesh.Get<Tri3, OriginalElement>(i));
+        }
+
+        for (var i = 0; i < mesh.Count<Tet4>(); i++)
+        {
+            var nodes = mesh.NodesOf<Tet4, Node>(i);
+            var useDup = ShouldUseDuplicates(nodes, out _);
+            var idx = newMesh.AddTetrahedron(RemapNode(nodes[0], useDup), RemapNode(nodes[1], useDup),
+                RemapNode(nodes[2], useDup), RemapNode(nodes[3], useDup));
+            newMesh.Set<Tet4, OriginalElement>(idx, mesh.Get<Tet4, OriginalElement>(i));
+        }
+
+        Console.WriteLine($"[CopyElements] Created {newMesh.Count<Tri3>()} triangles, {newMesh.Count<Tet4>()} tetrahedra");
+        Console.WriteLine($"[CopyElements] Side assignment: {useOriginalCount} original, {useDuplicateCount} duplicate");
+
+        if (levelSetStats.Count > 0)
+        {
+            Console.WriteLine("[CopyElements] Sample element classifications:");
+            foreach (var (elemId, useDup, phiValues) in levelSetStats)
+            {
+                var side = useDup ? "DUPLICATE" : "ORIGINAL";
+                var values = string.Join(", ", phiValues.Select(v => double.IsNaN(v) ? "crack" : $"{v:F6}"));
+                Console.WriteLine($"  Tri {elemId}: {side} (φ values: [{values}])");
+            }
+        }
+
+        var totalElements = useOriginalCount + useDuplicateCount;
+        if (totalElements > 0)
+        {
+            var ratio = (double)useDuplicateCount / totalElements;
+            if (ratio < 0.1 || ratio > 0.9)
+            {
+                Console.WriteLine("[CopyElements] ⚠ WARNING: Imbalanced side assignment!");
+                Console.WriteLine($"[CopyElements]   Duplicate side: {useDuplicateCount}/{totalElements} ({ratio * 100:F1}%)");
+            }
+        }
+    }
+
+    #endregion
+
+    #region Node Merging and Cleanup
+
+    private static (SimplexMesh mesh, double[,] coords, Dictionary<int, int> mapping)
+        MergeDuplicateNodesWithMapping(
+            SimplexMesh mesh, double[,] coords, HashSet<int> crackNodes, double tolerance = 1e-12)
+    {
+        Console.WriteLine($"[MergeDuplicateNodes] Checking for duplicate nodes (tolerance: {tolerance:E2})...");
+
+        var nNodes = mesh.Count<Node>();
+        var nodeMapping = new Dictionary<int, int>();
+        var spatialBuckets = new Dictionary<(int, int, int), List<int>>();
+        var bucketSize = Math.Max(tolerance * 100, 1e-6);
+
+        for (var i = 0; i < nNodes; i++)
+        {
+            var key = ((int)Math.Floor(coords[i, 0] / bucketSize),
+                       (int)Math.Floor(coords[i, 1] / bucketSize),
+                       (int)Math.Floor(coords[i, 2] / bucketSize));
+            if (!spatialBuckets.ContainsKey(key))
+                spatialBuckets[key] = new List<int>();
+            spatialBuckets[key].Add(i);
+        }
+
+        var merged = new HashSet<int>();
+        var mergeCount = 0;
+
+        foreach (var bucket in spatialBuckets.Values)
+        {
+            if (bucket.Count < 2) continue;
+            for (var i = 0; i < bucket.Count; i++)
+            {
+                var id1 = bucket[i];
+                if (merged.Contains(id1)) continue;
+                for (var j = i + 1; j < bucket.Count; j++)
+                {
+                    var id2 = bucket[j];
+                    if (merged.Contains(id2)) continue;
+
+                    var dx = coords[id1, 0] - coords[id2, 0];
+                    var dy = coords[id1, 1] - coords[id2, 1];
+                    var dz = coords[id1, 2] - coords[id2, 2];
+                    var dist = Math.Sqrt(dx * dx + dy * dy + dz * dz);
+
+                    if (dist < tolerance)
+                    {
+                        if (!(crackNodes.Contains(id1) && crackNodes.Contains(id2)))
+                        {
+                            var canonicalId = Math.Min(id1, id2);
+                            var mergedId = Math.Max(id1, id2);
+                            nodeMapping[mergedId] = canonicalId;
+                            merged.Add(mergedId);
+                            mergeCount++;
+                            Console.WriteLine($"[MergeDuplicateNodes]   Merging {mergedId} → {canonicalId} (dist: {dist:E3})");
+                        }
+                    }
+                }
+            }
+        }
+
+        Console.WriteLine($"[MergeDuplicateNodes] Found {mergeCount} duplicate nodes to merge");
+        if (mergeCount == 0) return (mesh, coords, nodeMapping);
+
+        var GetCanonicalNode = (int nodeId) =>
+        {
+            while (nodeMapping.ContainsKey(nodeId)) nodeId = nodeMapping[nodeId];
+            return nodeId;
+        };
+
+        for (var i = 0; i < mesh.Count<Tri3>(); i++)
+        {
+            var nodes = mesh.NodesOf<Tri3, Node>(i);
+            var c0 = GetCanonicalNode(nodes[0]);
+            var c1 = GetCanonicalNode(nodes[1]);
+            var c2 = GetCanonicalNode(nodes[2]);
+            if (c0 != nodes[0] || c1 != nodes[1] || c2 != nodes[2])
+                mesh.ReplaceElementNodes<Tri3, Node>(i, c0, c1, c2);
+        }
+
+        for (var i = 0; i < mesh.Count<Tet4>(); i++)
+        {
+            var nodes = mesh.NodesOf<Tet4, Node>(i);
+            var c0 = GetCanonicalNode(nodes[0]);
+            var c1 = GetCanonicalNode(nodes[1]);
+            var c2 = GetCanonicalNode(nodes[2]);
+            var c3 = GetCanonicalNode(nodes[3]);
+            if (c0 != nodes[0] || c1 != nodes[1] || c2 != nodes[2] || c3 != nodes[3])
+                mesh.ReplaceElementNodes<Tet4, Node>(i, c0, c1, c2, c3);
+        }
+
+        var usedNodes = new HashSet<int>();
+        for (var i = 0; i < mesh.Count<Tri3>(); i++)
+            foreach (var n in mesh.NodesOf<Tri3, Node>(i)) usedNodes.Add(n);
+        for (var i = 0; i < mesh.Count<Tet4>(); i++)
+            foreach (var n in mesh.NodesOf<Tet4, Node>(i)) usedNodes.Add(n);
+
+        for (int i = mesh.Count<Edge>() - 1; i >= 0; i--) mesh.Remove<Edge>(i);
+        for (int i = 0; i < nNodes; i++)
+            if (!usedNodes.Contains(i)) mesh.Remove<Node>(i);
+
+        var sortedUsed = usedNodes.OrderBy(x => x).ToList();
+        mesh.Compress();
+
+        var newCoords = new double[sortedUsed.Count, 3];
+        for (int i = 0; i < sortedUsed.Count; i++)
+        {
+            var oldId = sortedUsed[i];
+            newCoords[i, 0] = coords[oldId, 0];
+            newCoords[i, 1] = coords[oldId, 1];
+            newCoords[i, 2] = coords[oldId, 2];
+        }
+
+        Console.WriteLine($"[MergeDuplicateNodes] ✓ Merged {mergeCount} nodes: {nNodes} → {mesh.Count<Node>()} nodes");
+
+        var compactMapping = new Dictionary<int, int>();
+        for (int i = 0; i < sortedUsed.Count; i++) compactMapping[sortedUsed[i]] = i;
+
+        var finalMapping = new Dictionary<int, int>();
+        foreach (var (oldId, _) in nodeMapping)
+        {
+            var finalCanonical = GetCanonicalNode(oldId);
+            if (compactMapping.ContainsKey(finalCanonical))
+                finalMapping[oldId] = compactMapping[finalCanonical];
+        }
+
+        return (mesh, newCoords, finalMapping);
+    }
+
+    private static void DiagnoseZeroAreaTriangles(SimplexMesh mesh, double[,] coords, double tolerance = 1e-10)
+    {
+        var zeroAreaCount = 0;
+        var badTris = new List<int>();
+
+        for (var i = 0; i < mesh.Count<Tri3>(); i++)
+        {
+            var nodes = mesh.NodesOf<Tri3, Node>(i);
+            if (IsTriangleDegenerate(coords, nodes[0], nodes[1], nodes[2], tolerance))
+            {
+                zeroAreaCount++;
+                if (badTris.Count < 5) badTris.Add(i);
+            }
+        }
+
+        if (zeroAreaCount > 0)
+        {
+            Console.WriteLine($"[Diagnostic] ⚠ Found {zeroAreaCount} zero-area triangles!");
+            Console.WriteLine($"[Diagnostic] First few: {string.Join(", ", badTris)}");
+        }
+        else
+        {
+            Console.WriteLine("[Diagnostic] ✓ No zero-area triangles found");
+        }
     }
 
     #endregion
