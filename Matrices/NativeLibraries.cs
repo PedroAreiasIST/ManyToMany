@@ -166,8 +166,9 @@ public static class LibraryAvailability
                         var result = getVersion(ref version);
                         NativeLibrary.Free(handle);
 
-                        // Accept success (0) or error codes that mean library works
-                        if (result == 0 || result == 100 || result == 35 || result == 3)
+                        // Only accept success (0) - error codes 100 (NoDevice), 35 (InsufficientDriver),
+                        // 3 (InitializationError) mean the library loaded but CUDA cannot work
+                        if (result == 0)
                             return (true, version, result);
 
                         return (false, 0, result);
@@ -797,16 +798,7 @@ public sealed class NativeLibraryConfig : INativeLibraryConfig
                 }
         }
 
-        // PRIORITY 1: Current working directory
-        try
-        {
-            AddPath(Directory.GetCurrentDirectory(), "pwd");
-        }
-        catch
-        {
-        }
-
-        // PRIORITY 2: Application base directory
+        // PRIORITY 1: Application base directory
         try
         {
             AddPath(AppDomain.CurrentDomain.BaseDirectory, "app base");
@@ -815,7 +807,7 @@ public sealed class NativeLibraryConfig : INativeLibraryConfig
         {
         }
 
-        // PRIORITY 3: Assembly location
+        // PRIORITY 2: Assembly location
         try
         {
             var assemblyLocation = Assembly.GetExecutingAssembly().Location;
@@ -891,6 +883,15 @@ public sealed class NativeLibraryConfig : INativeLibraryConfig
             var pathDirs = pathEnv.Split(separator, StringSplitOptions.RemoveEmptyEntries);
 
             foreach (var dir in pathDirs.Take(100)) AddPath(dir, "From PATH/LD_LIBRARY_PATH");
+        }
+
+        // PRIORITY 8: Current working directory (lowest priority to avoid DLL hijacking)
+        try
+        {
+            AddPath(Directory.GetCurrentDirectory(), "pwd");
+        }
+        catch
+        {
         }
 
         Debug.WriteLine($"[NativeLibrary] Total search paths: {paths.Count}");
@@ -1436,7 +1437,7 @@ public sealed class NativeLibraryConfig : INativeLibraryConfig
             .ThenBy(lib => lib.IsSymlink ? 0 : 1)
             .ToList();
 
-        var result = sorted.Select(lib => lib.FileName).Distinct().ToArray();
+        var result = sorted.Select(lib => lib.FullPath).Distinct().ToArray();
 
         Debug.WriteLine($"[NativeLibrary] Discovered {libraryType}: {string.Join(", ", result.Take(5))}");
 
@@ -1937,7 +1938,7 @@ public sealed class NativeLibraryConfig : INativeLibraryConfig
 /// </summary>
 public static class NativeLibraryStatus
 {
-    private static bool _initialized;
+    private static volatile bool _initialized;
     private static readonly object _initLock = new();
 
     private static readonly DetailedLibraryInfo _cudaInfo = new() { LibraryName = "CUDA Runtime" };
@@ -2513,8 +2514,8 @@ public static class RobustNativeLibraryLoader
                         var version = 0;
                         var result = cudaRuntimeGetVersion(ref version);
 
-                        // Accept success (0) or error codes that indicate library works
-                        if (result == 0 || result == 3 || result == 35 || result == 100)
+                        // Only accept success (0) - error codes mean CUDA cannot work
+                        if (result == 0)
                             return true;
                     }
                     catch

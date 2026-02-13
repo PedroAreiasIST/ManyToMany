@@ -1346,11 +1346,11 @@ public sealed class CliqueSystem : IDisposable
             var stripeIndex = (int)(((uint)globalRow * HASH_MULTIPLIER) >> 20) & LOCK_STRIPE_MASK;
             lock (_lockStripes[stripeIndex])
             {
-                var rowBase = matStart + r * numDofs;
+                var rowBase = (long)matStart + (long)r * numDofs;
                 for (var c = 0; c < numDofs; c++)
                 {
                     // FIX FOR ISSUE #2: Use long indexing for chunked array access
-                    var cliqueIndex = (long)rowBase + c;
+                    var cliqueIndex = rowBase + c;
                     var destIndex = _cliqueDestinations[cliqueIndex];
                     _globalMatrixValues[destIndex] += _cliqueMatrices[cliqueIndex];
                 }
@@ -1581,11 +1581,15 @@ public sealed class CliqueSystem : IDisposable
     [MethodImpl(AggressiveInlining)]
     private static void PrefixSumInPlace(int[] array)
     {
-        var sum = 0;
+        long sum = 0;
         for (var i = 0; i < array.Length; i++)
         {
             var val = array[i];
-            array[i] = sum;
+            if (sum > int.MaxValue)
+                throw new OverflowException(
+                    $"Prefix sum overflow at index {i}: cumulative sum {sum} exceeds int.MaxValue. " +
+                    "The problem size is too large for 32-bit offsets.");
+            array[i] = (int)sum;
             sum += val;
         }
     }
@@ -1713,7 +1717,7 @@ public sealed class AssemblyStatistics
 ///         For a completely different mesh topology, create a new DiscreteLinearSystem instance.
 ///     </para>
 /// </remarks>
-public class DiscreteLinearSystem
+public class DiscreteLinearSystem : IDisposable
 {
     // Stack allocation threshold: 128 doubles = 1KB
     private const int StackAllocThreshold = 128;
@@ -2423,4 +2427,9 @@ public class DiscreteLinearSystem
     }
 
     #endregion
+
+    public void Dispose()
+    {
+        cs.Dispose();
+    }
 }
