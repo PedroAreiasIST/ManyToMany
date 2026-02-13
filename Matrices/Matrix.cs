@@ -2785,7 +2785,9 @@ public sealed class Matrix : IEquatable<Matrix>, IFormattable, ICloneable
             for (; i <= _data.Length - 4; i += 4)
             {
                 var v = Vector256.LoadUnsafe(ref _data[i]);
-                vSum = Fma.MultiplyAdd(v, v, vSum);
+                vSum = Fma.IsSupported
+                    ? Fma.MultiplyAdd(v, v, vSum)
+                    : Vector256.Add(Vector256.Multiply(v, v), vSum);
             }
 
             sum = Vector256.Sum(vSum);
@@ -2985,7 +2987,12 @@ public sealed class Matrix : IEquatable<Matrix>, IFormattable, ICloneable
             throw new InvalidOperationException("Matrix power requires a square matrix");
 
         if (n < 0)
+        {
+            if (n == int.MinValue)
+                throw new ArgumentOutOfRangeException(nameof(n),
+                    "int.MinValue is not supported because its negation overflows int.");
             return Inverse().MatrixPower(-n);
+        }
 
         if (n == 0)
             return Identity(RowCount);
@@ -3489,9 +3496,9 @@ public sealed class Matrix : IEquatable<Matrix>, IFormattable, ICloneable
             {
                 var vBj = Vector256.LoadUnsafe(ref data[jOffset + i]);
                 var vBk = Vector256.LoadUnsafe(ref data[kOffset + i]);
-                vCjj = Fma.MultiplyAdd(vBj, vBj, vCjj);
-                vCkk = Fma.MultiplyAdd(vBk, vBk, vCkk);
-                vCjk = Fma.MultiplyAdd(vBj, vBk, vCjk);
+                vCjj = Fma.IsSupported ? Fma.MultiplyAdd(vBj, vBj, vCjj) : Vector256.Add(Vector256.Multiply(vBj, vBj), vCjj);
+                vCkk = Fma.IsSupported ? Fma.MultiplyAdd(vBk, vBk, vCkk) : Vector256.Add(Vector256.Multiply(vBk, vBk), vCkk);
+                vCjk = Fma.IsSupported ? Fma.MultiplyAdd(vBj, vBk, vCjk) : Vector256.Add(Vector256.Multiply(vBj, vBk), vCjk);
             }
 
             cjj = Vector256.Sum(vCjj);
@@ -3671,8 +3678,12 @@ public sealed class Matrix : IEquatable<Matrix>, IFormattable, ICloneable
                                     var vBj = Vector256.LoadUnsafe(ref tempDataArray[jOffset + i]);
                                     var vBk = Vector256.LoadUnsafe(ref tempDataArray[kOffset + i]);
 
-                                    var newBj = Fma.MultiplyAdd(vC, vBj, Vector256.Multiply(vNegS, vBk));
-                                    var newBk = Fma.MultiplyAdd(vS, vBj, Vector256.Multiply(vC, vBk));
+                                    var newBj = Fma.IsSupported
+                                        ? Fma.MultiplyAdd(vC, vBj, Vector256.Multiply(vNegS, vBk))
+                                        : Vector256.Add(Vector256.Multiply(vC, vBj), Vector256.Multiply(vNegS, vBk));
+                                    var newBk = Fma.IsSupported
+                                        ? Fma.MultiplyAdd(vS, vBj, Vector256.Multiply(vC, vBk))
+                                        : Vector256.Add(Vector256.Multiply(vS, vBj), Vector256.Multiply(vC, vBk));
 
                                     newBj.StoreUnsafe(ref tempDataArray[jOffset + i]);
                                     newBk.StoreUnsafe(ref tempDataArray[kOffset + i]);
@@ -4091,7 +4102,7 @@ public sealed class Matrix : IEquatable<Matrix>, IFormattable, ICloneable
 
     public Matrix Reshape(int newRows, int newCols)
     {
-        if (newRows * newCols != ElementCount)
+        if ((long)newRows * newCols != ElementCount)
             throw new ArgumentException("New dimensions must have same total elements");
 
         var result = new Matrix(newRows, newCols);
@@ -4202,8 +4213,13 @@ public sealed class Matrix : IEquatable<Matrix>, IFormattable, ICloneable
 
     public Matrix KroneckerProduct(Matrix B)
     {
-        var m = RowCount * B.RowCount;
-        var n = ColumnCount * B.ColumnCount;
+        var mLong = (long)RowCount * B.RowCount;
+        var nLong = (long)ColumnCount * B.ColumnCount;
+        if (mLong > int.MaxValue || nLong > int.MaxValue)
+            throw new OverflowException(
+                $"Kronecker product dimensions ({mLong}x{nLong}) exceed int.MaxValue.");
+        var m = (int)mLong;
+        var n = (int)nLong;
         var result = new Matrix(m, n);
 
         for (var i = 0; i < RowCount; i++)
@@ -4442,7 +4458,9 @@ public sealed class Matrix : IEquatable<Matrix>, IFormattable, ICloneable
                     {
                         var v1 = Vector256.LoadUnsafe(ref centered._data[col1Offset + i]);
                         var v2 = Vector256.LoadUnsafe(ref centered._data[col2Offset + i]);
-                        vSum = Fma.MultiplyAdd(v1, v2, vSum);
+                        vSum = Fma.IsSupported
+                            ? Fma.MultiplyAdd(v1, v2, vSum)
+                            : Vector256.Add(Vector256.Multiply(v1, v2), vSum);
                     }
 
                     sum = Vector256.Sum(vSum);
@@ -4476,7 +4494,10 @@ public sealed class Matrix : IEquatable<Matrix>, IFormattable, ICloneable
 
         for (var i = 0; i < m; i++)
         for (var j = 0; j < m; j++)
-            corr[i, j] = cov[i, j] / (stdDevs[i] * stdDevs[j]);
+        {
+            var denom = stdDevs[i] * stdDevs[j];
+            corr[i, j] = denom == 0.0 ? (i == j ? 1.0 : 0.0) : cov[i, j] / denom;
+        }
 
         return corr;
     }
@@ -4719,12 +4740,11 @@ public sealed class Vector : IEquatable<Vector>, IFormattable, ICloneable
 
         // Sample up to 20 elements distributed throughout the vector
         const int maxSamples = 20;
-        var sampleCount = Math.Min(_data.Length, maxSamples);
 
-        if (sampleCount <= maxSamples)
+        if (_data.Length <= maxSamples)
         {
             // Small vector: include all elements
-            for (var i = 0; i < sampleCount; i++)
+            for (var i = 0; i < _data.Length; i++)
                 hash.Add(_data[i]);
         }
         else
@@ -4979,7 +4999,9 @@ public sealed class Vector : IEquatable<Vector>, IFormattable, ICloneable
             {
                 var vA = Vector256.LoadUnsafe(ref dataA[i]);
                 var vB = Vector256.LoadUnsafe(ref dataB[i]);
-                vSum = Fma.MultiplyAdd(vA, vB, vSum);
+                vSum = Fma.IsSupported
+                    ? Fma.MultiplyAdd(vA, vB, vSum)
+                    : Vector256.Add(Vector256.Multiply(vA, vB), vSum);
             }
 
             sum = Vector256.Sum(vSum);
@@ -5643,7 +5665,9 @@ public sealed class LUDecomposition
                             _originalMatrix[i, j + 3]
                         );
                         var vX = Vector256.LoadUnsafe(ref x[j]);
-                        vSum = Fma.MultiplyAdd(vA, vX, vSum);
+                        vSum = Fma.IsSupported
+                            ? Fma.MultiplyAdd(vA, vX, vSum)
+                            : Vector256.Add(Vector256.Multiply(vA, vX), vSum);
                     }
 
                     var sum = Vector256.Sum(vSum);

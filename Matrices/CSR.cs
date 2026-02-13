@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Numerics;
 using System.Reflection;
@@ -1491,7 +1492,7 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
                 {
                     var col = B.columnIndices[kb];
                     var ka = markerIdx[col];
-                    if (ka >= A.rowPointers[i]) // Column exists in A for this row
+                    if (ka != -1) // Column exists in A for this row
                         values[pos++] = aValues[ka] * bValues[kb];
                 }
 
@@ -1930,6 +1931,7 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
     public double OneNorm()
     {
         ThrowIfDisposed();
+        if (ncols == 0 || nrows == 0) return 0.0;
         var localValues = GetValuesOrThrow();
         var colSums = new double[ncols];
         for (var i = 0; i < nrows; i++)
@@ -1968,6 +1970,9 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
     public MatrixStatistics GetStatistics()
     {
         ThrowIfDisposed();
+        if (nrows == 0)
+            return new MatrixStatistics(0, ncols, 0, 1.0, 0, 0, 0.0);
+
         var minNnz = int.MaxValue;
         var maxNnz = 0;
         long totalNnz = 0;
@@ -3269,6 +3274,7 @@ internal sealed class CuSparseBackend : IDisposable
         {
             if (isDisposed) return;
             isDisposed = true; // Set early to prevent re-entry
+            isInitialized = false; // Prevent use of freed GPU resources
         }
 
         // Actual cleanup outside lock (CUDA calls may block)
@@ -3404,7 +3410,7 @@ internal sealed class CuSparseBackend : IDisposable
 
         CheckCuda(
             _createCsr!(ref spMatDescr, nrows, ncols, nnz, d_rowPtr, d_colInd, d_val, CUSPARSE_INDEX_32I,
-                CUSPARSE_INDEX_32I, CUDA_R_64F, CUSPARSE_INDEX_BASE_ZERO), "createCsr");
+                CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F), "createCsr");
         isInitialized = true;
     }
 
@@ -3435,6 +3441,8 @@ internal sealed class CuSparseBackend : IDisposable
                 if (bufferSize > allocatedBufferSize)
                 {
                     if (d_buffer != IntPtr.Zero) _cudaFree!(d_buffer);
+                    d_buffer = IntPtr.Zero;
+                    allocatedBufferSize = 0;
                     CheckCuda(_cudaMalloc!(ref d_buffer, bufferSize), "malloc buffer");
                     allocatedBufferSize = bufferSize;
                 }
@@ -3492,6 +3500,8 @@ internal sealed class CuSparseBackend : IDisposable
                 if (bufferSize > allocatedBufferSize)
                 {
                     if (d_buffer != IntPtr.Zero) _cudaFree!(d_buffer);
+                    d_buffer = IntPtr.Zero;
+                    allocatedBufferSize = 0;
                     CheckCuda(_cudaMalloc!(ref d_buffer, bufferSize), "malloc buffer");
                     allocatedBufferSize = bufferSize;
                 }
@@ -3554,7 +3564,7 @@ internal sealed class CuSparseBackend : IDisposable
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int CreateCsrDelegate(ref IntPtr spMatDescr, long rows, long cols, long nnz, IntPtr csrRowOffsets,
-        IntPtr csrColInd, IntPtr csrValues, int csrRowOffsetsType, int csrColIndType, int valueType, int idxBase);
+        IntPtr csrColInd, IntPtr csrValues, int csrRowOffsetsType, int csrColIndType, int idxBase, int valueType);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int CreateDnVecDelegate(ref IntPtr dnVecDescr, long size, IntPtr values, int valueType);
@@ -3735,13 +3745,16 @@ public sealed class HybridScheduler : IDisposable
 
     internal class PerformanceMonitor
     {
-        private readonly Dictionary<(BackendType, OperationType), List<double>> measurements = new();
+        private readonly ConcurrentDictionary<(BackendType, OperationType), List<double>> measurements = new();
 
         public void Record(BackendType backend, OperationType opType, double milliseconds)
         {
             var key = (backend, opType);
-            if (!measurements.ContainsKey(key)) measurements[key] = [];
-            measurements[key].Add(milliseconds);
+            var list = measurements.GetOrAdd(key, _ => new List<double>());
+            lock (list)
+            {
+                list.Add(milliseconds);
+            }
         }
     }
 }
