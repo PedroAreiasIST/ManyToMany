@@ -2418,6 +2418,139 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
     }
 
     /// <summary>
+    ///     Build a CSR matrix from COO (coordinate) arrays.
+    ///     Duplicate coordinates are summed when <paramref name="sumDuplicates" /> is true.
+    /// </summary>
+    /// <param name="rows">Row indices for each entry.</param>
+    /// <param name="cols">Column indices for each entry.</param>
+    /// <param name="nRows">Total matrix row count.</param>
+    /// <param name="nCols">Total matrix column count.</param>
+    /// <param name="vals">Optional values; when null, a structural matrix is created.</param>
+    /// <param name="sumDuplicates">If true, duplicate coordinates are merged by summing their values.</param>
+    /// <returns>New CSR matrix.</returns>
+    public static CSR FromCOO(
+        int[] rows,
+        int[] cols,
+        int nRows,
+        int nCols,
+        double[]? vals = null,
+        bool sumDuplicates = true)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        ArgumentNullException.ThrowIfNull(cols);
+
+        if (nRows < 0)
+            throw new ArgumentException("Row count must be non-negative", nameof(nRows));
+        if (nCols < 0)
+            throw new ArgumentException("Column count must be non-negative", nameof(nCols));
+        if (rows.Length != cols.Length)
+            throw new ArgumentException("Rows and columns must have the same length");
+        if (vals != null && vals.Length != rows.Length)
+            throw new ArgumentException("Values length must match rows/cols length", nameof(vals));
+
+        if (vals != null)
+        {
+            var perRow = new Dictionary<int, double>[nRows];
+
+            for (var k = 0; k < rows.Length; k++)
+            {
+                var row = rows[k];
+                var col = cols[k];
+                if (row < 0 || row >= nRows)
+                    throw new ArgumentOutOfRangeException(nameof(rows),
+                        $"Row index {row} at position {k} is out of range [0, {nRows})");
+                if (col < 0 || col >= nCols)
+                    throw new ArgumentOutOfRangeException(nameof(cols),
+                        $"Column index {col} at position {k} is out of range [0, {nCols})");
+
+                perRow[row] ??= new Dictionary<int, double>();
+                var rowMap = perRow[row]!;
+
+                if (rowMap.TryGetValue(col, out var current))
+                {
+                    if (!sumDuplicates)
+                        throw new ArgumentException(
+                            $"Duplicate coordinate ({row}, {col}) found at position {k}. Set {nameof(sumDuplicates)}=true to merge duplicates.");
+                    rowMap[col] = current + vals[k];
+                }
+                else
+                {
+                    rowMap[col] = vals[k];
+                }
+            }
+
+            var rowPtr = new int[nRows + 1];
+            for (var i = 0; i < nRows; i++)
+                rowPtr[i + 1] = rowPtr[i] + (perRow[i]?.Count ?? 0);
+
+            var nnz = rowPtr[nRows];
+            var colIdx = new int[nnz];
+            var valuesOut = new double[nnz];
+
+            for (var i = 0; i < nRows; i++)
+            {
+                var rowMap = perRow[i];
+                if (rowMap == null || rowMap.Count == 0)
+                    continue;
+
+                var offset = rowPtr[i];
+                var ordered = rowMap.OrderBy(p => p.Key);
+                var p = 0;
+                foreach (var (col, value) in ordered)
+                {
+                    colIdx[offset + p] = col;
+                    valuesOut[offset + p] = value;
+                    p++;
+                }
+            }
+
+            return new CSR(rowPtr, colIdx, nCols, valuesOut, true);
+        }
+        else
+        {
+            var perRow = new HashSet<int>[nRows];
+            for (var k = 0; k < rows.Length; k++)
+            {
+                var row = rows[k];
+                var col = cols[k];
+                if (row < 0 || row >= nRows)
+                    throw new ArgumentOutOfRangeException(nameof(rows),
+                        $"Row index {row} at position {k} is out of range [0, {nRows})");
+                if (col < 0 || col >= nCols)
+                    throw new ArgumentOutOfRangeException(nameof(cols),
+                        $"Column index {col} at position {k} is out of range [0, {nCols})");
+
+                perRow[row] ??= new HashSet<int>();
+                if (!perRow[row]!.Add(col) && !sumDuplicates)
+                    throw new ArgumentException(
+                        $"Duplicate coordinate ({row}, {col}) found at position {k}. Set {nameof(sumDuplicates)}=true to merge duplicates.");
+            }
+
+            var rowPtr = new int[nRows + 1];
+            for (var i = 0; i < nRows; i++)
+                rowPtr[i + 1] = rowPtr[i] + (perRow[i]?.Count ?? 0);
+
+            var nnz = rowPtr[nRows];
+            var colIdx = new int[nnz];
+
+            for (var i = 0; i < nRows; i++)
+            {
+                var rowSet = perRow[i];
+                if (rowSet == null || rowSet.Count == 0)
+                    continue;
+
+                var offset = rowPtr[i];
+                var ordered = rowSet.OrderBy(c => c);
+                var p = 0;
+                foreach (var col in ordered)
+                    colIdx[offset + p++] = col;
+            }
+
+            return new CSR(rowPtr, colIdx, nCols, null, true);
+        }
+    }
+
+    /// <summary>
     ///     Export matrix to Matrix Market coordinate format string.
     ///     Follows the Matrix Market format specification.
     ///     For structural matrices (no values), exports pattern format.
@@ -2649,6 +2782,59 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
         }
 
         return x;
+    }
+
+    /// <summary>
+    ///     Returns a matrix with entries |a_ij| ≤ tolerance removed.
+    ///     Structural matrices are returned unchanged.
+    /// </summary>
+    /// <param name="tolerance">Non-negative pruning tolerance.</param>
+    /// <returns>New matrix with small values removed.</returns>
+    public CSR DropZeros(double tolerance = DEFAULT_TOLERANCE)
+    {
+        ThrowIfDisposed();
+
+        if (tolerance < 0)
+            throw new ArgumentException("Tolerance must be non-negative", nameof(tolerance));
+
+        double[]? localValues;
+        lock (syncLock)
+        {
+            localValues = values;
+        }
+
+        if (localValues == null)
+            return (CSR)Clone();
+
+        var rowPtr = new int[nrows + 1];
+        var nnz = 0;
+
+        for (var i = 0; i < nrows; i++)
+        {
+            for (var k = rowPointers[i]; k < rowPointers[i + 1]; k++)
+                if (Math.Abs(localValues[k]) > tolerance)
+                    nnz++;
+
+            rowPtr[i + 1] = nnz;
+        }
+
+        if (nnz == localValues.Length)
+            return (CSR)Clone();
+
+        var colIdx = new int[nnz];
+        var outValues = new double[nnz];
+        var pos = 0;
+
+        for (var i = 0; i < nrows; i++)
+        for (var k = rowPointers[i]; k < rowPointers[i + 1]; k++)
+            if (Math.Abs(localValues[k]) > tolerance)
+            {
+                colIdx[pos] = columnIndices[k];
+                outValues[pos] = localValues[k];
+                pos++;
+            }
+
+        return new CSR(rowPtr, colIdx, ncols, outValues, true);
     }
 
     #endregion
