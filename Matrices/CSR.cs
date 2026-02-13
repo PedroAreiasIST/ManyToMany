@@ -1120,12 +1120,11 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
             return workspace;
         }, _ => { });
 
+        // Each thread writes directly to resultValues for its own row range.
+        // Rows are partitioned so output positions are non-overlapping.
         var numThreads = ParallelConfig.MaxDegreeOfParallelism;
-        var threadLocalResults = new double[numThreads][];
         Parallel.For(0, numThreads, ParallelConfig.Options, tid =>
         {
-            threadLocalResults[tid] = new double[resultNnz];
-            var localResult = threadLocalResults[tid];
             var rowsPerThread = (resultRows + numThreads - 1) / numThreads;
             var rowStart = tid * rowsPerThread;
             var rowEnd = Math.Min(rowStart + rowsPerThread, resultRows);
@@ -1145,32 +1144,11 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
                     for (var kb = B.rowPointers[k]; kb < B.rowPointers[k + 1]; kb++)
                     {
                         var pos = posMap[B.columnIndices[kb]];
-                        localResult[pos] += aVal * bValues[kb];
+                        resultValues[pos] += aVal * bValues[kb];
                     }
                 }
             }
         });
-
-        if (resultNnz < SMALL_ARRAY_MERGE_THRESHOLD)
-            for (var pos = 0; pos < resultNnz; pos++)
-            {
-                var sum = 0.0;
-                for (var tid = 0; tid < numThreads; tid++) sum += threadLocalResults[tid][pos];
-                resultValues[pos] = sum;
-            }
-        else
-            Parallel.For(0, numThreads, ParallelConfig.Options, tid =>
-            {
-                var chunkSize = (resultNnz + numThreads - 1) / numThreads;
-                var start = tid * chunkSize;
-                var end = Math.Min(start + chunkSize, resultNnz);
-                for (var pos = start; pos < end; pos++)
-                {
-                    var sum = 0.0;
-                    for (var t = 0; t < numThreads; t++) sum += threadLocalResults[t][pos];
-                    resultValues[pos] = sum;
-                }
-            });
 
         return new CSR(resultRowPtrs, resultColIndices, resultCols, resultValues, true);
     }
@@ -1503,7 +1481,21 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
         {
             var aValues = a.GetValuesInternal();
             newValues = new double[aValues.Length];
-            for (var i = 0; i < aValues.Length; i++) newValues[i] = alpha * aValues[i];
+
+            if (aValues.Length >= MIN_ROWS_FOR_PARALLEL)
+            {
+                Parallel.ForEach(
+                    Partitioner.Create(0, aValues.Length),
+                    ParallelConfig.Options,
+                    range =>
+                    {
+                        for (var i = range.Item1; i < range.Item2; i++) newValues[i] = alpha * aValues[i];
+                    });
+            }
+            else
+            {
+                for (var i = 0; i < aValues.Length; i++) newValues[i] = alpha * aValues[i];
+            }
         }
 
         return new CSR((int[])a.rowPointers.Clone(), (int[])a.columnIndices.Clone(), a.ncols, newValues, true);
@@ -1530,35 +1522,62 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
                 $"Dimension mismatch: A is {A.nrows}x{A.ncols}, B is {B.nrows}x{B.ncols}");
 
         var rowPtr = new int[A.nrows + 1];
-        var marker = ArrayPool<int>.Shared.Rent(A.ncols);
-        try
+
+        if (A.nrows >= MIN_ROWS_FOR_PARALLEL)
         {
-            Array.Fill(marker, -1, 0, A.ncols);
-            var totalNnz = 0;
+            // Parallel: row-timestamp marker pattern is already thread-safe
+            var rowCounts = new int[A.nrows];
+            Parallel.For(0, A.nrows, ParallelConfig.Options,
+                () => ArrayPool<int>.Shared.Rent(A.ncols),
+                (i, loopState, marker) =>
+                {
+                    for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
+                        marker[A.columnIndices[ka]] = i + 1;
+
+                    var nnzThisRow = 0;
+                    for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
+                        if (marker[B.columnIndices[kb]] == i + 1)
+                            nnzThisRow++;
+
+                    rowCounts[i] = nnzThisRow;
+                    return marker;
+                },
+                marker => ArrayPool<int>.Shared.Return(marker, true));
+
             rowPtr[0] = 0;
-
             for (var i = 0; i < A.nrows; i++)
-            {
-                // Mark all columns present in row i of A
-                for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
-                    marker[A.columnIndices[ka]] = i;
-
-                // Count columns that are also present in row i of B
-                var nnzThisRow = 0;
-                for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
-                    if (marker[B.columnIndices[kb]] == i)
-                        nnzThisRow++;
-
-                totalNnz += nnzThisRow;
-                rowPtr[i + 1] = totalNnz;
-            }
-
-            return rowPtr;
+                rowPtr[i + 1] = rowPtr[i] + rowCounts[i];
         }
-        finally
+        else
         {
-            ArrayPool<int>.Shared.Return(marker);
+            var marker = ArrayPool<int>.Shared.Rent(A.ncols);
+            try
+            {
+                Array.Fill(marker, -1, 0, A.ncols);
+                var totalNnz = 0;
+                rowPtr[0] = 0;
+
+                for (var i = 0; i < A.nrows; i++)
+                {
+                    for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
+                        marker[A.columnIndices[ka]] = i;
+
+                    var nnzThisRow = 0;
+                    for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
+                        if (marker[B.columnIndices[kb]] == i)
+                            nnzThisRow++;
+
+                    totalNnz += nnzThisRow;
+                    rowPtr[i + 1] = totalNnz;
+                }
+            }
+            finally
+            {
+                ArrayPool<int>.Shared.Return(marker);
+            }
         }
+
+        return rowPtr;
     }
 
     /// <summary>
@@ -1574,33 +1593,56 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
         B.ThrowIfDisposed();
 
         var colIdx = new int[rowPtr[^1]];
-        var marker = ArrayPool<int>.Shared.Rent(A.ncols);
-        try
+
+        if (A.nrows >= MIN_ROWS_FOR_PARALLEL)
         {
-            Array.Fill(marker, -1, 0, A.ncols);
-            var pos = 0;
-
-            for (var i = 0; i < A.nrows; i++)
-            {
-                // Mark all columns present in row i of A
-                for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
-                    marker[A.columnIndices[ka]] = i;
-
-                // Add columns that are also present in row i of B
-                for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
+            Parallel.For(0, A.nrows, ParallelConfig.Options,
+                () => ArrayPool<int>.Shared.Rent(A.ncols),
+                (i, loopState, marker) =>
                 {
-                    var col = B.columnIndices[kb];
-                    if (marker[col] == i)
-                        colIdx[pos++] = col;
+                    for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
+                        marker[A.columnIndices[ka]] = i + 1;
+
+                    var pos = rowPtr[i];
+                    for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
+                    {
+                        var col = B.columnIndices[kb];
+                        if (marker[col] == i + 1)
+                            colIdx[pos++] = col;
+                    }
+
+                    return marker;
+                },
+                marker => ArrayPool<int>.Shared.Return(marker, true));
+        }
+        else
+        {
+            var marker = ArrayPool<int>.Shared.Rent(A.ncols);
+            try
+            {
+                Array.Fill(marker, -1, 0, A.ncols);
+                var pos = 0;
+
+                for (var i = 0; i < A.nrows; i++)
+                {
+                    for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
+                        marker[A.columnIndices[ka]] = i;
+
+                    for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
+                    {
+                        var col = B.columnIndices[kb];
+                        if (marker[col] == i)
+                            colIdx[pos++] = col;
+                    }
                 }
             }
+            finally
+            {
+                ArrayPool<int>.Shared.Return(marker);
+            }
+        }
 
-            return colIdx;
-        }
-        finally
-        {
-            ArrayPool<int>.Shared.Return(marker);
-        }
+        return colIdx;
     }
 
     /// <summary>
@@ -1619,38 +1661,65 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
         var aValues = A.GetValuesInternal();
         var bValues = B.GetValuesInternal();
         var values = new double[colIdx.Length];
-        var markerIdx = ArrayPool<int>.Shared.Rent(A.ncols);
-        try
+
+        if (A.nrows >= MIN_ROWS_FOR_PARALLEL)
         {
-            Array.Fill(markerIdx, -1, 0, A.ncols);
-            var pos = 0;
-
-            for (var i = 0; i < A.nrows; i++)
-            {
-                // Store index into A's values for each column in row i
-                for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
-                    markerIdx[A.columnIndices[ka]] = ka;
-
-                // Compute Hadamard product for intersecting entries
-                for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
+            Parallel.For(0, A.nrows, ParallelConfig.Options,
+                () => ArrayPool<int>.Shared.Rent(A.ncols),
+                (i, loopState, markerIdx) =>
                 {
-                    var col = B.columnIndices[kb];
-                    var ka = markerIdx[col];
-                    if (ka != -1) // Column exists in A for this row
-                        values[pos++] = aValues[ka] * bValues[kb];
-                }
+                    for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
+                        markerIdx[A.columnIndices[ka]] = ka + 1; // +1 so 0 means "unset"
 
-                // Clear markers for this row
-                for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
-                    markerIdx[A.columnIndices[ka]] = -1;
-            }
+                    var pos = rowPtr[i];
+                    for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
+                    {
+                        var col = B.columnIndices[kb];
+                        var kaPlus1 = markerIdx[col];
+                        if (kaPlus1 > 0)
+                            values[pos++] = aValues[kaPlus1 - 1] * bValues[kb];
+                    }
 
-            return values;
+                    // Clear markers for this row
+                    for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
+                        markerIdx[A.columnIndices[ka]] = 0;
+
+                    return markerIdx;
+                },
+                markerIdx => ArrayPool<int>.Shared.Return(markerIdx, true));
         }
-        finally
+        else
         {
-            ArrayPool<int>.Shared.Return(markerIdx);
+            var markerIdx = ArrayPool<int>.Shared.Rent(A.ncols);
+            try
+            {
+                Array.Fill(markerIdx, -1, 0, A.ncols);
+                var pos = 0;
+
+                for (var i = 0; i < A.nrows; i++)
+                {
+                    for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
+                        markerIdx[A.columnIndices[ka]] = ka;
+
+                    for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
+                    {
+                        var col = B.columnIndices[kb];
+                        var ka = markerIdx[col];
+                        if (ka != -1)
+                            values[pos++] = aValues[ka] * bValues[kb];
+                    }
+
+                    for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
+                        markerIdx[A.columnIndices[ka]] = -1;
+                }
+            }
+            finally
+            {
+                ArrayPool<int>.Shared.Return(markerIdx);
+            }
         }
+
+        return values;
     }
 
     /// <summary>
@@ -1971,37 +2040,48 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
         try
         {
             foreach (var col in cols) colSet.Add(col);
-            var colMap = new Dictionary<int, int>();
+            var colMap = new Dictionary<int, int>(cols.Length);
             for (var j = 0; j < cols.Length; j++) colMap[cols[j]] = j;
 
-            var resultRows = new List<List<int>>(rows.Length);
-            List<double>? resultVals;
             double[]? localValues;
             lock (syncLock)
             {
                 localValues = values;
-                resultVals = localValues != null ? new List<double>() : null;
             }
 
-            foreach (var row in rows)
+            // Two-pass: first count nnz per row, then fill
+            var newRowPtr = new int[rows.Length + 1];
+            for (var ri = 0; ri < rows.Length; ri++)
             {
-                List<int> newRow = [];
+                var row = rows[ri];
+                var count = 0;
+                for (var k = rowPointers[row]; k < rowPointers[row + 1]; k++)
+                    if (colSet.Contains(columnIndices[k]))
+                        count++;
+                newRowPtr[ri + 1] = newRowPtr[ri] + count;
+            }
+
+            var totalNnz = newRowPtr[rows.Length];
+            var newColIdx = new int[totalNnz];
+            var newValues = localValues != null ? new double[totalNnz] : null;
+
+            for (var ri = 0; ri < rows.Length; ri++)
+            {
+                var row = rows[ri];
+                var pos = newRowPtr[ri];
                 for (var k = rowPointers[row]; k < rowPointers[row + 1]; k++)
                 {
                     var col = columnIndices[k];
                     if (colSet.Contains(col))
                     {
-                        newRow.Add(colMap[col]);
-                        if (resultVals != null && localValues != null) resultVals.Add(localValues[k]);
+                        newColIdx[pos] = colMap[col];
+                        if (newValues != null && localValues != null) newValues[pos] = localValues[k];
+                        pos++;
                     }
                 }
-
-                resultRows.Add(newRow);
             }
 
-            var result = new CSR(resultRows, true);
-            if (resultVals != null) result.Values = resultVals.ToArray();
-            return result;
+            return new CSR(newRowPtr, newColIdx, cols.Length, newValues, true);
         }
         finally
         {
@@ -2022,10 +2102,22 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
 
         var localValues = GetValuesOrThrow();
         var newValues = new double[localValues.Length];
-        for (var i = 0; i < nrows; i++)
+
+        if (nrows >= MIN_ROWS_FOR_PARALLEL)
         {
-            var factor = factors[i];
-            for (var k = rowPointers[i]; k < rowPointers[i + 1]; k++) newValues[k] = factor * localValues[k];
+            Parallel.For(0, nrows, ParallelConfig.Options, i =>
+            {
+                var factor = factors[i];
+                for (var k = rowPointers[i]; k < rowPointers[i + 1]; k++) newValues[k] = factor * localValues[k];
+            });
+        }
+        else
+        {
+            for (var i = 0; i < nrows; i++)
+            {
+                var factor = factors[i];
+                for (var k = rowPointers[i]; k < rowPointers[i + 1]; k++) newValues[k] = factor * localValues[k];
+            }
         }
 
         return new CSR((int[])rowPointers.Clone(), (int[])columnIndices.Clone(), ncols, newValues, true);
@@ -2044,7 +2136,20 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
 
         var localValues = GetValuesOrThrow();
         var newValues = new double[localValues.Length];
-        for (var k = 0; k < localValues.Length; k++) newValues[k] = factors[columnIndices[k]] * localValues[k];
+
+        if (nrows >= MIN_ROWS_FOR_PARALLEL)
+        {
+            Parallel.For(0, nrows, ParallelConfig.Options, i =>
+            {
+                for (var k = rowPointers[i]; k < rowPointers[i + 1]; k++)
+                    newValues[k] = factors[columnIndices[k]] * localValues[k];
+            });
+        }
+        else
+        {
+            for (var k = 0; k < localValues.Length; k++) newValues[k] = factors[columnIndices[k]] * localValues[k];
+        }
+
         return new CSR((int[])rowPointers.Clone(), (int[])columnIndices.Clone(), ncols, newValues, true);
     }
 
@@ -2084,6 +2189,26 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
     {
         ThrowIfDisposed();
         var localValues = GetValuesOrThrow();
+
+        if (nrows >= MIN_ROWS_FOR_PARALLEL)
+        {
+            var lockObj = new object();
+            var globalMax = 0.0;
+            Parallel.For(0, nrows, ParallelConfig.Options,
+                () => 0.0,
+                (i, loopState, localMax) =>
+                {
+                    var rowSum = 0.0;
+                    for (var k = rowPointers[i]; k < rowPointers[i + 1]; k++) rowSum += Math.Abs(localValues[k]);
+                    return Math.Max(localMax, rowSum);
+                },
+                localMax =>
+                {
+                    lock (lockObj) { globalMax = Math.Max(globalMax, localMax); }
+                });
+            return globalMax;
+        }
+
         var maxNorm = 0.0;
         for (var i = 0; i < nrows; i++)
         {
@@ -2100,6 +2225,35 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
         ThrowIfDisposed();
         if (ncols == 0 || nrows == 0) return 0.0;
         var localValues = GetValuesOrThrow();
+
+        if (nrows >= MIN_ROWS_FOR_PARALLEL)
+        {
+            // Use thread-local column sum arrays to avoid contention
+            var lockObj = new object();
+            var globalColSums = new double[ncols];
+            Parallel.ForEach(
+                Partitioner.Create(0, nrows),
+                ParallelConfig.Options,
+                () => new double[ncols],
+                (range, loopState, localColSums) =>
+                {
+                    for (var i = range.Item1; i < range.Item2; i++)
+                    for (var k = rowPointers[i]; k < rowPointers[i + 1]; k++)
+                        localColSums[columnIndices[k]] += Math.Abs(localValues[k]);
+                    return localColSums;
+                },
+                localColSums =>
+                {
+                    lock (lockObj)
+                    {
+                        for (var j = 0; j < ncols; j++) globalColSums[j] += localColSums[j];
+                    }
+                });
+            var max = 0.0;
+            for (var j = 0; j < ncols; j++) max = Math.Max(max, globalColSums[j]);
+            return max;
+        }
+
         var colSums = new double[ncols];
         for (var i = 0; i < nrows; i++)
         for (var k = rowPointers[i]; k < rowPointers[i + 1]; k++)
@@ -3059,8 +3213,9 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
         other.ThrowIfDisposed();
 
         if (nrows != other.nrows || ncols != other.ncols) return false;
-        if (!rowPointers.SequenceEqual(other.rowPointers)) return false;
-        if (!columnIndices.SequenceEqual(other.columnIndices)) return false;
+        // Use Span.SequenceEqual which is SIMD-accelerated in .NET 9
+        if (!rowPointers.AsSpan().SequenceEqual(other.rowPointers)) return false;
+        if (!columnIndices.AsSpan().SequenceEqual(other.columnIndices)) return false;
 
         // Take snapshots under individual locks to avoid nested locking deadlock
         // This is safe because values arrays are effectively immutable once assigned
@@ -3079,7 +3234,7 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
 
         if (thisValues == null && otherValues == null) return true;
         if (thisValues == null || otherValues == null) return false;
-        return thisValues.SequenceEqual(otherValues);
+        return thisValues.AsSpan().SequenceEqual(otherValues);
     }
 
     public override bool Equals(object? obj)
@@ -3226,6 +3381,7 @@ file class DiagonalCache
 public static class CSRIterativeSolvers
 {
     // FIXED: Issue #18 - Relative tolerance for breakdown detection
+    // Uses MultiplyAuto for optimal SpMV backend selection (GPU/SIMD/Parallel/Serial)
     public static double[] DiagonallyPreconditionedBiCGSTAB(
         this CSR matrix,
         double[] b,
@@ -3247,7 +3403,7 @@ public static class CSRIterativeSolvers
         Array.Copy(b, r, n);
         if (x0 != null)
         {
-            var Ax = matrix.Multiply(x);
+            var Ax = matrix.MultiplyAuto(x);
             for (var i = 0; i < n; i++) r[i] -= Ax[i];
         }
 
@@ -3294,7 +3450,7 @@ public static class CSRIterativeSolvers
             }
 
             for (var i = 0; i < n; i++) phat[i] = diagInv[i] * p[i];
-            Array.Copy(matrix.Multiply(phat), v, n);
+            Array.Copy(matrix.MultiplyAuto(phat), v, n);
             alpha = rho;
             var temp = 0.0;
             for (var i = 0; i < n; i++) temp += r0_hat[i] * v[i];
@@ -3315,7 +3471,7 @@ public static class CSRIterativeSolvers
             }
 
             for (var i = 0; i < n; i++) shat[i] = diagInv[i] * s[i];
-            Array.Copy(matrix.Multiply(shat), t, n);
+            Array.Copy(matrix.MultiplyAuto(shat), t, n);
             var ts = 0.0;
             var tt = 0.0;
             for (var i = 0; i < n; i++)
@@ -3381,7 +3537,7 @@ public static class CSRIterativeSolvers
         Array.Copy(b, r, n);
         if (x0 != null)
         {
-            var Ax = matrix.Multiply(x);
+            var Ax = matrix.MultiplyAuto(x);
             for (var i = 0; i < n; i++) r[i] -= Ax[i];
         }
 
@@ -3422,7 +3578,7 @@ public static class CSRIterativeSolvers
             }
 
             for (var i = 0; i < n; i++) phat[i] = diagInv[i] * p[i];
-            Array.Copy(matrix.Multiply(phat), v, n);
+            Array.Copy(matrix.MultiplyAuto(phat), v, n);
             alpha = rho;
             var temp = 0.0;
             for (var i = 0; i < n; i++) temp += r0_hat[i] * v[i];
@@ -3442,7 +3598,7 @@ public static class CSRIterativeSolvers
             }
 
             for (var i = 0; i < n; i++) shat[i] = diagInv[i] * s[i];
-            Array.Copy(matrix.Multiply(shat), t, n);
+            Array.Copy(matrix.MultiplyAuto(shat), t, n);
             var ts = 0.0;
             var tt = 0.0;
             for (var i = 0; i < n; i++)
