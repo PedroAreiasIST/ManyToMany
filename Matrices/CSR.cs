@@ -442,6 +442,34 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
         return result;
     }
 
+    /// <summary>
+    ///     Multiply into a pre-allocated result span, avoiding allocation.
+    ///     result = A * vector
+    /// </summary>
+    public void Multiply(ReadOnlySpan<double> vector, Span<double> result)
+    {
+        ThrowIfDisposed();
+
+        if (vector.Length != ncols)
+            throw new ArgumentException(
+                $"Vector length {vector.Length} does not match matrix columns {ncols}",
+                nameof(vector));
+        if (result.Length < nrows)
+            throw new ArgumentException(
+                $"Result span length {result.Length} must be at least {nrows}",
+                nameof(result));
+
+        var localValues = GetValuesOrThrow();
+
+        for (var i = 0; i < nrows; i++)
+        {
+            double sum = 0;
+            for (var j = rowPointers[i]; j < rowPointers[i + 1]; j++)
+                sum += localValues[j] * vector[columnIndices[j]];
+            result[i] = sum;
+        }
+    }
+
     public double[] MultiplyParallel(double[] vector)
     {
         ThrowIfDisposed();
@@ -664,7 +692,9 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
                 var vdata = Avx.LoadVector256(pValues + k);
                 var vvec = Vector256.Create(pVector[pCols[k]], pVector[pCols[k + 1]], pVector[pCols[k + 2]],
                     pVector[pCols[k + 3]]);
-                vsum = Avx.Add(vsum, Avx.Multiply(vdata, vvec));
+                vsum = Fma.IsSupported
+                    ? Fma.MultiplyAdd(vdata, vvec, vsum)
+                    : Avx.Add(vsum, Avx.Multiply(vdata, vvec));
             }
         }
 
@@ -933,9 +963,10 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
         return colIdx;
     }
 
-    // NOTE: Issue #1 - The thread-local pattern here is correct. Each thread has its own
-    // threadLocalValues[tid] array, and writes only to positions corresponding to rows it processes.
-    // The workspace pattern ensures correct position mapping within each thread's slice.
+    // Each thread writes directly to finalValues for its own row range.
+    // Since rows are partitioned across threads, each thread's output positions
+    // (rowPtr[startRow]..rowPtr[endRow]) are non-overlapping, eliminating the
+    // need for thread-local copies and the merge phase.
     public static double[] MultiplyValues(CSR A, CSR B, int[] rowPtr, int[] colIdx)
     {
         A.ThrowIfDisposed();
@@ -944,12 +975,9 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
         var bValues = B.GetValuesInternal();
         var finalValues = new double[colIdx.Length];
         var numThreads = ParallelConfig.MaxDegreeOfParallelism;
-        var threadLocalValues = new double[numThreads][];
 
         Parallel.For(0, numThreads, ParallelConfig.Options, tid =>
         {
-            threadLocalValues[tid] = new double[colIdx.Length];
-            var localValues = threadLocalValues[tid];
             var rowsPerThread = (A.nrows + numThreads - 1) / numThreads;
             var startRow = tid * rowsPerThread;
             var endRow = Math.Min(startRow + rowsPerThread, A.nrows);
@@ -969,32 +997,11 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
                     {
                         var cb = B.columnIndices[kb];
                         var pos = colToPos[cb];
-                        localValues[pos] += aval * bValues[kb];
+                        finalValues[pos] += aval * bValues[kb];
                     }
                 }
             }
         });
-
-        if (colIdx.Length < SMALL_ARRAY_MERGE_THRESHOLD)
-            for (var pos = 0; pos < colIdx.Length; pos++)
-            {
-                var sum = 0.0;
-                for (var tid = 0; tid < numThreads; tid++) sum += threadLocalValues[tid][pos];
-                finalValues[pos] = sum;
-            }
-        else
-            Parallel.For(0, numThreads, ParallelConfig.Options, tid =>
-            {
-                var chunkSize = (colIdx.Length + numThreads - 1) / numThreads;
-                var start = tid * chunkSize;
-                var end = Math.Min(start + chunkSize, colIdx.Length);
-                for (var pos = start; pos < end; pos++)
-                {
-                    var sum = 0.0;
-                    for (var t = 0; t < numThreads; t++) sum += threadLocalValues[t][pos];
-                    finalValues[pos] = sum;
-                }
-            });
 
         return finalValues;
     }
@@ -1182,50 +1189,92 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
                 $"Dimension mismatch: A is {A.nrows}x{A.ncols}, B is {B.nrows}x{B.ncols}");
 
         var rowPtr = new int[A.nrows + 1];
-        var workspace = ArrayPool<int>.Shared.Rent(A.ncols);
-        try
+
+        if (A.nrows >= MIN_ROWS_FOR_PARALLEL)
         {
-            Array.Clear(workspace, 0, workspace.Length);
-            var totalNnz = 0;
+            // Parallel: compute row counts independently, then prefix sum
+            var rowCounts = new int[A.nrows];
+            Parallel.For(0, A.nrows, ParallelConfig.Options,
+                () => ArrayPool<int>.Shared.Rent(A.ncols),
+                (i, loopState, workspace) =>
+                {
+                    var nnzThisRow = 0;
+                    for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
+                    {
+                        var col = A.columnIndices[ka];
+                        if (workspace[col] != i + 1)
+                        {
+                            workspace[col] = i + 1;
+                            nnzThisRow++;
+                        }
+                    }
+
+                    for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
+                    {
+                        var col = B.columnIndices[kb];
+                        if (workspace[col] != i + 1)
+                        {
+                            workspace[col] = i + 1;
+                            nnzThisRow++;
+                        }
+                    }
+
+                    rowCounts[i] = nnzThisRow;
+                    return workspace;
+                },
+                workspace => ArrayPool<int>.Shared.Return(workspace, true));
+
             rowPtr[0] = 0;
-
             for (var i = 0; i < A.nrows; i++)
-            {
-                var nnzThisRow = 0;
-                for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
-                {
-                    var col = A.columnIndices[ka];
-                    if (workspace[col] == 0)
-                    {
-                        workspace[col] = 1;
-                        nnzThisRow++;
-                    }
-                }
-
-                for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
-                {
-                    var col = B.columnIndices[kb];
-                    if (workspace[col] == 0)
-                    {
-                        workspace[col] = 1;
-                        nnzThisRow++;
-                    }
-                }
-
-                // Cleanup
-                for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++) workspace[A.columnIndices[ka]] = 0;
-                for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++) workspace[B.columnIndices[kb]] = 0;
-
-                totalNnz += nnzThisRow;
-                rowPtr[i + 1] = totalNnz;
-            }
-
-            return rowPtr;
+                rowPtr[i + 1] = rowPtr[i] + rowCounts[i];
         }
-        finally
+        else
         {
-            ArrayPool<int>.Shared.Return(workspace);
+            var workspace = ArrayPool<int>.Shared.Rent(A.ncols);
+            try
+            {
+                Array.Clear(workspace, 0, workspace.Length);
+                var totalNnz = 0;
+                rowPtr[0] = 0;
+
+                for (var i = 0; i < A.nrows; i++)
+                {
+                    var nnzThisRow = 0;
+                    for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
+                    {
+                        var col = A.columnIndices[ka];
+                        if (workspace[col] == 0)
+                        {
+                            workspace[col] = 1;
+                            nnzThisRow++;
+                        }
+                    }
+
+                    for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
+                    {
+                        var col = B.columnIndices[kb];
+                        if (workspace[col] == 0)
+                        {
+                            workspace[col] = 1;
+                            nnzThisRow++;
+                        }
+                    }
+
+                    // Cleanup
+                    for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++) workspace[A.columnIndices[ka]] = 0;
+                    for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++) workspace[B.columnIndices[kb]] = 0;
+
+                    totalNnz += nnzThisRow;
+                    rowPtr[i + 1] = totalNnz;
+                }
+            }
+            finally
+            {
+                ArrayPool<int>.Shared.Return(workspace);
+            }
         }
+
+        return rowPtr;
     }
 
     public static int[] AddIndices(CSR A, CSR B, int[] rowPtr)
@@ -1233,44 +1282,80 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
         A.ThrowIfDisposed();
         B.ThrowIfDisposed();
         var colIdx = new int[rowPtr[^1]];
-        var workspace = ArrayPool<int>.Shared.Rent(A.ncols);
-        try
+
+        if (A.nrows >= MIN_ROWS_FOR_PARALLEL)
         {
-            Array.Clear(workspace, 0, workspace.Length);
-            var pos = 0;
-            for (var i = 0; i < A.nrows; i++)
+            // Parallel: each row writes to its own non-overlapping segment in colIdx
+            Parallel.For(0, A.nrows, ParallelConfig.Options,
+                () => ArrayPool<int>.Shared.Rent(A.ncols),
+                (i, loopState, workspace) =>
+                {
+                    var pos = rowPtr[i];
+                    for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
+                    {
+                        var col = A.columnIndices[ka];
+                        if (workspace[col] != i + 1)
+                        {
+                            colIdx[pos++] = col;
+                            workspace[col] = i + 1;
+                        }
+                    }
+
+                    for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
+                    {
+                        var col = B.columnIndices[kb];
+                        if (workspace[col] != i + 1)
+                        {
+                            colIdx[pos++] = col;
+                            workspace[col] = i + 1;
+                        }
+                    }
+
+                    return workspace;
+                },
+                workspace => ArrayPool<int>.Shared.Return(workspace, true));
+        }
+        else
+        {
+            var workspace = ArrayPool<int>.Shared.Rent(A.ncols);
+            try
             {
-                for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
+                Array.Clear(workspace, 0, workspace.Length);
+                var pos = 0;
+                for (var i = 0; i < A.nrows; i++)
                 {
-                    var col = A.columnIndices[ka];
-                    if (workspace[col] == 0)
+                    for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
                     {
-                        colIdx[pos] = col;
-                        workspace[col] = pos + 1;
-                        pos++;
+                        var col = A.columnIndices[ka];
+                        if (workspace[col] == 0)
+                        {
+                            colIdx[pos] = col;
+                            workspace[col] = pos + 1;
+                            pos++;
+                        }
                     }
-                }
 
-                for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
-                {
-                    var col = B.columnIndices[kb];
-                    if (workspace[col] == 0)
+                    for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
                     {
-                        colIdx[pos] = col;
-                        workspace[col] = pos + 1;
-                        pos++;
+                        var col = B.columnIndices[kb];
+                        if (workspace[col] == 0)
+                        {
+                            colIdx[pos] = col;
+                            workspace[col] = pos + 1;
+                            pos++;
+                        }
                     }
-                }
 
-                for (var k = rowPtr[i]; k < rowPtr[i + 1]; k++) workspace[colIdx[k]] = 0;
+                    for (var k = rowPtr[i]; k < rowPtr[i + 1]; k++) workspace[colIdx[k]] = 0;
+                }
             }
+            finally
+            {
+                ArrayPool<int>.Shared.Return(workspace);
+            }
+        }
 
-            return colIdx;
-        }
-        finally
-        {
-            ArrayPool<int>.Shared.Return(workspace);
-        }
+        return colIdx;
     }
 
     public static double[] AddValues(CSR A, CSR B, double alpha, double beta, int[] rowPtr, int[] colIdx)
@@ -1280,52 +1365,111 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
         var aValues = A.GetValuesInternal();
         var bValues = B.GetValuesInternal();
         var values = new double[colIdx.Length];
-        var workspace = ArrayPool<int>.Shared.Rent(A.ncols);
-        try
+
+        if (A.nrows >= MIN_ROWS_FOR_PARALLEL)
         {
-            Array.Clear(workspace, 0, workspace.Length);
-            var pos = 0;
-            for (var i = 0; i < A.nrows; i++)
+            // Parallel: each row writes to its own non-overlapping segment in values
+            Parallel.For(0, A.nrows, ParallelConfig.Options,
+                () => ArrayPool<int>.Shared.Rent(A.ncols),
+                (i, loopState, workspace) =>
+                {
+                    // Build position map for this row's output segment
+                    var pos = rowPtr[i];
+                    for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
+                    {
+                        var col = A.columnIndices[ka];
+                        if (workspace[col] != i + 1)
+                        {
+                            values[pos] = alpha * aValues[ka];
+                            workspace[col] = i + 1;
+                            pos++;
+                        }
+                        else
+                        {
+                            // Find position of this column in the output segment
+                            for (var k = rowPtr[i]; k < pos; k++)
+                                if (colIdx[k] == col)
+                                {
+                                    values[k] += alpha * aValues[ka];
+                                    break;
+                                }
+                        }
+                    }
+
+                    for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
+                    {
+                        var col = B.columnIndices[kb];
+                        if (workspace[col] != i + 1)
+                        {
+                            values[pos] = beta * bValues[kb];
+                            workspace[col] = i + 1;
+                            pos++;
+                        }
+                        else
+                        {
+                            // Find position of this column in the output segment
+                            for (var k = rowPtr[i]; k < pos; k++)
+                                if (colIdx[k] == col)
+                                {
+                                    values[k] += beta * bValues[kb];
+                                    break;
+                                }
+                        }
+                    }
+
+                    return workspace;
+                },
+                workspace => ArrayPool<int>.Shared.Return(workspace, true));
+        }
+        else
+        {
+            var workspace = ArrayPool<int>.Shared.Rent(A.ncols);
+            try
             {
-                for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
+                Array.Clear(workspace, 0, workspace.Length);
+                var pos = 0;
+                for (var i = 0; i < A.nrows; i++)
                 {
-                    var col = A.columnIndices[ka];
-                    if (workspace[col] == 0)
+                    for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
                     {
-                        values[pos] = alpha * aValues[ka];
-                        workspace[col] = pos + 1;
-                        pos++;
+                        var col = A.columnIndices[ka];
+                        if (workspace[col] == 0)
+                        {
+                            values[pos] = alpha * aValues[ka];
+                            workspace[col] = pos + 1;
+                            pos++;
+                        }
+                        else
+                        {
+                            values[workspace[col] - 1] += alpha * aValues[ka];
+                        }
                     }
-                    else
-                    {
-                        values[workspace[col] - 1] += alpha * aValues[ka];
-                    }
-                }
 
-                for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
-                {
-                    var col = B.columnIndices[kb];
-                    if (workspace[col] == 0)
+                    for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
                     {
-                        values[pos] = beta * bValues[kb];
-                        workspace[col] = pos + 1;
-                        pos++;
+                        var col = B.columnIndices[kb];
+                        if (workspace[col] == 0)
+                        {
+                            values[pos] = beta * bValues[kb];
+                            workspace[col] = pos + 1;
+                            pos++;
+                        }
+                        else
+                        {
+                            values[workspace[col] - 1] += beta * bValues[kb];
+                        }
                     }
-                    else
-                    {
-                        values[workspace[col] - 1] += beta * bValues[kb];
-                    }
-                }
 
-                for (var k = rowPtr[i]; k < rowPtr[i + 1]; k++) workspace[colIdx[k]] = 0;
+                    for (var k = rowPtr[i]; k < rowPtr[i + 1]; k++) workspace[colIdx[k]] = 0;
+                }
             }
+            finally
+            {
+                ArrayPool<int>.Shared.Return(workspace);
+            }
+        }
 
-            return values;
-        }
-        finally
-        {
-            ArrayPool<int>.Shared.Return(workspace);
-        }
+        return values;
     }
 
     public static CSR Add(CSR A, CSR B, double alpha = 1.0, double beta = 1.0)
@@ -1908,6 +2052,29 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
     {
         ThrowIfDisposed();
         var localValues = GetValuesOrThrow();
+
+        if (localValues.Length >= MIN_ROWS_FOR_PARALLEL)
+        {
+            var lockObj = new object();
+            var totalSum = 0.0;
+            Parallel.ForEach(
+                Partitioner.Create(0, localValues.Length),
+                ParallelConfig.Options,
+                () => 0.0,
+                (range, loopState, partialSum) =>
+                {
+                    var localSum = partialSum;
+                    for (var i = range.Item1; i < range.Item2; i++)
+                        localSum += localValues[i] * localValues[i];
+                    return localSum;
+                },
+                partialSum =>
+                {
+                    lock (lockObj) { totalSum += partialSum; }
+                });
+            return Math.Sqrt(totalSum);
+        }
+
         var sum = 0.0;
         foreach (var val in localValues) sum += val * val;
         return Math.Sqrt(sum);
@@ -2522,44 +2689,54 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
             throw new ArgumentException("Symmetric matrix requires rows == cols", nameof(symmetric));
 
         var random = new Random(seed);
-        var rowsList = new List<List<int>>(rows);
-        var rowValuesList = new List<List<double>>(rows); // FIXED: Track values per row atomically
+        var nnzPerRow = Math.Max(1, (int)(cols * sparsity));
+
+        // First pass: build row structure and count total nnz
+        var rowPointers = new int[rows + 1];
+        var rowColLists = new int[rows][];
+        var rowValLists = new double[rows][];
 
         for (var i = 0; i < rows; i++)
         {
-            var row = new List<int>();
-            var rowValues = new List<double>(); // FIXED: Values for this row
-            var nnzThisRow = Math.Max(1, (int)(cols * sparsity)); // At least 1 entry per row
             var colsSet = new HashSet<int>();
+            var rowCols = new List<int>(nnzPerRow);
+            var rowVals = new List<double>(nnzPerRow);
 
-            // FIXED: Limit iterations to prevent infinite loop on high sparsity
-            var maxAttempts = nnzThisRow * 10;
+            var maxAttempts = nnzPerRow * 10;
             var attempts = 0;
-            while (colsSet.Count < nnzThisRow && attempts < maxAttempts)
+            while (colsSet.Count < nnzPerRow && attempts < maxAttempts)
             {
                 var col = random.Next(cols);
                 if (colsSet.Add(col))
                 {
-                    row.Add(col);
-                    rowValues.Add(random.NextDouble()); // FIXED: Add value at same time as column
+                    rowCols.Add(col);
+                    rowVals.Add(random.NextDouble());
                 }
 
                 attempts++;
             }
 
-            // NOTE: Sorting not required - columns can be in any order
-            rowsList.Add(row);
-            rowValuesList.Add(rowValues);
+            rowColLists[i] = rowCols.ToArray();
+            rowValLists[i] = rowVals.ToArray();
+            rowPointers[i + 1] = rowPointers[i] + rowColLists[i].Length;
         }
 
-        var result = new CSR(rowsList, true);
+        // Build flat arrays directly
+        var totalNnz = rowPointers[rows];
+        var columnIndices = new int[totalNnz];
+        var values = new double[totalNnz];
 
-        // FIXED: Build values array atomically matching structure
-        var valuesList = new List<double>();
-        foreach (var rowValues in rowValuesList)
-            valuesList.AddRange(rowValues);
+        for (var i = 0; i < rows; i++)
+        {
+            var start = rowPointers[i];
+            Array.Copy(rowColLists[i], 0, columnIndices, start, rowColLists[i].Length);
+            Array.Copy(rowValLists[i], 0, values, start, rowValLists[i].Length);
+        }
 
-        result.Values = valuesList.ToArray();
+        var ncols = rows > 0 && totalNnz > 0 ? columnIndices.Max() + 1 : 0;
+        ncols = Math.Max(ncols, cols);
+        var result = new CSR(rowPointers, columnIndices, ncols, values, true);
+
         if (symmetric && rows == cols) result = Add(result, result.Transpose(), 0.5, 0.5);
         return result;
     }
@@ -3165,6 +3342,141 @@ public static class CSRIterativeSolvers
         }
 
         throw new InvalidOperationException($"BiCGSTAB did not converge in {maxIterations} iterations");
+    }
+
+    /// <summary>
+    ///     Non-throwing variant of DiagonallyPreconditionedBiCGSTAB.
+    ///     Returns a SolverResult with convergence information instead of throwing on failure.
+    /// </summary>
+    public static SolverResult TrySolve(
+        this CSR matrix,
+        double[] b,
+        double tolerance = 1e-10,
+        int maxIterations = 1000,
+        double[]? x0 = null)
+    {
+        if (matrix == null) throw new ArgumentNullException(nameof(matrix));
+        matrix.ThrowIfDisposed();
+        if (matrix.Rows != matrix.Columns)
+            throw new InvalidOperationException("Matrix must be square for iterative solvers");
+
+        var n = matrix.Rows;
+        DiagonalCache diagCache;
+        try
+        {
+            diagCache = new DiagonalCache(matrix);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new SolverResult(
+                new double[n], 0, double.NaN, false,
+                $"Preconditioner failed: {ex.Message}");
+        }
+
+        var diagInv = diagCache.InverseDiagonal;
+        var x = new double[n];
+        if (x0 != null) Array.Copy(x0, x, n);
+
+        var r = new double[n];
+        Array.Copy(b, r, n);
+        if (x0 != null)
+        {
+            var Ax = matrix.Multiply(x);
+            for (var i = 0; i < n; i++) r[i] -= Ax[i];
+        }
+
+        var r0_hat = (double[])r.Clone();
+        var rho = 1.0;
+        var alpha = 1.0;
+        var omega = 1.0;
+        var v = new double[n];
+        var p = new double[n];
+        var s = new double[n];
+        var t = new double[n];
+        var phat = new double[n];
+        var shat = new double[n];
+
+        var bNormSq = 0.0;
+        for (var i = 0; i < n; i++) bNormSq += b[i] * b[i];
+        var bNorm = Math.Sqrt(bNormSq);
+        var breakdownTol = Math.Max(tolerance * tolerance * bNormSq, 1e-300);
+
+        for (var iter = 0; iter < maxIterations; iter++)
+        {
+            var rho_prev = rho;
+            rho = 0.0;
+            for (var i = 0; i < n; i++) rho += r0_hat[i] * r[i];
+
+            if (Math.Abs(rho) < breakdownTol)
+                return new SolverResult(x, iter + 1, ComputeResidualNorm(r, n), false,
+                    $"BiCGSTAB breakdown: rho = {rho} is below threshold {breakdownTol}");
+
+            if (iter == 0)
+            {
+                Array.Copy(r, p, n);
+            }
+            else
+            {
+                var beta = rho / rho_prev * (alpha / omega);
+                for (var i = 0; i < n; i++) p[i] = r[i] + beta * (p[i] - omega * v[i]);
+            }
+
+            for (var i = 0; i < n; i++) phat[i] = diagInv[i] * p[i];
+            Array.Copy(matrix.Multiply(phat), v, n);
+            alpha = rho;
+            var temp = 0.0;
+            for (var i = 0; i < n; i++) temp += r0_hat[i] * v[i];
+
+            if (Math.Abs(temp) < breakdownTol)
+                return new SolverResult(x, iter + 1, ComputeResidualNorm(r, n), false,
+                    $"BiCGSTAB breakdown: (r0_hat, v) = {temp} is below threshold {breakdownTol}");
+            alpha /= temp;
+
+            for (var i = 0; i < n; i++) s[i] = r[i] - alpha * v[i];
+            var sNorm = 0.0;
+            for (var i = 0; i < n; i++) sNorm += s[i] * s[i];
+            if (Math.Sqrt(sNorm) < tolerance)
+            {
+                for (var i = 0; i < n; i++) x[i] += alpha * phat[i];
+                return new SolverResult(x, iter + 1, Math.Sqrt(sNorm), true);
+            }
+
+            for (var i = 0; i < n; i++) shat[i] = diagInv[i] * s[i];
+            Array.Copy(matrix.Multiply(shat), t, n);
+            var ts = 0.0;
+            var tt = 0.0;
+            for (var i = 0; i < n; i++)
+            {
+                ts += t[i] * s[i];
+                tt += t[i] * t[i];
+            }
+
+            if (Math.Abs(tt) < breakdownTol)
+                return new SolverResult(x, iter + 1, ComputeResidualNorm(r, n), false,
+                    $"BiCGSTAB breakdown: (t, t) = {tt} is below threshold {breakdownTol}");
+            omega = ts / tt;
+
+            for (var i = 0; i < n; i++)
+            {
+                x[i] += alpha * phat[i] + omega * shat[i];
+                r[i] = s[i] - omega * t[i];
+            }
+
+            var rNorm = ComputeResidualNorm(r, n);
+            if (rNorm < tolerance)
+                return new SolverResult(x, iter + 1, rNorm, true);
+        }
+
+        return new SolverResult(x, maxIterations, ComputeResidualNorm(r, n), false,
+            $"BiCGSTAB did not converge in {maxIterations} iterations");
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static double ComputeResidualNorm(double[] r, int n)
+    {
+        var norm = 0.0;
+        for (var i = 0; i < n; i++) norm += r[i] * r[i];
+        return Math.Sqrt(norm);
     }
 
     public static double[] SmallestEigenvalues(this CSR matrix, int m, double tolerance = 1e-8, int maxIterations = 100)
