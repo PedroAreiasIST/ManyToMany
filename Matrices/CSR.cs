@@ -324,6 +324,7 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
         }
     }
 
+    /// <summary>Density of the matrix: fraction of non-zero entries (nnz / (rows * cols)).</summary>
     public double Sparsity
     {
         get
@@ -1395,54 +1396,42 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
 
         if (A.nrows >= MIN_ROWS_FOR_PARALLEL)
         {
-            // Parallel: each row writes to its own non-overlapping segment in values
+            // Parallel: each row writes to its own non-overlapping segment in values.
+            // Uses workspace as a column→position map (storing position+1, with 0 meaning "unseen").
+            // This gives O(1) lookup for duplicate columns, avoiding the previous O(nnz_per_row) linear search.
             Parallel.For(0, A.nrows, ParallelConfig.Options,
                 () => ArrayPool<int>.Shared.Rent(A.ncols),
                 (i, loopState, workspace) =>
                 {
-                    // Build position map for this row's output segment
-                    var pos = rowPtr[i];
+                    // First, build position map from the colIdx that AddIndices produced for this row.
+                    // workspace[col] = position_in_values + 1 (0 means not yet seen).
+                    // We use row-local timestamp (i+1) shifted approach: store actual output position.
+                    var rowStart = rowPtr[i];
+                    var rowEnd = rowPtr[i + 1];
+
+                    // Clear workspace entries for columns in this row's output segment
+                    for (var k = rowStart; k < rowEnd; k++)
+                        workspace[colIdx[k]] = k + 1; // +1 so that 0 means "no mapping"
+
+                    // Accumulate A's contributions
                     for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
                     {
                         var col = A.columnIndices[ka];
-                        if (workspace[col] != i + 1)
-                        {
-                            values[pos] = alpha * aValues[ka];
-                            workspace[col] = i + 1;
-                            pos++;
-                        }
-                        else
-                        {
-                            // Find position of this column in the output segment
-                            for (var k = rowPtr[i]; k < pos; k++)
-                                if (colIdx[k] == col)
-                                {
-                                    values[k] += alpha * aValues[ka];
-                                    break;
-                                }
-                        }
+                        var mappedPos = workspace[col] - 1; // O(1) lookup
+                        values[mappedPos] += alpha * aValues[ka];
                     }
 
+                    // Accumulate B's contributions
                     for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
                     {
                         var col = B.columnIndices[kb];
-                        if (workspace[col] != i + 1)
-                        {
-                            values[pos] = beta * bValues[kb];
-                            workspace[col] = i + 1;
-                            pos++;
-                        }
-                        else
-                        {
-                            // Find position of this column in the output segment
-                            for (var k = rowPtr[i]; k < pos; k++)
-                                if (colIdx[k] == col)
-                                {
-                                    values[k] += beta * bValues[kb];
-                                    break;
-                                }
-                        }
+                        var mappedPos = workspace[col] - 1; // O(1) lookup
+                        values[mappedPos] += beta * bValues[kb];
                     }
+
+                    // Reset workspace entries for this row (only touch columns we used)
+                    for (var k = rowStart; k < rowEnd; k++)
+                        workspace[colIdx[k]] = 0;
 
                     return workspace;
                 },
@@ -1563,35 +1552,64 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
                 $"Dimension mismatch: A is {A.nrows}x{A.ncols}, B is {B.nrows}x{B.ncols}");
 
         var rowPtr = new int[A.nrows + 1];
-        var marker = ArrayPool<int>.Shared.Rent(A.ncols);
-        try
+
+        if (A.nrows >= MIN_ROWS_FOR_PARALLEL)
         {
-            Array.Fill(marker, -1, 0, A.ncols);
-            var totalNnz = 0;
+            // Parallel: compute row counts independently, then prefix sum
+            var rowCounts = new int[A.nrows];
+            Parallel.For(0, A.nrows, ParallelConfig.Options,
+                () => ArrayPool<int>.Shared.Rent(A.ncols),
+                (i, loopState, workspace) =>
+                {
+                    // Mark all columns present in row i of A using timestamp trick
+                    for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
+                        workspace[A.columnIndices[ka]] = i + 1;
+
+                    // Count columns that are also present in row i of B
+                    var nnzThisRow = 0;
+                    for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
+                        if (workspace[B.columnIndices[kb]] == i + 1)
+                            nnzThisRow++;
+
+                    rowCounts[i] = nnzThisRow;
+                    return workspace;
+                },
+                workspace => ArrayPool<int>.Shared.Return(workspace, true));
+
             rowPtr[0] = 0;
-
             for (var i = 0; i < A.nrows; i++)
-            {
-                // Mark all columns present in row i of A
-                for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
-                    marker[A.columnIndices[ka]] = i;
-
-                // Count columns that are also present in row i of B
-                var nnzThisRow = 0;
-                for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
-                    if (marker[B.columnIndices[kb]] == i)
-                        nnzThisRow++;
-
-                totalNnz += nnzThisRow;
-                rowPtr[i + 1] = totalNnz;
-            }
-
-            return rowPtr;
+                rowPtr[i + 1] = rowPtr[i] + rowCounts[i];
         }
-        finally
+        else
         {
-            ArrayPool<int>.Shared.Return(marker);
+            var marker = ArrayPool<int>.Shared.Rent(A.ncols);
+            try
+            {
+                Array.Fill(marker, -1, 0, A.ncols);
+                var totalNnz = 0;
+                rowPtr[0] = 0;
+
+                for (var i = 0; i < A.nrows; i++)
+                {
+                    for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
+                        marker[A.columnIndices[ka]] = i;
+
+                    var nnzThisRow = 0;
+                    for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
+                        if (marker[B.columnIndices[kb]] == i)
+                            nnzThisRow++;
+
+                    totalNnz += nnzThisRow;
+                    rowPtr[i + 1] = totalNnz;
+                }
+            }
+            finally
+            {
+                ArrayPool<int>.Shared.Return(marker);
+            }
         }
+
+        return rowPtr;
     }
 
     /// <summary>
@@ -1607,33 +1625,57 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
         B.ThrowIfDisposed();
 
         var colIdx = new int[rowPtr[^1]];
-        var marker = ArrayPool<int>.Shared.Rent(A.ncols);
-        try
+
+        if (A.nrows >= MIN_ROWS_FOR_PARALLEL)
         {
-            Array.Fill(marker, -1, 0, A.ncols);
-            var pos = 0;
-
-            for (var i = 0; i < A.nrows; i++)
-            {
-                // Mark all columns present in row i of A
-                for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
-                    marker[A.columnIndices[ka]] = i;
-
-                // Add columns that are also present in row i of B
-                for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
+            // Parallel: each row writes to its own non-overlapping segment in colIdx
+            Parallel.For(0, A.nrows, ParallelConfig.Options,
+                () => ArrayPool<int>.Shared.Rent(A.ncols),
+                (i, loopState, workspace) =>
                 {
-                    var col = B.columnIndices[kb];
-                    if (marker[col] == i)
-                        colIdx[pos++] = col;
+                    for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
+                        workspace[A.columnIndices[ka]] = i + 1;
+
+                    var pos = rowPtr[i];
+                    for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
+                    {
+                        var col = B.columnIndices[kb];
+                        if (workspace[col] == i + 1)
+                            colIdx[pos++] = col;
+                    }
+
+                    return workspace;
+                },
+                workspace => ArrayPool<int>.Shared.Return(workspace, true));
+        }
+        else
+        {
+            var marker = ArrayPool<int>.Shared.Rent(A.ncols);
+            try
+            {
+                Array.Fill(marker, -1, 0, A.ncols);
+                var pos = 0;
+
+                for (var i = 0; i < A.nrows; i++)
+                {
+                    for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
+                        marker[A.columnIndices[ka]] = i;
+
+                    for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
+                    {
+                        var col = B.columnIndices[kb];
+                        if (marker[col] == i)
+                            colIdx[pos++] = col;
+                    }
                 }
             }
+            finally
+            {
+                ArrayPool<int>.Shared.Return(marker);
+            }
+        }
 
-            return colIdx;
-        }
-        finally
-        {
-            ArrayPool<int>.Shared.Return(marker);
-        }
+        return colIdx;
     }
 
     /// <summary>
@@ -1652,38 +1694,67 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
         var aValues = A.GetValuesInternal();
         var bValues = B.GetValuesInternal();
         var values = new double[colIdx.Length];
-        var markerIdx = ArrayPool<int>.Shared.Rent(A.ncols);
-        try
+
+        if (A.nrows >= MIN_ROWS_FOR_PARALLEL)
         {
-            Array.Fill(markerIdx, -1, 0, A.ncols);
-            var pos = 0;
-
-            for (var i = 0; i < A.nrows; i++)
-            {
-                // Store index into A's values for each column in row i
-                for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
-                    markerIdx[A.columnIndices[ka]] = ka;
-
-                // Compute Hadamard product for intersecting entries
-                for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
+            // Parallel: each row writes to its own non-overlapping segment in values
+            Parallel.For(0, A.nrows, ParallelConfig.Options,
+                () => ArrayPool<int>.Shared.Rent(A.ncols),
+                (i, loopState, workspace) =>
                 {
-                    var col = B.columnIndices[kb];
-                    var ka = markerIdx[col];
-                    if (ka != -1) // Column exists in A for this row
-                        values[pos++] = aValues[ka] * bValues[kb];
-                }
+                    // Store index into A's values for each column (using timestamp+offset encoding)
+                    for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
+                        workspace[A.columnIndices[ka]] = ka + 1; // +1 so 0 = "not present"
 
-                // Clear markers for this row
-                for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
-                    markerIdx[A.columnIndices[ka]] = -1;
-            }
+                    var pos = rowPtr[i];
+                    for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
+                    {
+                        var col = B.columnIndices[kb];
+                        var kaEncoded = workspace[col];
+                        if (kaEncoded > 0) // Column exists in A for this row
+                            values[pos++] = aValues[kaEncoded - 1] * bValues[kb];
+                    }
 
-            return values;
+                    // Clear markers for this row
+                    for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
+                        workspace[A.columnIndices[ka]] = 0;
+
+                    return workspace;
+                },
+                workspace => ArrayPool<int>.Shared.Return(workspace, true));
         }
-        finally
+        else
         {
-            ArrayPool<int>.Shared.Return(markerIdx);
+            var markerIdx = ArrayPool<int>.Shared.Rent(A.ncols);
+            try
+            {
+                Array.Fill(markerIdx, -1, 0, A.ncols);
+                var pos = 0;
+
+                for (var i = 0; i < A.nrows; i++)
+                {
+                    for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
+                        markerIdx[A.columnIndices[ka]] = ka;
+
+                    for (var kb = B.rowPointers[i]; kb < B.rowPointers[i + 1]; kb++)
+                    {
+                        var col = B.columnIndices[kb];
+                        var ka = markerIdx[col];
+                        if (ka != -1)
+                            values[pos++] = aValues[ka] * bValues[kb];
+                    }
+
+                    for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)
+                        markerIdx[A.columnIndices[ka]] = -1;
+                }
+            }
+            finally
+            {
+                ArrayPool<int>.Shared.Return(markerIdx);
+            }
         }
+
+        return values;
     }
 
     /// <summary>
@@ -1782,6 +1853,13 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
         }
     }
 
+    /// <summary>
+    ///     Computes the transpose along with position tracking.
+    ///     For each entry <c>k</c> in the transposed matrix, <c>positionTracking[k]</c> gives
+    ///     the 0-based index of that entry within its original row in the source matrix.
+    ///     For example, if transposed entry <c>k</c> came from the 3rd non-zero in its original row,
+    ///     <c>positionTracking[k] == 2</c>.
+    /// </summary>
     public (CSR transpose, int[] positionTracking) TransposeWithPositions()
     {
         ThrowIfDisposed();
@@ -1814,12 +1892,12 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
             var kOrigRow = 0;
             for (var k = rowPointers[i]; k < rowPointers[i + 1]; k++)
             {
-                kOrigRow++;
                 var col = columnIndices[k];
                 var posT = Interlocked.Increment(ref next[col]) - 1;
                 colIdxT[posT] = i;
                 if (valuesT != null && localValues != null) valuesT[posT] = localValues[k];
                 positions[posT] = kOrigRow;
+                kOrigRow++;
             }
         });
         return (new CSR(rowPtrT, colIdxT, nrows, valuesT, true), positions);
@@ -2182,7 +2260,11 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
         }
     }
 
-    /// <summary>Density of the matrix (fraction of non-zeros), equivalent to Sparsity.</summary>
+    /// <summary>
+    ///     Density of the matrix: fraction of non-zero entries (nnz / (rows * cols)).
+    ///     Note: Both <see cref="Density"/> and <see cref="Sparsity"/> return the same value
+    ///     (the non-zero ratio). The <c>Sparsity</c> name is retained for backward compatibility.
+    /// </summary>
     public double Density
     {
         get
@@ -2668,14 +2750,19 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
                     continue;
 
                 var offset = rowPtr[i];
-                var ordered = rowMap.OrderBy(p => p.Key);
+                var count = rowMap.Count;
+
+                // Copy keys and values into output arrays, then sort in-place
                 var p = 0;
-                foreach (var (col, value) in ordered)
+                foreach (var (col, value) in rowMap)
                 {
                     colIdx[offset + p] = col;
                     valuesOut[offset + p] = value;
                     p++;
                 }
+
+                // Sort columns (and corresponding values) in-place by column index
+                Array.Sort(colIdx, valuesOut, offset, count);
             }
 
             return new CSR(rowPtr, colIdx, nCols, valuesOut, true);
@@ -2714,10 +2801,12 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
                     continue;
 
                 var offset = rowPtr[i];
-                var ordered = rowSet.OrderBy(c => c);
                 var p = 0;
-                foreach (var col in ordered)
+                foreach (var col in rowSet)
                     colIdx[offset + p++] = col;
+
+                // Sort column indices in-place
+                Array.Sort(colIdx, offset, rowSet.Count);
             }
 
             return new CSR(rowPtr, colIdx, nCols, null, true);
@@ -3017,6 +3106,9 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
 
     public static CSR Identity(int n)
     {
+        if (n < 0)
+            throw new ArgumentOutOfRangeException(nameof(n), "Identity matrix size must be non-negative");
+
         var rowPtr = new int[n + 1];
         var colIdx = new int[n];
         var vals = new double[n];
@@ -3260,7 +3352,12 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
                 return new CSR(nodeRowPtrs, nodeColIdx, nodeCount, null, true);
 
             // Expand to DOF level
-            var totalDofs = nodeCount * dofsPerNode;
+            var totalDofsLong = (long)nodeCount * dofsPerNode;
+            if (totalDofsLong > int.MaxValue)
+                throw new OverflowException(
+                    $"DOF expansion overflows: {nodeCount} nodes * {dofsPerNode} DOFs/node = {totalDofsLong:N0}, " +
+                    "which exceeds int.MaxValue. Consider reducing mesh size or using a partitioned approach.");
+            var totalDofs = (int)totalDofsLong;
             var dofRowPtrs = new int[totalDofs + 1];
 
             // Each node-node connection becomes a dofsPerNode × dofsPerNode block
@@ -3461,9 +3558,8 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
 
     /// <summary>
     ///     Returns a hash code based on dimensions and structural data.
-    ///     Note: Equals uses tolerance-based comparison for values, making CSR unsuitable
-    ///     as a dictionary key when tolerance-sensitive equality is needed. This hash code
-    ///     uses only structural invariants (dimensions, nnz, row pointers) for consistency.
+    ///     Uses only structural invariants (dimensions, nnz, row pointers) for fast computation.
+    ///     Note: Equals uses exact value comparison via SequenceEqual.
     /// </summary>
     public override int GetHashCode()
     {
@@ -3560,1746 +3656,4 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
     }
 
     #endregion
-}
-
-file class DiagonalCache
-{
-    public DiagonalCache(CSR matrix)
-    {
-        var matrixValues = matrix.GetValuesInternal();
-        if (matrix.Rows != matrix.Columns)
-            throw new InvalidOperationException("Matrix must be square for diagonal extraction");
-
-        var n = matrix.Rows;
-        InverseDiagonal = new double[n];
-        var rowPtrs = matrix.RowPointersArray;
-        var colIndices = matrix.ColumnIndicesArray;
-
-        // FIXED: Use relative tolerance based on matrix scale
-        // First pass: find the maximum absolute diagonal value
-        var maxAbsDiag = 0.0;
-        for (var i = 0; i < n; i++)
-        for (var k = rowPtrs[i]; k < rowPtrs[i + 1]; k++)
-            if (colIndices[k] == i)
-            {
-                maxAbsDiag = Math.Max(maxAbsDiag, Math.Abs(matrixValues[k]));
-                break;
-            }
-
-        // Use relative tolerance for zero detection
-        var zeroTol = Math.Max(maxAbsDiag * 1e-14, 1e-300);
-
-        for (var i = 0; i < n; i++)
-        {
-            var found = false;
-            for (var k = rowPtrs[i]; k < rowPtrs[i + 1]; k++)
-                if (colIndices[k] == i)
-                {
-                    if (Math.Abs(matrixValues[k]) < zeroTol)
-                        throw new InvalidOperationException(
-                            $"Zero or near-zero diagonal element at position {i}: value = {matrixValues[k]}, " +
-                            $"threshold = {zeroTol} (relative to max diagonal {maxAbsDiag})");
-                    InverseDiagonal[i] = 1.0 / matrixValues[k];
-                    found = true;
-                    break;
-                }
-
-            if (!found)
-                throw new InvalidOperationException($"Missing diagonal entry at row {i}");
-        }
-    }
-
-    public double[] InverseDiagonal { get; }
-}
-
-public static class CSRIterativeSolvers
-{
-    // FIXED: Issue #18 - Relative tolerance for breakdown detection
-    public static double[] DiagonallyPreconditionedBiCGSTAB(
-        this CSR matrix,
-        double[] b,
-        double tolerance = 1e-10,
-        int maxIterations = 1000,
-        double[]? x0 = null)
-    {
-        if (matrix == null) throw new ArgumentNullException(nameof(matrix));
-        matrix.ThrowIfDisposed();
-        if (matrix.Rows != matrix.Columns)
-            throw new InvalidOperationException("Matrix must be square for iterative solvers");
-
-        var n = matrix.Rows;
-        var diagInv = new DiagonalCache(matrix).InverseDiagonal;
-        var x = new double[n];
-        if (x0 != null) Array.Copy(x0, x, n);
-
-        var r = new double[n];
-        Array.Copy(b, r, n);
-        if (x0 != null)
-        {
-            var Ax = matrix.Multiply(x);
-            for (var i = 0; i < n; i++) r[i] -= Ax[i];
-        }
-
-        var r0_hat = (double[])r.Clone();
-        var rho = 1.0;
-        var alpha = 1.0;
-        var omega = 1.0;
-        var v = new double[n];
-        var p = new double[n];
-        var s = new double[n];
-        var t = new double[n];
-        var phat = new double[n];
-        var shat = new double[n];
-
-        // FIXED: Issue #18 - Compute relative breakdown tolerance based on RHS norm
-        // This prevents false breakdowns for systems with large/small values
-        var bNormSq = 0.0;
-        for (var i = 0; i < n; i++) bNormSq += b[i] * b[i];
-        var bNorm = Math.Sqrt(bNormSq);
-
-        // Use relative tolerance scaled by squared norm (since we're checking dot products)
-        // Minimum absolute tolerance to handle zero RHS case
-        var breakdownTol = Math.Max(tolerance * tolerance * bNormSq, 1e-300);
-
-        for (var iter = 0; iter < maxIterations; iter++)
-        {
-            var rho_prev = rho;
-            rho = 0.0;
-            for (var i = 0; i < n; i++) rho += r0_hat[i] * r[i];
-
-            // FIXED: Issue #18 - Use relative tolerance
-            if (Math.Abs(rho) < breakdownTol)
-                throw new InvalidOperationException(
-                    $"BiCGSTAB breakdown: rho = {rho} is below threshold {breakdownTol}");
-
-            if (iter == 0)
-            {
-                Array.Copy(r, p, n);
-            }
-            else
-            {
-                var beta = rho / rho_prev * (alpha / omega);
-                for (var i = 0; i < n; i++) p[i] = r[i] + beta * (p[i] - omega * v[i]);
-            }
-
-            for (var i = 0; i < n; i++) phat[i] = diagInv[i] * p[i];
-            Array.Copy(matrix.Multiply(phat), v, n);
-            alpha = rho;
-            var temp = 0.0;
-            for (var i = 0; i < n; i++) temp += r0_hat[i] * v[i];
-
-            // FIXED: Issue #18 - Use relative tolerance
-            if (Math.Abs(temp) < breakdownTol)
-                throw new InvalidOperationException(
-                    $"BiCGSTAB breakdown: (r0_hat, v) = {temp} is below threshold {breakdownTol}");
-            alpha /= temp;
-
-            for (var i = 0; i < n; i++) s[i] = r[i] - alpha * v[i];
-            var sNorm = 0.0;
-            for (var i = 0; i < n; i++) sNorm += s[i] * s[i];
-            if (Math.Sqrt(sNorm) < tolerance)
-            {
-                for (var i = 0; i < n; i++) x[i] += alpha * phat[i];
-                return x;
-            }
-
-            for (var i = 0; i < n; i++) shat[i] = diagInv[i] * s[i];
-            Array.Copy(matrix.Multiply(shat), t, n);
-            var ts = 0.0;
-            var tt = 0.0;
-            for (var i = 0; i < n; i++)
-            {
-                ts += t[i] * s[i];
-                tt += t[i] * t[i];
-            }
-
-            // FIXED: Issue #18 - Use relative tolerance
-            if (Math.Abs(tt) < breakdownTol)
-                throw new InvalidOperationException(
-                    $"BiCGSTAB breakdown: (t, t) = {tt} is below threshold {breakdownTol}");
-            omega = ts / tt;
-
-            for (var i = 0; i < n; i++)
-            {
-                x[i] += alpha * phat[i] + omega * shat[i];
-                r[i] = s[i] - omega * t[i];
-            }
-
-            var rNorm = 0.0;
-            for (var i = 0; i < n; i++) rNorm += r[i] * r[i];
-            if (Math.Sqrt(rNorm) < tolerance) return x;
-        }
-
-        throw new InvalidOperationException($"BiCGSTAB did not converge in {maxIterations} iterations");
-    }
-
-    /// <summary>
-    ///     Non-throwing variant of DiagonallyPreconditionedBiCGSTAB.
-    ///     Returns a SolverResult with convergence information instead of throwing on failure.
-    /// </summary>
-    public static SolverResult TrySolve(
-        this CSR matrix,
-        double[] b,
-        double tolerance = 1e-10,
-        int maxIterations = 1000,
-        double[]? x0 = null)
-    {
-        if (matrix == null) throw new ArgumentNullException(nameof(matrix));
-        matrix.ThrowIfDisposed();
-        if (matrix.Rows != matrix.Columns)
-            throw new InvalidOperationException("Matrix must be square for iterative solvers");
-
-        var n = matrix.Rows;
-        DiagonalCache diagCache;
-        try
-        {
-            diagCache = new DiagonalCache(matrix);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return new SolverResult(
-                new double[n], 0, double.NaN, false,
-                $"Preconditioner failed: {ex.Message}");
-        }
-
-        var diagInv = diagCache.InverseDiagonal;
-        var x = new double[n];
-        if (x0 != null) Array.Copy(x0, x, n);
-
-        var r = new double[n];
-        Array.Copy(b, r, n);
-        if (x0 != null)
-        {
-            var Ax = matrix.Multiply(x);
-            for (var i = 0; i < n; i++) r[i] -= Ax[i];
-        }
-
-        var r0_hat = (double[])r.Clone();
-        var rho = 1.0;
-        var alpha = 1.0;
-        var omega = 1.0;
-        var v = new double[n];
-        var p = new double[n];
-        var s = new double[n];
-        var t = new double[n];
-        var phat = new double[n];
-        var shat = new double[n];
-
-        var bNormSq = 0.0;
-        for (var i = 0; i < n; i++) bNormSq += b[i] * b[i];
-        var bNorm = Math.Sqrt(bNormSq);
-        var breakdownTol = Math.Max(tolerance * tolerance * bNormSq, 1e-300);
-
-        for (var iter = 0; iter < maxIterations; iter++)
-        {
-            var rho_prev = rho;
-            rho = 0.0;
-            for (var i = 0; i < n; i++) rho += r0_hat[i] * r[i];
-
-            if (Math.Abs(rho) < breakdownTol)
-                return new SolverResult(x, iter + 1, ComputeResidualNorm(r, n), false,
-                    $"BiCGSTAB breakdown: rho = {rho} is below threshold {breakdownTol}");
-
-            if (iter == 0)
-            {
-                Array.Copy(r, p, n);
-            }
-            else
-            {
-                var beta = rho / rho_prev * (alpha / omega);
-                for (var i = 0; i < n; i++) p[i] = r[i] + beta * (p[i] - omega * v[i]);
-            }
-
-            for (var i = 0; i < n; i++) phat[i] = diagInv[i] * p[i];
-            Array.Copy(matrix.Multiply(phat), v, n);
-            alpha = rho;
-            var temp = 0.0;
-            for (var i = 0; i < n; i++) temp += r0_hat[i] * v[i];
-
-            if (Math.Abs(temp) < breakdownTol)
-                return new SolverResult(x, iter + 1, ComputeResidualNorm(r, n), false,
-                    $"BiCGSTAB breakdown: (r0_hat, v) = {temp} is below threshold {breakdownTol}");
-            alpha /= temp;
-
-            for (var i = 0; i < n; i++) s[i] = r[i] - alpha * v[i];
-            var sNorm = 0.0;
-            for (var i = 0; i < n; i++) sNorm += s[i] * s[i];
-            if (Math.Sqrt(sNorm) < tolerance)
-            {
-                for (var i = 0; i < n; i++) x[i] += alpha * phat[i];
-                return new SolverResult(x, iter + 1, Math.Sqrt(sNorm), true);
-            }
-
-            for (var i = 0; i < n; i++) shat[i] = diagInv[i] * s[i];
-            Array.Copy(matrix.Multiply(shat), t, n);
-            var ts = 0.0;
-            var tt = 0.0;
-            for (var i = 0; i < n; i++)
-            {
-                ts += t[i] * s[i];
-                tt += t[i] * t[i];
-            }
-
-            if (Math.Abs(tt) < breakdownTol)
-                return new SolverResult(x, iter + 1, ComputeResidualNorm(r, n), false,
-                    $"BiCGSTAB breakdown: (t, t) = {tt} is below threshold {breakdownTol}");
-            omega = ts / tt;
-
-            for (var i = 0; i < n; i++)
-            {
-                x[i] += alpha * phat[i] + omega * shat[i];
-                r[i] = s[i] - omega * t[i];
-            }
-
-            var rNorm = ComputeResidualNorm(r, n);
-            if (rNorm < tolerance)
-                return new SolverResult(x, iter + 1, rNorm, true);
-        }
-
-        return new SolverResult(x, maxIterations, ComputeResidualNorm(r, n), false,
-            $"BiCGSTAB did not converge in {maxIterations} iterations");
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static double ComputeResidualNorm(double[] r, int n)
-    {
-        var norm = 0.0;
-        for (var i = 0; i < n; i++) norm += r[i] * r[i];
-        return Math.Sqrt(norm);
-    }
-
-    public static double[] SmallestEigenvalues(this CSR matrix, int m, double tolerance = 1e-8, int maxIterations = 100)
-    {
-        ArgumentNullException.ThrowIfNull(matrix);
-        matrix.ThrowIfDisposed();
-
-        if (matrix.Rows != matrix.Columns)
-            throw new InvalidOperationException("Eigenvalue computation requires a square matrix.");
-        if (m <= 0)
-            throw new ArgumentOutOfRangeException(nameof(m), "Number of requested eigenvalues must be positive.");
-        if (m > matrix.Rows)
-            throw new ArgumentOutOfRangeException(nameof(m),
-                $"Cannot request {m} eigenvalues from a {matrix.Rows}x{matrix.Columns} matrix.");
-        if (tolerance <= 0)
-            throw new ArgumentOutOfRangeException(nameof(tolerance), "Tolerance must be positive.");
-        if (maxIterations <= 0)
-            throw new ArgumentOutOfRangeException(nameof(maxIterations), "Maximum iterations must be positive.");
-
-        var n = matrix.Rows;
-        var basis = new double[m][];
-        var current = new double[m][];
-        var eigenvalues = new double[m];
-
-        // Deterministic initialization to keep behavior reproducible.
-        for (var k = 0; k < m; k++)
-        {
-            var v = new double[n];
-            for (var i = 0; i < n; i++) v[i] = Math.Sin((k + 1) * (i + 1));
-            basis[k] = v;
-            current[k] = new double[n];
-        }
-
-        OrthogonalizeAndNormalize(basis, m, n);
-
-        for (var iteration = 0; iteration < maxIterations; iteration++)
-        {
-            var maxLambdaDelta = 0.0;
-
-            for (var k = 0; k < m; k++)
-            {
-                var solve = matrix.TrySolve(basis[k], tolerance * 0.1, Math.Max(200, matrix.Rows * 2));
-                if (!solve.Converged)
-                    throw new SolverException(
-                        $"Inverse iteration failed while computing eigenvalue #{k + 1}: {solve.Message ?? "solver did not converge"}");
-
-                Array.Copy(solve.Solution, current[k], n);
-            }
-
-            OrthogonalizeAndNormalize(current, m, n);
-
-            for (var k = 0; k < m; k++)
-            {
-                var Av = matrix.Multiply(current[k]);
-                var numerator = Dot(current[k], Av, n);
-                var denominator = Dot(current[k], current[k], n);
-
-                if (Math.Abs(denominator) <= DEFAULT_TOLERANCE)
-                    throw new SolverException("Encountered near-zero eigenvector norm during eigenvalue estimation.");
-
-                var lambda = numerator / denominator;
-                maxLambdaDelta = Math.Max(maxLambdaDelta, Math.Abs(lambda - eigenvalues[k]));
-                eigenvalues[k] = lambda;
-            }
-
-            // Keep iteration basis updated.
-            for (var k = 0; k < m; k++) Array.Copy(current[k], basis[k], n);
-
-            if (maxLambdaDelta < tolerance) break;
-        }
-
-        Array.Sort(eigenvalues);
-        return eigenvalues;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static double Dot(double[] a, double[] b, int n)
-    {
-        var sum = 0.0;
-        for (var i = 0; i < n; i++) sum += a[i] * b[i];
-        return sum;
-    }
-
-    private static void OrthogonalizeAndNormalize(double[][] vectors, int count, int length)
-    {
-        for (var i = 0; i < count; i++)
-        {
-            var vi = vectors[i];
-
-            for (var j = 0; j < i; j++)
-            {
-                var vj = vectors[j];
-                var projection = Dot(vi, vj, length);
-                for (var p = 0; p < length; p++) vi[p] -= projection * vj[p];
-            }
-
-            var norm = Math.Sqrt(Dot(vi, vi, length));
-            if (norm <= DEFAULT_TOLERANCE)
-                throw new SolverException("Failed to build a stable orthonormal basis for eigenvalue computation.");
-
-            var invNorm = 1.0 / norm;
-            for (var p = 0; p < length; p++) vi[p] *= invNorm;
-        }
-    }
-}
-
-public record MatrixStatistics(
-    int Rows,
-    int Columns,
-    int NonZeros,
-    double Sparsity,
-    int MinNnzPerRow,
-    int MaxNnzPerRow,
-    double AvgNnzPerRow);
-
-public record SolverResult(
-    double[] Solution,
-    int Iterations,
-    double ResidualNorm,
-    bool Converged,
-    string? Message = null);
-
-public class SolverException : Exception
-{
-    public SolverException(string message) : base(message)
-    {
-    }
-
-    public SolverException(string message, Exception inner) : base(message, inner)
-    {
-    }
-}
-
-/// <summary>
-///     GPU backend using NVIDIA cuSPARSE - DYNAMIC RESOLUTION VERSION
-///     Portability: Dynamically resolves CUDA 12/11 on Windows and Linux.
-/// </summary>
-internal sealed class CuSparseBackend : IDisposable
-{
-    // Constants
-    private const int CUSPARSE_INDEX_32I = 1;
-    private const int CUSPARSE_INDEX_BASE_ZERO = 0;
-    private const int CUDA_R_64F = 6;
-    private const int CUSPARSE_OPERATION_NON_TRANSPOSE = 0;
-    private const int CUSPARSE_OPERATION_TRANSPOSE = 1;
-    private const int CUSPARSE_SPMV_CSR_ALG2 = 3;
-    private const int cudaMemcpyHostToDevice = 1;
-    private const int cudaMemcpyDeviceToHost = 2;
-
-    // --- 2. Function Pointers (Static Loading) ---
-    private static IntPtr _libCuSparse;
-    private static IntPtr _libCudaRt;
-
-    private static CudaErrorDelegate? _cusparseCreate;
-    private static CudaErrorSinglePtrDelegate? _cusparseDestroy;
-    private static CreateCsrDelegate? _createCsr;
-    private static CudaErrorSinglePtrDelegate? _destroySpMat;
-    private static CreateDnVecDelegate? _createDnVec;
-    private static CudaErrorSinglePtrDelegate? _destroyDnVec;
-    private static SpMVBufferSizeDelegate? _spmvBufferSize;
-    private static SpMVDelegate? _spmv;
-
-    private static MallocDelegate? _cudaMalloc;
-    private static FreeDelegate? _cudaFree;
-    private static MemcpyDelegate? _cudaMemcpy;
-    private static SynchronizeDelegate? _cudaDeviceSynchronize;
-
-    // Complete native library configuration:
-    // - Deep system scanning + pattern-based discovery
-    // - Automatic latest version selection
-    // - Package manager auto-install fallback (Linux/macOS)
-    // - Works with ANY CUDA/MKL version forever
-    private static INativeLibraryConfig _libraryConfig = new NativeLibraryConfig();
-    private readonly object _disposeLock = new(); // FIXED: Thread-safe disposal
-
-    private readonly int nrows, ncols, nnz;
-    private ulong allocatedBufferSize;
-    private IntPtr cusparseHandle = IntPtr.Zero;
-    private IntPtr d_rowPtr = IntPtr.Zero, d_colInd = IntPtr.Zero, d_val = IntPtr.Zero;
-    private IntPtr d_x = IntPtr.Zero, d_y = IntPtr.Zero, d_buffer = IntPtr.Zero;
-    private volatile bool isDisposed;
-    private bool isInitialized;
-    private IntPtr spMatDescr = IntPtr.Zero;
-
-    static CuSparseBackend()
-    {
-        LoadLibraries();
-    }
-
-    public CuSparseBackend(int rows, int cols, int nonZeros)
-    {
-        if (!IsAvailable)
-            throw new PlatformNotSupportedException("CUDA libraries (cudart/cusparse) could not be loaded.");
-        nrows = rows;
-        ncols = cols;
-        nnz = nonZeros;
-    }
-
-    public static bool IsAvailable { get; private set; }
-
-    public void Dispose()
-    {
-        // FIXED: Thread-safe disposal to prevent double-free from finalizer race
-        lock (_disposeLock)
-        {
-            if (isDisposed) return;
-            isDisposed = true; // Set early to prevent re-entry
-            isInitialized = false; // Prevent use of freed GPU resources
-        }
-
-        // Actual cleanup outside lock (CUDA calls may block)
-        try
-        {
-            if (_cusparseDestroy != null && spMatDescr != IntPtr.Zero) _destroySpMat!(spMatDescr);
-            if (_cudaFree != null)
-            {
-                if (d_buffer != IntPtr.Zero) _cudaFree(d_buffer);
-                if (d_x != IntPtr.Zero) _cudaFree(d_x);
-                if (d_y != IntPtr.Zero) _cudaFree(d_y);
-                if (d_val != IntPtr.Zero) _cudaFree(d_val);
-                if (d_colInd != IntPtr.Zero) _cudaFree(d_colInd);
-                if (d_rowPtr != IntPtr.Zero) _cudaFree(d_rowPtr);
-            }
-
-            if (_cusparseDestroy != null && cusparseHandle != IntPtr.Zero) _cusparseDestroy(cusparseHandle);
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"CUDA cleanup exception: {ex.Message}");
-        }
-
-        GC.SuppressFinalize(this);
-    }
-
-    /// <summary>
-    ///     Sets the native library configuration.
-    ///     Must be called before any CuSparseBackend instances are created.
-    /// </summary>
-    /// <param name="config">Configuration specifying library names and search paths</param>
-    public static void SetLibraryConfig(INativeLibraryConfig config)
-    {
-        _libraryConfig = config ?? throw new ArgumentNullException(nameof(config));
-    }
-
-    private static void LoadLibraries()
-    {
-        try
-        {
-            // TURN-KEY: Use robust library loader with comprehensive auto-discovery
-            var rtNames = _libraryConfig.GetCudaRuntimeLibraries();
-            var spNames = _libraryConfig.GetCuSparseLibraries();
-            var searchPaths = _libraryConfig.GetSearchPaths();
-
-            if (rtNames == null || spNames == null)
-            {
-                Debug.WriteLine("[CuSparse] No CUDA libraries configured for this platform");
-                IsAvailable = false;
-                return;
-            }
-
-            Debug.WriteLine("[CuSparse] Searching for CUDA libraries...");
-
-            // Load CUDA Runtime
-            _libCudaRt = RobustNativeLibraryLoader.TryLoadLibrary(rtNames, searchPaths, "CUDA Runtime");
-
-            if (_libCudaRt != IntPtr.Zero)
-            {
-                TryGetExport(_libCudaRt, "cudaMalloc", out _cudaMalloc);
-                TryGetExport(_libCudaRt, "cudaFree", out _cudaFree);
-                TryGetExport(_libCudaRt, "cudaMemcpy", out _cudaMemcpy);
-                TryGetExport(_libCudaRt, "cudaDeviceSynchronize", out _cudaDeviceSynchronize);
-            }
-
-            // Load cuSPARSE
-            _libCuSparse = RobustNativeLibraryLoader.TryLoadLibrary(spNames, searchPaths, "cuSPARSE");
-
-            if (_libCuSparse != IntPtr.Zero)
-            {
-                TryGetExport(_libCuSparse, "cusparseCreate", out _cusparseCreate);
-                TryGetExport(_libCuSparse, "cusparseDestroy", out _cusparseDestroy);
-                TryGetExport(_libCuSparse, "cusparseCreateCsr", out _createCsr);
-                TryGetExport(_libCuSparse, "cusparseDestroySpMat", out _destroySpMat);
-                TryGetExport(_libCuSparse, "cusparseCreateDnVec", out _createDnVec);
-                TryGetExport(_libCuSparse, "cusparseDestroyDnVec", out _destroyDnVec);
-                TryGetExport(_libCuSparse, "cusparseSpMV_bufferSize", out _spmvBufferSize);
-                TryGetExport(_libCuSparse, "cusparseSpMV", out _spmv);
-            }
-
-            IsAvailable = _cudaMalloc != null && _cusparseCreate != null;
-
-            if (IsAvailable)
-                Debug.WriteLine("[CuSparse] ✓ CUDA backend available");
-            else
-                Debug.WriteLine("[CuSparse] × CUDA backend not available");
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[CuSparse] Error: {ex.Message}");
-            IsAvailable = false;
-        }
-    }
-
-    private static bool TryGetExport<T>(IntPtr handle, string name, out T? del) where T : Delegate
-    {
-        if (NativeLibrary.TryGetExport(handle, name, out var addr))
-        {
-            del = Marshal.GetDelegateForFunctionPointer<T>(addr);
-            return true;
-        }
-
-        del = null;
-        return false;
-    }
-
-    public void Initialize(int[] rowPointers, int[] columnIndices, double[] values)
-    {
-        if (isInitialized) throw new InvalidOperationException("Already initialized");
-        CheckCuda(_cusparseCreate!(ref cusparseHandle), "cusparseCreate");
-
-        var rowPtrSize = (ulong)(nrows + 1) * sizeof(int);
-        var colIndSize = (ulong)nnz * sizeof(int);
-        var valSize = (ulong)nnz * sizeof(double);
-        var vecSize = (ulong)Math.Max(nrows, ncols) * sizeof(double);
-
-        CheckCuda(_cudaMalloc!(ref d_rowPtr, rowPtrSize), "malloc rowPtr");
-        CheckCuda(_cudaMalloc!(ref d_colInd, colIndSize), "malloc colInd");
-        CheckCuda(_cudaMalloc!(ref d_val, valSize), "malloc val");
-        CheckCuda(_cudaMalloc!(ref d_x, vecSize), "malloc x");
-        CheckCuda(_cudaMalloc!(ref d_y, vecSize), "malloc y");
-
-        unsafe
-        {
-            fixed (int* pR = rowPointers, pC = columnIndices)
-            fixed (double* pV = values)
-            {
-                CheckCuda(_cudaMemcpy!(d_rowPtr, (IntPtr)pR, rowPtrSize, cudaMemcpyHostToDevice), "memcpy rows");
-                CheckCuda(_cudaMemcpy!(d_colInd, (IntPtr)pC, colIndSize, cudaMemcpyHostToDevice), "memcpy cols");
-                CheckCuda(_cudaMemcpy!(d_val, (IntPtr)pV, valSize, cudaMemcpyHostToDevice), "memcpy vals");
-            }
-        }
-
-        CheckCuda(
-            _createCsr!(ref spMatDescr, nrows, ncols, nnz, d_rowPtr, d_colInd, d_val, CUSPARSE_INDEX_32I,
-                CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F), "createCsr");
-        isInitialized = true;
-    }
-
-    public double[] Multiply(double[] x)
-    {
-        if (!isInitialized) throw new InvalidOperationException("Not initialized");
-        unsafe
-        {
-            fixed (double* px = x)
-            {
-                CheckCuda(_cudaMemcpy!(d_x, (IntPtr)px, (ulong)ncols * sizeof(double), cudaMemcpyHostToDevice),
-                    "memcpy x");
-            }
-        }
-
-        IntPtr vecX = IntPtr.Zero, vecY = IntPtr.Zero;
-        try
-        {
-            CheckCuda(_createDnVec!(ref vecX, ncols, d_x, CUDA_R_64F), "createDnVec X");
-            CheckCuda(_createDnVec!(ref vecY, nrows, d_y, CUDA_R_64F), "createDnVec Y");
-            double alpha = 1.0, beta = 0.0;
-            ulong bufferSize = 0;
-            unsafe
-            {
-                CheckCuda(
-                    _spmvBufferSize!(cusparseHandle, CUSPARSE_OPERATION_NON_TRANSPOSE, (IntPtr)(&alpha), spMatDescr,
-                        vecX, (IntPtr)(&beta), vecY, CUDA_R_64F, CUSPARSE_SPMV_CSR_ALG2, ref bufferSize), "bufferSize");
-                if (bufferSize > allocatedBufferSize)
-                {
-                    if (d_buffer != IntPtr.Zero) _cudaFree!(d_buffer);
-                    d_buffer = IntPtr.Zero;
-                    allocatedBufferSize = 0;
-                    CheckCuda(_cudaMalloc!(ref d_buffer, bufferSize), "malloc buffer");
-                    allocatedBufferSize = bufferSize;
-                }
-
-                CheckCuda(
-                    _spmv!(cusparseHandle, CUSPARSE_OPERATION_NON_TRANSPOSE, (IntPtr)(&alpha), spMatDescr, vecX,
-                        (IntPtr)(&beta), vecY, CUDA_R_64F, CUSPARSE_SPMV_CSR_ALG2, d_buffer), "spmv");
-            }
-
-            CheckCuda(_cudaDeviceSynchronize!(), "sync");
-        }
-        finally
-        {
-            if (vecX != IntPtr.Zero) _destroyDnVec!(vecX);
-            if (vecY != IntPtr.Zero) _destroyDnVec!(vecY);
-        }
-
-        var result = new double[nrows];
-        unsafe
-        {
-            fixed (double* pr = result)
-            {
-                CheckCuda(_cudaMemcpy((IntPtr)pr, d_y, (ulong)nrows * sizeof(double), cudaMemcpyDeviceToHost),
-                    "memcpy result");
-            }
-        }
-
-        return result;
-    }
-
-    public double[] MultiplyTransposed(double[] x)
-    {
-        if (!isInitialized) throw new InvalidOperationException("Not initialized");
-        unsafe
-        {
-            fixed (double* px = x)
-            {
-                CheckCuda(_cudaMemcpy!(d_x, (IntPtr)px, (ulong)nrows * sizeof(double), cudaMemcpyHostToDevice),
-                    "memcpy x");
-            }
-        }
-
-        IntPtr vecX = IntPtr.Zero, vecY = IntPtr.Zero;
-        try
-        {
-            CheckCuda(_createDnVec!(ref vecX, nrows, d_x, CUDA_R_64F), "createDnVec X");
-            CheckCuda(_createDnVec!(ref vecY, ncols, d_y, CUDA_R_64F), "createDnVec Y");
-            double alpha = 1.0, beta = 0.0;
-            ulong bufferSize = 0;
-            unsafe
-            {
-                CheckCuda(
-                    _spmvBufferSize!(cusparseHandle, CUSPARSE_OPERATION_TRANSPOSE, (IntPtr)(&alpha), spMatDescr, vecX,
-                        (IntPtr)(&beta), vecY, CUDA_R_64F, CUSPARSE_SPMV_CSR_ALG2, ref bufferSize), "bufferSize");
-                if (bufferSize > allocatedBufferSize)
-                {
-                    if (d_buffer != IntPtr.Zero) _cudaFree!(d_buffer);
-                    d_buffer = IntPtr.Zero;
-                    allocatedBufferSize = 0;
-                    CheckCuda(_cudaMalloc!(ref d_buffer, bufferSize), "malloc buffer");
-                    allocatedBufferSize = bufferSize;
-                }
-
-                CheckCuda(
-                    _spmv!(cusparseHandle, CUSPARSE_OPERATION_TRANSPOSE, (IntPtr)(&alpha), spMatDescr, vecX,
-                        (IntPtr)(&beta), vecY, CUDA_R_64F, CUSPARSE_SPMV_CSR_ALG2, d_buffer), "spmv");
-            }
-
-            CheckCuda(_cudaDeviceSynchronize!(), "sync");
-        }
-        finally
-        {
-            if (vecX != IntPtr.Zero) _destroyDnVec!(vecX);
-            if (vecY != IntPtr.Zero) _destroyDnVec!(vecY);
-        }
-
-        var result = new double[ncols];
-        unsafe
-        {
-            fixed (double* pr = result)
-            {
-                CheckCuda(_cudaMemcpy((IntPtr)pr, d_y, (ulong)ncols * sizeof(double), cudaMemcpyDeviceToHost),
-                    "memcpy result");
-            }
-        }
-
-        return result;
-    }
-
-    public void UpdateValues(double[] newValues)
-    {
-        if (!isInitialized) throw new InvalidOperationException("Not initialized");
-        unsafe
-        {
-            fixed (double* pV = newValues)
-            {
-                CheckCuda(_cudaMemcpy!(d_val, (IntPtr)pV, (ulong)nnz * sizeof(double), cudaMemcpyHostToDevice),
-                    "update values");
-            }
-        }
-    }
-
-    private void CheckCuda(int error, string msg)
-    {
-        if (error != 0) throw new Exception($"CUDA Error ({msg}): {error}");
-    }
-
-    // FIXED: MEM-C2 - Finalizer must NOT call CUDA P/Invoke functions.
-    // The CUDA context may be torn down during process shutdown, causing crashes.
-    // Only clean up managed resources; native CUDA resources are abandoned if not disposed.
-    ~CuSparseBackend()
-    {
-        lock (_disposeLock)
-        {
-            isDisposed = true;
-            isInitialized = false;
-        }
-    }
-
-    // --- 1. Delegate Definitions ---
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate int CudaErrorDelegate(ref IntPtr handle);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate int CudaErrorSinglePtrDelegate(IntPtr handle);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate int CreateCsrDelegate(ref IntPtr spMatDescr, long rows, long cols, long nnz, IntPtr csrRowOffsets,
-        IntPtr csrColInd, IntPtr csrValues, int csrRowOffsetsType, int csrColIndType, int idxBase, int valueType);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate int CreateDnVecDelegate(ref IntPtr dnVecDescr, long size, IntPtr values, int valueType);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate int SpMVBufferSizeDelegate(IntPtr handle, int opA, IntPtr alpha, IntPtr matA, IntPtr vecX,
-        IntPtr beta, IntPtr vecY, int computeType, int alg, ref ulong bufferSize);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate int SpMVDelegate(IntPtr handle, int opA, IntPtr alpha, IntPtr matA, IntPtr vecX, IntPtr beta,
-        IntPtr vecY, int computeType, int alg, IntPtr externalBuffer);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate int MallocDelegate(ref IntPtr devPtr, ulong size);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate int FreeDelegate(IntPtr devPtr);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate int MemcpyDelegate(IntPtr dst, IntPtr src, ulong count, int kind);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate int SynchronizeDelegate();
-}
-
-public static class SparseBackendFactory
-{
-    private const int MIN_ROWS_FOR_GPU = 50_000;
-    private const int MIN_NNZ_FOR_GPU = 1_000_000;
-
-    public static bool ShouldUseGPU(int nrows, int ncols, int nnz)
-    {
-        return ParallelConfig.EnableGPU && CuSparseBackend.IsAvailable &&
-               (nrows >= MIN_ROWS_FOR_GPU || nnz >= MIN_NNZ_FOR_GPU);
-    }
-}
-
-public sealed class HybridScheduler : IDisposable
-{
-    public enum BackendType
-    {
-        Auto,
-        CPU_Sequential,
-        CPU_Parallel,
-        CPU_SIMD,
-        GPU_CUDA,
-        Hybrid_CPUandGPU
-    }
-
-    public enum OperationType
-    {
-        SpMV,
-        SpMV_Transpose,
-        SpMM,
-        SpAdd,
-        Solve
-    }
-
-    private readonly bool gpuAvailable;
-    private readonly object gpuLock = new();
-    private readonly CSR matrix;
-    private readonly PerformanceMonitor perfMonitor;
-    private CuSparseBackend? gpuBackend;
-    private volatile bool gpuInitialized;
-    private BackendType preferredBackend;
-
-    public HybridScheduler(CSR matrix, BackendType preferredBackend = BackendType.Auto, bool eagerGpuInit = true)
-    {
-        this.matrix = matrix;
-        this.preferredBackend = preferredBackend;
-        perfMonitor = new PerformanceMonitor();
-        gpuAvailable = SparseBackendFactory.ShouldUseGPU(matrix.Rows, matrix.Columns, matrix.NonZeroCount);
-
-        if (preferredBackend == BackendType.Auto) AutoSelectBackend();
-        if (eagerGpuInit && gpuAvailable)
-            if (this.preferredBackend == BackendType.GPU_CUDA || this.preferredBackend == BackendType.Hybrid_CPUandGPU)
-                try
-                {
-                    InitializeGPU();
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"GPU Eager init failed: {ex.Message}");
-                }
-    }
-
-    public void Dispose()
-    {
-        lock (gpuLock)
-        {
-            gpuBackend?.Dispose();
-            gpuBackend = null;
-            gpuInitialized = false;
-        }
-    }
-
-    public void InitializeGPU()
-    {
-        if (!gpuAvailable) throw new InvalidOperationException("GPU backend not available.");
-        if (!gpuInitialized)
-            lock (gpuLock)
-            {
-                if (!gpuInitialized)
-                {
-                    gpuBackend = new CuSparseBackend(matrix.Rows, matrix.Columns, matrix.NonZeroCount);
-                    if (matrix.Values != null)
-                        gpuBackend.Initialize(matrix.RowPointersArray, matrix.ColumnIndicesArray, matrix.Values);
-                    gpuInitialized = true;
-                }
-            }
-    }
-
-    private void AutoSelectBackend()
-    {
-        var nrows = matrix.Rows;
-        if (gpuAvailable && nrows >= 100_000) preferredBackend = BackendType.GPU_CUDA;
-        else if (nrows >= 5_000) preferredBackend = BackendType.CPU_SIMD;
-        else if (nrows >= 1_000) preferredBackend = BackendType.CPU_Parallel;
-        else preferredBackend = BackendType.CPU_Sequential;
-    }
-
-    public double[] Execute(OperationType opType, double[] vector)
-    {
-        var sw = Stopwatch.StartNew();
-        double[] result;
-        try
-        {
-            result = opType switch
-            {
-                OperationType.SpMV => ExecuteSpMV(vector),
-                OperationType.SpMV_Transpose => ExecuteSpMV_Transpose(vector),
-                _ => throw new NotImplementedException()
-            };
-        }
-        finally
-        {
-            sw.Stop();
-            perfMonitor.Record(preferredBackend, opType, sw.Elapsed.TotalMilliseconds);
-        }
-
-        return result;
-    }
-
-    private double[] ExecuteSpMV(double[] vector)
-    {
-        return preferredBackend switch
-        {
-            BackendType.CPU_Sequential => matrix.Multiply(vector),
-            BackendType.CPU_Parallel => matrix.MultiplyParallel(vector),
-            BackendType.CPU_SIMD => matrix.MultiplySIMD(vector),
-            BackendType.GPU_CUDA => ExecuteOnGPU(vector),
-            _ => matrix.MultiplyParallel(vector)
-        };
-    }
-
-    private double[] ExecuteSpMV_Transpose(double[] vector)
-    {
-        return preferredBackend switch
-        {
-            BackendType.CPU_Parallel => matrix.MultiplyTransposedParallel(vector),
-            BackendType.CPU_SIMD => matrix.MultiplyTransposedParallel(vector),
-            BackendType.GPU_CUDA => ExecuteTransposeOnGPU(vector),
-            _ => matrix.MultiplyTransposedParallel(vector)
-        };
-    }
-
-    private double[] ExecuteOnGPU(double[] vector)
-    {
-        if (!gpuInitialized) InitializeGPU();
-        return gpuBackend!.Multiply(vector);
-    }
-
-    private double[] ExecuteTransposeOnGPU(double[] vector)
-    {
-        if (!gpuInitialized) InitializeGPU();
-        return gpuBackend!.MultiplyTransposed(vector);
-    }
-
-    internal class PerformanceMonitor
-    {
-        private readonly ConcurrentDictionary<(BackendType, OperationType), List<double>> measurements = new();
-
-        public void Record(BackendType backend, OperationType opType, double milliseconds)
-        {
-            var key = (backend, opType);
-            var list = measurements.GetOrAdd(key, _ => new List<double>());
-            lock (list)
-            {
-                list.Add(milliseconds);
-            }
-        }
-    }
-}
-
-/// <summary>
-///     Intel MKL PARDISO direct solver for sparse linear systems.
-///     High-performance multithreaded solver for Ax = b.
-///     This is a standalone class for advanced users who need direct control
-///     over PARDISO. Basic users should use FEMSystem.Solve() instead.
-///     Usage:
-///     <code>
-///     CSR matrix = GetSparseMatrix();
-///     double[] rhs = GetRHS();
-/// 
-///     using var solver = new PardisoSolver();
-///     double[] solution = solver.Solve(matrix, rhs);
-///     </code>
-/// </summary>
-internal class PardisoSolver : IDisposable
-{
-    private const int PARDISO_PT_SIZE = 64;
-    private const int PARDISO_IPARM_SIZE = 64;
-
-    private static PardisoInitDelegate? _pardisoinit;
-    private static PardisoDelegate? _pardiso;
-    private static bool _isAvailable;
-    private readonly int[] iparm = new int[64];
-    private readonly IntPtr[] pt = new IntPtr[64];
-    private volatile bool isDisposed;
-    private bool isInitialized;
-    private int matrixSize;
-    private int matrixType = 11;
-
-    static PardisoSolver()
-    {
-        LoadPardisoFunctions();
-    }
-
-    // --- Constructor and Methods ---
-
-    public PardisoSolver(int mtype = 11)
-    {
-        if (!_isAvailable)
-            throw new SolverException("Intel MKL runtime for PARDISO not found or failed initialization.");
-        matrixType = mtype;
-
-        // FIXED: Issue #3 - Proper initialization
-        try
-        {
-            var mt = matrixType;
-            _pardisoinit!(pt, ref mt, iparm);
-        }
-        catch (Exception ex)
-        {
-            throw new SolverException($"PARDISO initialization failed during instance creation: {ex.Message}");
-        }
-    }
-
-    public void Dispose()
-    {
-        Dispose(true);
-        GC.SuppressFinalize(this);
-    }
-
-    private static void LoadPardisoFunctions()
-    {
-        try
-        {
-            // ULTIMATE+ FUTURE-PROOF: Deep system scanning + latest version + auto-install fallback
-            var config = new NativeLibraryConfig();
-            var mklNames = config.GetMKLLibraries();
-            var searchPaths = config.GetSearchPaths();
-
-            if (mklNames == null)
-            {
-                Debug.WriteLine("[PARDISO] No MKL libraries configured for this platform");
-                _isAvailable = false;
-                return;
-            }
-
-            Debug.WriteLine("[PARDISO] Searching for PARDISO solver...");
-
-            // Load MKL (PARDISO is part of MKL)
-            var mklHandle = RobustNativeLibraryLoader.TryLoadLibrary(mklNames, searchPaths, "Intel MKL/PARDISO");
-
-            if (mklHandle != IntPtr.Zero)
-            {
-                if (TryGetExport(mklHandle, "pardisoinit", out _pardisoinit) &&
-                    TryGetExport(mklHandle, "pardiso", out _pardiso))
-                {
-                    _isAvailable = true;
-                    Debug.WriteLine("[PARDISO] ✓ PARDISO solver available");
-                }
-                else
-                {
-                    Debug.WriteLine("[PARDISO] × PARDISO functions not found");
-                    _isAvailable = false;
-                }
-            }
-            else
-            {
-                Debug.WriteLine("[PARDISO] × MKL library not found");
-                _isAvailable = false;
-            }
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[PARDISO] Error: {ex.Message}");
-            _isAvailable = false;
-        }
-    }
-
-    private static bool TryGetExport<T>(IntPtr handle, string name, out T? del) where T : Delegate
-    {
-        if (NativeLibrary.TryGetExport(handle, name, out var address))
-        {
-            del = Marshal.GetDelegateForFunctionPointer<T>(address);
-            return true;
-        }
-
-        del = null;
-        return false;
-    }
-
-    public double[] Solve(CSR matrix, double[] rhs, bool refresh = false)
-    {
-        var n = matrix.Rows;
-        var solution = new double[n];
-        var ia = matrix.RowPointersArray;
-        var ja = matrix.ColumnIndicesArray;
-        var vals = matrix.GetValuesInternal();
-
-        int maxfct = 1, mnum = 1, nrhs = 1, msglvl = 0, error = 0;
-        var idum = new int[1];
-        int phase;
-
-        if (refresh || !isInitialized || matrixSize != n)
-        {
-            // FIXED: Issue #3 - Proper cleanup before reinitializing
-            if (isInitialized)
-            {
-                // Release old factorization
-                phase = -1;
-                CallPardiso(pt, ref maxfct, ref mnum, ref matrixType, ref phase, ref n, vals, ia, ja, idum, ref nrhs,
-                    iparm, ref msglvl, rhs, solution, ref error);
-
-                // Clear pt array properly
-                for (var i = 0; i < 64; i++) pt[i] = IntPtr.Zero;
-                isInitialized = false;
-            }
-
-            // Reinitialize
-            Array.Clear(iparm, 0, 64);
-            CallPardisoInit(pt, ref matrixType, iparm);
-            iparm[34] = 1; // 0-based indexing
-
-            // Symbolic factorization
-            phase = 11;
-            CallPardiso(pt, ref maxfct, ref mnum, ref matrixType, ref phase, ref n, vals, ia, ja, idum, ref nrhs, iparm,
-                ref msglvl, rhs, solution, ref error);
-            if (error != 0)
-                throw new SolverException($"PARDISO symbolic factorization failed with error code: {error}");
-
-            isInitialized = true;
-            matrixSize = n;
-        }
-
-        // Numerical factorization
-        phase = 22;
-        CallPardiso(pt, ref maxfct, ref mnum, ref matrixType, ref phase, ref n, vals, ia, ja, idum, ref nrhs, iparm,
-            ref msglvl, rhs, solution, ref error);
-        if (error != 0) throw new SolverException($"PARDISO numerical factorization failed with error code: {error}");
-
-        // Solve
-        phase = 33;
-        CallPardiso(pt, ref maxfct, ref mnum, ref matrixType, ref phase, ref n, vals, ia, ja, idum, ref nrhs, iparm,
-            ref msglvl, rhs, solution, ref error);
-        if (error != 0) throw new SolverException($"PARDISO solve failed with error code: {error}");
-
-        return solution;
-    }
-
-    public double[] SolveMultiple(CSR matrix, double[] rhs, int nrhs, bool refresh = false)
-    {
-        var n = matrix.Rows;
-        var solution = new double[n * nrhs];
-        var ia = matrix.RowPointersArray;
-        var ja = matrix.ColumnIndicesArray;
-        var vals = matrix.GetValuesInternal();
-
-        int maxfct = 1, mnum = 1, msglvl = 0, error = 0;
-        var idum = new int[1];
-        int phase;
-
-        if (refresh || !isInitialized)
-        {
-            // FIXED: Issue #3 - Proper cleanup
-            if (isInitialized)
-            {
-                phase = -1;
-                CallPardiso(pt, ref maxfct, ref mnum, ref matrixType, ref phase, ref n, vals, ia, ja, idum, ref nrhs,
-                    iparm, ref msglvl, rhs, solution, ref error);
-                for (var i = 0; i < 64; i++) pt[i] = IntPtr.Zero;
-                isInitialized = false;
-            }
-
-            Array.Clear(iparm, 0, 64);
-            CallPardisoInit(pt, ref matrixType, iparm);
-            iparm[34] = 1;
-
-            phase = 11;
-            CallPardiso(pt, ref maxfct, ref mnum, ref matrixType, ref phase, ref n, vals, ia, ja, idum, ref nrhs, iparm,
-                ref msglvl, rhs, solution, ref error);
-            if (error != 0)
-                throw new SolverException($"PARDISO symbolic factorization failed with error code: {error}");
-            isInitialized = true;
-        }
-
-        phase = 22;
-        CallPardiso(pt, ref maxfct, ref mnum, ref matrixType, ref phase, ref n, vals, ia, ja, idum, ref nrhs, iparm,
-            ref msglvl, rhs, solution, ref error);
-        if (error != 0) throw new SolverException($"PARDISO numerical factorization failed with error code: {error}");
-
-        phase = 33;
-        CallPardiso(pt, ref maxfct, ref mnum, ref matrixType, ref phase, ref n, vals, ia, ja, idum, ref nrhs, iparm,
-            ref msglvl, rhs, solution, ref error);
-        if (error != 0) throw new SolverException($"PARDISO solve failed with error code: {error}");
-
-        return solution;
-    }
-
-    protected virtual void Dispose(bool disposing)
-    {
-        if (isDisposed) return;
-
-        // MEDIUM FIX M7: Set disposed flag FIRST to ensure idempotency
-        // If cleanup throws in finalizer, we won't retry endlessly
-        isDisposed = true;
-
-        if (isInitialized && disposing)
-            try
-            {
-                int phase = -1, maxfct = 1, mnum = 1, nrhs = 1, msglvl = 0, error = 0;
-                var dummy = new double[1];
-                var idum = new int[1];
-                var n = matrixSize;
-                CallPardiso(pt, ref maxfct, ref mnum, ref matrixType, ref phase, ref n, dummy, idum, idum, idum,
-                    ref nrhs, iparm, ref msglvl, dummy, dummy, ref error);
-
-                // Only clear if cleanup succeeded
-                isInitialized = false;
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"PARDISO cleanup exception: {ex.Message}");
-                // Don't rethrow from Dispose - swallow exceptions per .NET guidelines
-            }
-    }
-
-    ~PardisoSolver()
-    {
-        Dispose(false);
-    }
-
-    // DYNAMIC WRAPPERS - Use the static delegates resolved by NativeLibrary
-    private void CallPardisoInit(IntPtr[] pt, ref int mtype, int[] iparm)
-    {
-        _pardisoinit!(pt, ref mtype, iparm);
-    }
-
-    private void CallPardiso(IntPtr[] pt, ref int maxfct, ref int mnum, ref int mtype, ref int phase, ref int n,
-        double[] a, int[] ia, int[] ja, int[] perm, ref int nrhs, int[] iparm, ref int msglvl, double[] b, double[] x,
-        ref int error)
-    {
-        _pardiso!(pt, ref maxfct, ref mnum, ref mtype, ref phase, ref n, a, ia, ja, perm, ref nrhs, iparm, ref msglvl,
-            b, x, ref error);
-    }
-
-    // --- Dynamic Loading Delegates and State ---
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate void PardisoInitDelegate(IntPtr[] pt, ref int mtype, int[] iparm);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate void PardisoDelegate(IntPtr[] pt, ref int maxfct, ref int mnum, ref int mtype, ref int phase,
-        ref int n, double[] a, int[] ia, int[] ja, int[] perm, ref int nrhs, int[] iparm, ref int msglvl, double[] b,
-        double[] x, ref int error);
-
-    #region Optimized Sparse Matrix Kernels
-
-    /// <summary>
-    ///     Ultra-optimized sparse matrix-vector multiplication kernels
-    /// </summary>
-    internal static class OptimizedSpMV
-    {
-        [MethodImpl(AggressiveOptimization)]
-        public static unsafe void MultiplyVector(
-            int* rowPtr, int* colInd, double* values,
-            double* x, double* y,
-            int numRows)
-        {
-            // Optimized SpMV: y = A * x
-            // where A is in CSR format
-
-            if (Avx512F.IsSupported)
-                MultiplyVector_AVX512(rowPtr, colInd, values, x, y, numRows);
-            else if (Avx2.IsSupported)
-                MultiplyVector_AVX2(rowPtr, colInd, values, x, y, numRows);
-            else
-                MultiplyVector_Scalar(rowPtr, colInd, values, x, y, numRows);
-        }
-
-        [MethodImpl(AggressiveOptimization)]
-        private static unsafe void MultiplyVector_AVX512(
-            int* rowPtr, int* colInd, double* values,
-            double* x, double* y,
-            int numRows)
-        {
-            // Process multiple rows at once for better instruction-level parallelism
-            const int UNROLL = 4;
-            var row = 0;
-
-            for (; row + UNROLL - 1 < numRows; row += UNROLL)
-            {
-                // Process 4 rows simultaneously
-                ProcessRow_AVX512(rowPtr, colInd, values, x, y, row + 0);
-                ProcessRow_AVX512(rowPtr, colInd, values, x, y, row + 1);
-                ProcessRow_AVX512(rowPtr, colInd, values, x, y, row + 2);
-                ProcessRow_AVX512(rowPtr, colInd, values, x, y, row + 3);
-            }
-
-            // Handle remaining rows
-            for (; row < numRows; row++) ProcessRow_AVX512(rowPtr, colInd, values, x, y, row);
-        }
-
-        [MethodImpl(AggressiveInlining | AggressiveOptimization)]
-        private static unsafe void ProcessRow_AVX512(
-            int* rowPtr, int* colInd, double* values,
-            double* x, double* y, int row)
-        {
-            var rowStart = rowPtr[row];
-            var rowEnd = rowPtr[row + 1];
-            var nnz = rowEnd - rowStart;
-
-            if (nnz == 0)
-            {
-                y[row] = 0.0;
-                return;
-            }
-
-            // Use AVX-512 for reduction (8 doubles at a time)
-            var sum = Vector512<double>.Zero;
-            var j = rowStart;
-
-            // Allocate gather buffer once outside loop to avoid stack overflow
-            Span<double> xGathered = stackalloc double[8];
-
-            // Main vectorized loop: process 8 non-zeros at a time
-            for (; j + 7 < rowEnd; j += 8)
-            {
-                // Prefetch next iteration (heuristic: 16 elements ahead)
-                if (j + 16 < rowEnd)
-                {
-                    Sse.Prefetch0(values + j + 16);
-                    Sse.Prefetch0(colInd + j + 16);
-                }
-
-                // Load 8 values
-                var vals = Avx512F.LoadVector512(values + j);
-
-                // Manual gather of x-values (GatherVector512 not yet available in .NET)
-                // This is the bottleneck in SpMV - irregular memory access
-                for (var g = 0; g < 8; g++) xGathered[g] = x[colInd[j + g]];
-
-                fixed (double* pGathered = xGathered)
-                {
-                    var xVals = Avx512F.LoadVector512(pGathered);
-                    // Multiply and accumulate
-                    sum = Avx512F.FusedMultiplyAdd(vals, xVals, sum);
-                }
-            }
-
-            // Horizontal reduction of sum vector
-            var total = HorizontalSum_AVX512(sum);
-
-            // Process remaining elements (< 8)
-            for (; j < rowEnd; j++) total += values[j] * x[colInd[j]];
-
-            y[row] = total;
-        }
-
-        [MethodImpl(AggressiveInlining)]
-        private static double HorizontalSum_AVX512(Vector512<double> v)
-        {
-            // Efficient horizontal sum of 8 doubles
-            var low = v.GetLower(); // Lower 4 doubles
-            var high = v.GetUpper(); // Upper 4 doubles
-
-            var sum4 = Avx.Add(low, high); // Now 4 doubles
-
-            // Continue reduction to scalar
-            var low2 = Avx.ExtractVector128(sum4, 0);
-            var high2 = Avx.ExtractVector128(sum4, 1);
-            var sum2 = Sse2.Add(low2, high2);
-
-            var high1 = Sse2.UnpackHigh(sum2, sum2);
-            var sum1 = Sse2.Add(sum2, high1);
-
-            return sum1.ToScalar();
-        }
-
-        [MethodImpl(AggressiveOptimization)]
-        private static unsafe void MultiplyVector_AVX2(
-            int* rowPtr, int* colInd, double* values,
-            double* x, double* y,
-            int numRows)
-        {
-            const int UNROLL = 4;
-            var row = 0;
-
-            for (; row + UNROLL - 1 < numRows; row += UNROLL)
-            {
-                ProcessRow_AVX2(rowPtr, colInd, values, x, y, row + 0);
-                ProcessRow_AVX2(rowPtr, colInd, values, x, y, row + 1);
-                ProcessRow_AVX2(rowPtr, colInd, values, x, y, row + 2);
-                ProcessRow_AVX2(rowPtr, colInd, values, x, y, row + 3);
-            }
-
-            for (; row < numRows; row++) ProcessRow_AVX2(rowPtr, colInd, values, x, y, row);
-        }
-
-        [MethodImpl(AggressiveInlining | AggressiveOptimization)]
-        private static unsafe void ProcessRow_AVX2(
-            int* rowPtr, int* colInd, double* values,
-            double* x, double* y, int row)
-        {
-            var rowStart = rowPtr[row];
-            var rowEnd = rowPtr[row + 1];
-
-            if (rowStart == rowEnd)
-            {
-                y[row] = 0.0;
-                return;
-            }
-
-            // AVX2: process 4 doubles at a time
-            var sum = Vector256<double>.Zero;
-            var j = rowStart;
-
-            // Main loop: 4 at a time
-            for (; j + 3 < rowEnd; j += 4)
-            {
-                // Load 4 values
-                var vals = Avx.LoadVector256(values + j);
-
-                // Manual gather (AVX2 doesn't have double gather)
-                var xVals = Vector256.Create(
-                    x[colInd[j]],
-                    x[colInd[j + 1]],
-                    x[colInd[j + 2]],
-                    x[colInd[j + 3]]
-                );
-
-                // FMA
-                sum = Fma.IsSupported
-                    ? Fma.MultiplyAdd(vals, xVals, sum)
-                    : Avx.Add(Avx.Multiply(vals, xVals), sum);
-            }
-
-            // Horizontal sum
-            var total = HorizontalSum_AVX2(sum);
-
-            // Remaining elements
-            for (; j < rowEnd; j++) total += values[j] * x[colInd[j]];
-
-            y[row] = total;
-        }
-
-        [MethodImpl(AggressiveInlining)]
-        private static double HorizontalSum_AVX2(Vector256<double> v)
-        {
-            var low = Avx.ExtractVector128(v, 0);
-            var high = Avx.ExtractVector128(v, 1);
-            var sum = Sse2.Add(low, high);
-
-            var high1 = Sse2.UnpackHigh(sum, sum);
-            var final = Sse2.Add(sum, high1);
-
-            return final.ToScalar();
-        }
-
-        [MethodImpl(AggressiveOptimization)]
-        private static unsafe void MultiplyVector_Scalar(
-            int* rowPtr, int* colInd, double* values,
-            double* x, double* y,
-            int numRows)
-        {
-            // Optimized scalar fallback - still better than naive
-            for (var row = 0; row < numRows; row++)
-            {
-                var rowStart = rowPtr[row];
-                var rowEnd = rowPtr[row + 1];
-
-                var sum = 0.0;
-
-                // Unroll by 4 for better ILP
-                var j = rowStart;
-                for (; j + 3 < rowEnd; j += 4)
-                {
-                    sum += values[j] * x[colInd[j]];
-                    sum += values[j + 1] * x[colInd[j + 1]];
-                    sum += values[j + 2] * x[colInd[j + 2]];
-                    sum += values[j + 3] * x[colInd[j + 3]];
-                }
-
-                for (; j < rowEnd; j++) sum += values[j] * x[colInd[j]];
-
-                y[row] = sum;
-            }
-        }
-
-        /// <summary>
-        ///     Optimized SpMV with scaling: y = alpha * A * x + beta * y
-        /// </summary>
-        [MethodImpl(AggressiveOptimization)]
-        public static unsafe void MultiplyVectorScaled(
-            int* rowPtr, int* colInd, double* values,
-            double* x, double* y,
-            int numRows,
-            double alpha, double beta)
-        {
-            if (alpha == 0.0)
-            {
-                if (beta == 0.0)
-                    // y = 0
-                    for (var i = 0; i < numRows; i++)
-                        y[i] = 0.0;
-                else if (beta != 1.0)
-                    // y = beta * y
-                    ScaleVector(y, numRows, beta);
-                // else: y = y (no-op)
-                return;
-            }
-
-            if (beta == 0.0)
-            {
-                // y = alpha * A * x
-                MultiplyVector(rowPtr, colInd, values, x, y, numRows);
-                if (alpha != 1.0)
-                    ScaleVector(y, numRows, alpha);
-            }
-            else
-            {
-                // General case: y = alpha * A * x + beta * y
-                // Use temporary buffer to avoid read-modify-write conflicts
-                Span<double> temp = stackalloc double[Math.Min(numRows, 1024)];
-
-                for (var blockStart = 0; blockStart < numRows; blockStart += temp.Length)
-                {
-                    var blockSize = Math.Min(temp.Length, numRows - blockStart);
-
-                    fixed (double* pTemp = temp)
-                    {
-                        // Compute temp = A[block] * x
-                        MultiplyVector(rowPtr + blockStart, colInd, values,
-                            x, pTemp, blockSize);
-
-                        // y[block] = alpha * temp + beta * y[block]
-                        for (var i = 0; i < blockSize; i++)
-                            y[blockStart + i] = alpha * pTemp[i] + beta * y[blockStart + i];
-                    }
-                }
-            }
-        }
-
-        [MethodImpl(AggressiveInlining | AggressiveOptimization)]
-        private static unsafe void ScaleVector(double* v, int n, double alpha)
-        {
-            var i = 0;
-
-            if (Avx512F.IsSupported)
-            {
-                var valpha = Vector512.Create(alpha);
-                for (; i + 7 < n; i += 8)
-                {
-                    var vec = Avx512F.LoadVector512(v + i);
-                    vec = Avx512F.Multiply(vec, valpha);
-                    Avx512F.Store(v + i, vec);
-                }
-            }
-            else if (Avx.IsSupported)
-            {
-                var valpha = Vector256.Create(alpha);
-                for (; i + 3 < n; i += 4)
-                {
-                    var vec = Avx.LoadVector256(v + i);
-                    vec = Avx.Multiply(vec, valpha);
-                    Avx.Store(v + i, vec);
-                }
-            }
-
-            for (; i < n; i++) v[i] *= alpha;
-        }
-    }
-
-    /// <summary>
-    ///     Optimized sparse matrix-matrix multiply and other CSR operations
-    /// </summary>
-    internal static class OptimizedSpMM
-    {
-        /// <summary>
-        ///     Sparse matrix-matrix multiply: C = A * B where A is sparse CSR, B is dense
-        ///     Highly optimized for this common case in FEA
-        ///     FIXED: Now correctly handles column-major storage with arbitrary leading dimensions.
-        ///     The algorithm processes one output element at a time using dot products, which
-        ///     naturally handles strided column-major access patterns.
-        ///     Storage layout: Column-major (Fortran/BLAS convention)
-        ///     B[row, col] is at B[row + col * ldb]
-        ///     C[row, col] is at C[row + col * ldc]
-        /// </summary>
-        [MethodImpl(AggressiveOptimization)]
-        public static unsafe void MultiplyDense(
-            int* rowPtr, int* colInd, double* aValues,
-            double* B, int ldb,
-            double* C, int ldc,
-            int m, int n, int k)
-        {
-            // C(m x n) = A(m x k) * B(k x n)
-            // A is sparse CSR, B and C are dense column-major
-
-            // Initialize C to zero
-            for (var j = 0; j < n; j++)
-            for (var i = 0; i < m; i++)
-                C[i + j * ldc] = 0.0;
-
-            // For each row of A (row i of output C)
-            for (var i = 0; i < m; i++)
-            {
-                var rowStart = rowPtr[i];
-                var rowEnd = rowPtr[i + 1];
-                var nnzRow = rowEnd - rowStart;
-
-                if (nnzRow == 0) continue;
-
-                // For each column j of output C
-                // C[i,j] = sum over non-zeros in row i of A: A[i,k] * B[k,j]
-                for (var j = 0; j < n; j++)
-                {
-                    var sum = 0.0;
-
-                    // Accumulate dot product of sparse row i of A with column j of B
-                    // Use SIMD for the accumulation when we have enough non-zeros
-                    if (Avx2.IsSupported && nnzRow >= 4)
-                    {
-                        var sumVec = Vector256<double>.Zero;
-                        var jj = rowStart;
-
-                        // Process 4 non-zeros at a time
-                        for (; jj + 3 < rowEnd; jj += 4)
-                        {
-                            // Load 4 values from A
-                            var aVec = Avx.LoadVector256(aValues + jj);
-
-                            // Gather 4 values from column j of B (strided access)
-                            // B[colInd[jj], j], B[colInd[jj+1], j], etc.
-                            var bVec = Vector256.Create(
-                                B[colInd[jj] + j * ldb],
-                                B[colInd[jj + 1] + j * ldb],
-                                B[colInd[jj + 2] + j * ldb],
-                                B[colInd[jj + 3] + j * ldb]
-                            );
-
-                            // FMA: sumVec += aVec * bVec
-                            sumVec = Fma.IsSupported
-                                ? Fma.MultiplyAdd(aVec, bVec, sumVec)
-                                : Avx.Add(Avx.Multiply(aVec, bVec), sumVec);
-                        }
-
-                        // Horizontal sum of vector
-                        var low = Avx.ExtractVector128(sumVec, 0);
-                        var high = Avx.ExtractVector128(sumVec, 1);
-                        var sum2 = Sse2.Add(low, high);
-                        var high1 = Sse2.UnpackHigh(sum2, sum2);
-                        var final = Sse2.Add(sum2, high1);
-                        sum = final.ToScalar();
-
-                        // Handle remaining non-zeros
-                        for (; jj < rowEnd; jj++) sum += aValues[jj] * B[colInd[jj] + j * ldb];
-                    }
-                    else
-                    {
-                        // Scalar path for small nnz or no AVX2
-                        for (var jj = rowStart; jj < rowEnd; jj++) sum += aValues[jj] * B[colInd[jj] + j * ldb];
-                    }
-
-                    C[i + j * ldc] = sum;
-                }
-            }
-        }
-
-        /// <summary>
-        ///     Alternative SpMM using outer product formulation: C += A[:,k] * B[k,:]
-        ///     Better cache behavior when B has many columns and rows of A are dense.
-        ///     Correctly handles column-major storage.
-        /// </summary>
-        [MethodImpl(AggressiveOptimization)]
-        public static unsafe void MultiplyDenseOuterProduct(
-            int* rowPtr, int* colInd, double* aValues,
-            double* B, int ldb,
-            double* C, int ldc,
-            int m, int n, int k)
-        {
-            // C(m x n) = A(m x k) * B(k x n)
-            // Initialize C to zero
-            for (var j = 0; j < n; j++)
-            for (var i = 0; i < m; i++)
-                C[i + j * ldc] = 0.0;
-
-            // Outer product formulation: for each row i of A
-            for (var i = 0; i < m; i++)
-            {
-                var rowStart = rowPtr[i];
-                var rowEnd = rowPtr[i + 1];
-
-                // For each non-zero A[i, k_idx]
-                for (var jj = rowStart; jj < rowEnd; jj++)
-                {
-                    var k_idx = colInd[jj];
-                    var aVal = aValues[jj];
-
-                    // C[i, :] += aVal * B[k_idx, :]
-                    // This is a SAXPY on row i of C using row k_idx of B
-                    // Column-major: elements of row k_idx of B are at B[k_idx + j*ldb] for j=0..n-1
-                    for (var j = 0; j < n; j++) C[i + j * ldc] += aVal * B[k_idx + j * ldb];
-                }
-            }
-        }
-    }
-
-    #endregion
-
 }
