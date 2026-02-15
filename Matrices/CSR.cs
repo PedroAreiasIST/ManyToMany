@@ -205,6 +205,55 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
     {
     }
 
+    /// <summary>
+    ///     Creates a CSR matrix from a list of rows, where each row is a list of column indices.
+    /// </summary>
+    /// <param name="rows">List of rows, each containing column indices of non-zero entries.</param>
+    /// <param name="sorted">Ignored. Kept for backward compatibility. Column indices do not need to be sorted.</param>
+    /// <param name="enableGpu">If true, attempts to initialize GPU acceleration.</param>
+    public CSR(List<List<int>> rows, bool sorted = false, bool enableGpu = false)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        nrows = rows.Count;
+        ncols = InferColumnCount(rows);
+
+        rowPointers = new int[nrows + 1];
+        var nnz = 0;
+
+        for (var i = 0; i < nrows; i++)
+        {
+            rowPointers[i] = nnz;
+            nnz += rows[i].Count;
+        }
+
+        rowPointers[nrows] = nnz;
+        columnIndices = new int[nnz];
+
+        var pos = 0;
+        for (var i = 0; i < nrows; i++)
+        {
+            var rowSpan = CollectionsMarshal.AsSpan(rows[i]);
+            for (var j = 0; j < rowSpan.Length; j++)
+                columnIndices[pos++] = rowSpan[j];
+        }
+
+        ValidateCSRStructure(rowPointers, columnIndices, nrows, ncols);
+        constructedWithSkipValidation = false;
+
+        if (enableGpu)
+            try
+            {
+                InitializeGpu();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"GPU initialization failed: {ex.Message}. Continuing with CPU only.");
+                gpuAccelerator = null;
+                isGpuInitialized = false;
+            }
+    }
+
     private static int InferColumnCount(int[] columnIndices)
     {
         ArgumentNullException.ThrowIfNull(columnIndices);
@@ -2059,34 +2108,45 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
             var colMap = new Dictionary<int, int>();
             for (var j = 0; j < cols.Length; j++) colMap[cols[j]] = j;
 
-            var resultRows = new List<List<int>>(rows.Length);
-            List<double>? resultVals;
             double[]? localValues;
             lock (syncLock)
             {
                 localValues = values;
-                resultVals = localValues != null ? new List<double>() : null;
             }
 
-            foreach (var row in rows)
+            // First pass: count non-zeros per row to build row pointers
+            var resultRowPtrs = new int[rows.Length + 1];
+            for (var i = 0; i < rows.Length; i++)
             {
-                List<int> newRow = [];
-                for (var k = rowPointers[row]; k < rowPointers[row + 1]; k++)
+                var count = 0;
+                for (var k = rowPointers[rows[i]]; k < rowPointers[rows[i] + 1]; k++)
+                    if (colSet.Contains(columnIndices[k]))
+                        count++;
+                resultRowPtrs[i + 1] = resultRowPtrs[i] + count;
+            }
+
+            var totalNnz = resultRowPtrs[rows.Length];
+            var resultColIdx = new int[totalNnz];
+            var resultVals = localValues != null ? new double[totalNnz] : null;
+
+            // Second pass: fill column indices and values
+            for (var i = 0; i < rows.Length; i++)
+            {
+                var pos = resultRowPtrs[i];
+                for (var k = rowPointers[rows[i]]; k < rowPointers[rows[i] + 1]; k++)
                 {
                     var col = columnIndices[k];
                     if (colSet.Contains(col))
                     {
-                        newRow.Add(colMap[col]);
-                        if (resultVals != null && localValues != null) resultVals.Add(localValues[k]);
+                        resultColIdx[pos] = colMap[col];
+                        if (resultVals != null && localValues != null)
+                            resultVals[pos] = localValues[k];
+                        pos++;
                     }
                 }
-
-                resultRows.Add(newRow);
             }
 
-            var result = new CSR(resultRows, true);
-            if (resultVals != null) result.Values = resultVals.ToArray();
-            return result;
+            return new CSR(resultRowPtrs, resultColIdx, cols.Length, resultVals, true);
         }
         finally
         {
