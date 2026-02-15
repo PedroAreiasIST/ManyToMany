@@ -205,53 +205,6 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
     {
     }
 
-    public CSR(List<List<int>> rows, [Obsolete("The sorted parameter is ignored. Column indices do not need to be sorted.")] bool sorted = false, bool enableGpu = false)
-    {
-        ArgumentNullException.ThrowIfNull(rows);
-
-        nrows = rows.Count;
-        ncols = InferColumnCount(rows);
-
-        rowPointers = new int[nrows + 1];
-        var nnz = 0;
-
-        for (var i = 0; i < nrows; i++)
-        {
-            rowPointers[i] = nnz;
-            // NOTE: Sorting is no longer required - columns can be in any order
-            // The 'sorted' parameter is kept for API compatibility but ignored
-            nnz += rows[i].Count;
-        }
-
-        rowPointers[nrows] = nnz;
-        columnIndices = new int[nnz];
-
-        var pos = 0;
-        for (var i = 0; i < nrows; i++)
-        {
-            var rowSpan = CollectionsMarshal.AsSpan(rows[i]);
-            for (var j = 0; j < rowSpan.Length; j++)
-                columnIndices[pos++] = rowSpan[j];
-        }
-
-        // Keep this constructor's validation behavior aligned with the primary constructor.
-        // This is required for safety because SIMD code paths use unsafe pointers.
-        ValidateCSRStructure(rowPointers, columnIndices, nrows, ncols);
-        constructedWithSkipValidation = false;
-
-        if (enableGpu)
-            try
-            {
-                InitializeGpu();
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"GPU initialization failed: {ex.Message}. Continuing with CPU only.");
-                gpuAccelerator = null;
-                isGpuInitialized = false;
-            }
-    }
-
     private static int InferColumnCount(int[] columnIndices)
     {
         ArgumentNullException.ThrowIfNull(columnIndices);
