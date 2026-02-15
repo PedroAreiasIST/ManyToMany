@@ -201,7 +201,7 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
         "Use constructor with explicit column count to avoid dimension errors. This will become an error in the next major version.",
         false)]
     public CSR(int[] rowPointers, int[] columnIndices, double[]? values = null)
-        : this(rowPointers, columnIndices, columnIndices.Length > 0 ? columnIndices.Max() + 1 : 0, values)
+        : this(rowPointers, columnIndices, InferColumnCount(columnIndices), values)
     {
     }
 
@@ -209,13 +209,8 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
     {
         ArgumentNullException.ThrowIfNull(rows);
 
-        for (var i = 0; i < rows.Count; i++)
-            if (rows[i] == null)
-                throw new ArgumentException($"Row {i} is null. Rows collection must not contain null entries.",
-                    nameof(rows));
-
         nrows = rows.Count;
-        ncols = rows.Count > 0 ? rows.Max(r => r.Count > 0 ? r.Max() + 1 : 0) : 0;
+        ncols = InferColumnCount(rows);
 
         rowPointers = new int[nrows + 1];
         var nnz = 0;
@@ -255,6 +250,47 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
                 gpuAccelerator = null;
                 isGpuInitialized = false;
             }
+    }
+
+    private static int InferColumnCount(int[] columnIndices)
+    {
+        ArgumentNullException.ThrowIfNull(columnIndices);
+
+        if (columnIndices.Length == 0)
+            return 0;
+
+        var maxColumn = columnIndices.Max();
+        if (maxColumn == int.MaxValue)
+            throw new ArgumentException(
+                "Column index contains Int32.MaxValue. Column count cannot be inferred safely; use constructor with explicit nCols.",
+                nameof(columnIndices));
+
+        return maxColumn + 1;
+    }
+
+    private static int InferColumnCount(List<List<int>> rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        var maxColumn = -1;
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var row = rows[i] ?? throw new ArgumentException(
+                $"Row {i} is null. Rows collection must not contain null entries.",
+                nameof(rows));
+
+            var rowSpan = CollectionsMarshal.AsSpan(row);
+            for (var j = 0; j < rowSpan.Length; j++)
+                if (rowSpan[j] > maxColumn)
+                    maxColumn = rowSpan[j];
+        }
+
+        if (maxColumn == int.MaxValue)
+            throw new ArgumentException(
+                "Column index contains Int32.MaxValue. Column count cannot be inferred safely; use constructor with explicit nCols.",
+                nameof(rows));
+
+        return maxColumn + 1;
     }
 
     #endregion
