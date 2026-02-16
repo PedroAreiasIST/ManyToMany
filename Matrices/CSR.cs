@@ -196,6 +196,52 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
         }
     }
 
+    /// <summary>
+    ///     Constructs a CSR matrix from adjacency lists (one list of column indices per row).
+    /// </summary>
+    /// <param name="rows">List of rows, each containing column indices for that row.</param>
+    /// <param name="nCols">Explicit column count.</param>
+    /// <param name="skipValidation">Skip structural validation if true.</param>
+    public CSR(List<List<int>> rows, int nCols, bool skipValidation = false)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        nrows = rows.Count;
+        ncols = nCols;
+
+        rowPointers = new int[nrows + 1];
+        var totalNnz = 0;
+        for (var i = 0; i < nrows; i++)
+        {
+            var row = rows[i] ?? throw new ArgumentException(
+                $"Row {i} is null. Rows collection must not contain null entries.",
+                nameof(rows));
+            totalNnz += row.Count;
+            rowPointers[i + 1] = totalNnz;
+        }
+
+        columnIndices = new int[totalNnz];
+        for (var i = 0; i < nrows; i++)
+        {
+            var rowSpan = CollectionsMarshal.AsSpan(rows[i]);
+            var destStart = rowPointers[i];
+            for (var j = 0; j < rowSpan.Length; j++)
+                columnIndices[destStart + j] = rowSpan[j];
+        }
+
+        constructedWithSkipValidation = skipValidation;
+        if (!skipValidation) ValidateCSRStructure(rowPointers, columnIndices, nrows, ncols);
+    }
+
+    /// <summary>
+    ///     Constructs a CSR matrix from adjacency lists, inferring column count from data.
+    /// </summary>
+    /// <param name="rows">List of rows, each containing column indices for that row.</param>
+    /// <param name="skipValidation">Skip structural validation if true.</param>
+    public CSR(List<List<int>> rows, bool skipValidation = false)
+        : this(rows, InferColumnCount(rows), skipValidation)
+    {
+    }
+
     // FIXED: Issue #19 - Changed to warning (false) instead of compile error (true)
     [Obsolete(
         "Use constructor with explicit column count to avoid dimension errors. This will become an error in the next major version.",
@@ -1030,17 +1076,21 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
 
     public static CSR TransposeAndMultiply(CSR A, CSR B)
     {
+        A.ThrowIfDisposed();
+        B.ThrowIfDisposed();
+
         if (A.nrows != B.nrows)
             throw new ArgumentException(
                 $"Row count mismatch: A has {A.nrows} rows, B has {B.nrows} rows");
-
-        A.ThrowIfDisposed();
-        B.ThrowIfDisposed();
 
         var aValues = A.GetValuesOrThrow();
         var bValues = B.GetValuesOrThrow();
         var resultRows = A.ncols;
         var resultCols = B.ncols;
+
+        // Handle edge case: A has 0 columns → result is 0×resultCols empty matrix
+        if (resultRows == 0)
+            return new CSR(new int[1], Array.Empty<int>(), resultCols, Array.Empty<double>(), true);
 
         var aTransposeStart = new int[resultRows];
         var aTransposeCount = new int[resultRows];
@@ -2359,7 +2409,7 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
     {
         ThrowIfDisposed();
         if (nrows == 0)
-            return new MatrixStatistics(0, ncols, 0, 1.0, 0, 0, 0.0);
+            return new MatrixStatistics(0, ncols, 0, 0.0, 0, 0, 0.0);
 
         var minNnz = int.MaxValue;
         var maxNnz = 0;
