@@ -2115,7 +2115,7 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
                 resultRows.Add(newRow);
             }
 
-            var result = new CSR(resultRows, true);
+            var result = new CSR(resultRows, cols.Length, true);
             if (resultVals != null) result.Values = resultVals.ToArray();
             return result;
         }
