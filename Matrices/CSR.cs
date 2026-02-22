@@ -19,43 +19,25 @@ namespace Numerical;
 // Helper class for object pooling
 file class HashSetPoolPolicy : IPooledObjectPolicy<HashSet<int>>
 {
+    private const int InitialCapacity = 256;
+    private const int MaxReusableSize = 10000;
+
     public HashSet<int> Create()
     {
-        return new HashSet<int>(256);
+        return new HashSet<int>(InitialCapacity);
     }
 
     public bool Return(HashSet<int> obj)
     {
-        if (obj.Count > 10000) return false;
+        if (obj.Count > MaxReusableSize) return false;
         obj.Clear();
         return true;
     }
 }
 
 /// <summary>
-///     High-performance Compressed Sparse Row (CSR) matrix with complete functionality.
-///     FINAL PATCHED VERSION: All native backends (PARDISO, CUDA)
-///     now use dynamic NativeLibrary resolution for maximum portability.
-///     NOTE: MKL Sparse BLAS has been removed; MKL is only used for PARDISO solver.
-///     REVISION 2.0 - ADDITIONAL AUDIT FIXES:
-///     - Improved ArrayPool usage in MultiplyTransposedParallel for large matrices
-///     - Added shared static ParallelOptions to reduce allocations
-///     - Enhanced error messages with actionable guidance throughout
-///     - Made threshold constants public for user tuning
-///     - Added null validation in Diagonal() factory method
-///     - Improved thread-safety documentation for Equals method
-///     - Better validation for skipValidation matrices in SIMD operations
-///     PRIOR AUDIT FIXES:
-///     - Fixed lock ordering deadlock risk in Equals method
-///     - Fixed integer overflow check placement in MultiplySymbolic
-///     - Added bounds checking in SIMD operations
-///     - Fixed GPU disposal race condition
-///     - Improved modification counter semantics
-///     - Enhanced error messages throughout
-///     - Added duplicate detection in validation
-///     - Improved BiCGSTAB breakdown detection
-///     - Added GPU initialization check
-///     - Enhanced parallel tuning options
+///     High-performance Compressed Sparse Row (CSR) matrix for sparse structure and value operations.
+///     Supports structural-only matrices, weighted matrices, parallel execution, and optional native accelerators.
 /// </summary>
 public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
 {
@@ -75,7 +57,6 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
     /// <summary>Minimum non-zeros for GPU acceleration consideration.</summary>
     public const int MIN_NNZ_FOR_GPU = 1000000;
 
-    private const int HASHSET_POOL_MAX_SIZE = 10000;
     private const int SMALL_ARRAY_MERGE_THRESHOLD = 10000;
 
     // Use ParallelConfig.Options for all parallel operations (centralized control)
