@@ -1366,3 +1366,284 @@ public static class CrackDuplication
 }
 
 #endregion
+
+#region Topology-Based Node Duplication
+
+/// <summary>
+///     Topology-based node duplication: splits a mesh along a set of interface nodes
+///     using only graph connectivity (no level-set or geometry required).
+/// </summary>
+/// <remarks>
+///     <para>
+///         <b>Algorithm:</b> Given a set of nodes to duplicate ("interface nodes"),
+///         builds an element adjacency graph where two elements are connected only
+///         if they share a non-interface node. Connected components of this graph
+///         identify the independent "sides" of the interface. Component 0 keeps the
+///         original interface nodes; each subsequent component receives fresh copies.
+///     </para>
+///     <para>
+///         <b>Advantages over level-set approach:</b>
+///         <list type="bullet">
+///             <item>Works with arbitrary interfaces (cracks, contacts, material boundaries)</item>
+///             <item>Correctly handles branching cracks (3+ components)</item>
+///             <item>No signed-field evaluation or snapping required</item>
+///             <item>Pure topological operation — geometry enters only via coordinate copying</item>
+///         </list>
+///     </para>
+/// </remarks>
+public static class NodeDuplication
+{
+    /// <summary>
+    ///     Result of a topology-based node duplication operation.
+    /// </summary>
+    /// <param name="Mesh">The new mesh with duplicated connectivity.</param>
+    /// <param name="Coords">Coordinate array for all nodes (originals + duplicates).</param>
+    /// <param name="ComponentCount">Number of connected components found (≥ 1).</param>
+    /// <param name="DuplicateMap">
+    ///     Maps (original interface node, component index) → new node index.
+    ///     Component 0 maps to the original node indices.
+    /// </param>
+    public readonly record struct DuplicationResult(
+        SimplexMesh Mesh,
+        double[,] Coords,
+        int ComponentCount,
+        Dictionary<(int OriginalNode, int Component), int> DuplicateMap);
+
+    /// <summary>
+    ///     Duplicates a set of interface nodes using topology-based side assignment.
+    /// </summary>
+    /// <param name="mesh">Input mesh.</param>
+    /// <param name="coords">Node coordinate array (nNodes × dim).</param>
+    /// <param name="interfaceNodes">Set of node indices to duplicate.</param>
+    /// <returns>A <see cref="DuplicationResult"/> with the new mesh, coordinates, and mapping.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when any argument is null.</exception>
+    /// <exception cref="ArgumentException">Thrown when interfaceNodes is empty.</exception>
+    public static DuplicationResult DuplicateNodes(
+        SimplexMesh mesh,
+        double[,] coords,
+        IReadOnlySet<int> interfaceNodes)
+    {
+        ArgumentNullException.ThrowIfNull(mesh);
+        ArgumentNullException.ThrowIfNull(coords);
+        ArgumentNullException.ThrowIfNull(interfaceNodes);
+        if (interfaceNodes.Count == 0)
+            throw new ArgumentException("Interface node set must not be empty.", nameof(interfaceNodes));
+
+        int nNodes = mesh.Count<Node>();
+        int coordDim = coords.GetLength(1);
+        int nTri = mesh.Count<Tri3>();
+        int nTet = mesh.Count<Tet4>();
+
+        // ── Step 1: Find connected components along the interface ──
+
+        var (componentOf, componentCount) = FindComponentsAlongInterface(mesh, interfaceNodes);
+
+        // ── Step 2: Create duplicate nodes for components > 0 ──
+
+        var duplicateMap = new Dictionary<(int, int), int>();
+
+        // Component 0 keeps original node indices for interface nodes
+        foreach (int n in interfaceNodes)
+            duplicateMap[(n, 0)] = n;
+
+        // Count extra nodes: (componentCount - 1) copies per interface node
+        int extraNodes = interfaceNodes.Count * (componentCount - 1);
+        int finalNodeCount = nNodes + extraNodes;
+        var newCoords = new double[finalNodeCount, coordDim];
+
+        // Copy original coordinates
+        for (int i = 0; i < nNodes; i++)
+            for (int d = 0; d < coordDim; d++)
+                newCoords[i, d] = coords[i, d];
+
+        // Create duplicates for components 1..componentCount-1
+        int nextId = nNodes;
+        for (int comp = 1; comp < componentCount; comp++)
+        {
+            foreach (int n in interfaceNodes)
+            {
+                int dupId = nextId++;
+                duplicateMap[(n, comp)] = dupId;
+
+                for (int d = 0; d < coordDim; d++)
+                    newCoords[dupId, d] = coords[n, d];
+            }
+        }
+
+        // ── Step 3: Build new mesh with remapped connectivity ──
+
+        var newMesh = new SimplexMesh();
+        newMesh.WithBatch(() =>
+        {
+            for (int i = 0; i < finalNodeCount; i++)
+            {
+                int idx = newMesh.Add<Node>();
+                if (i < nNodes)
+                {
+                    var parents = mesh.Get<Node, ParentNodes>(i);
+                    newMesh.Set<Node, ParentNodes>(idx, parents);
+                }
+                else
+                {
+                    newMesh.Set<Node, ParentNodes>(idx, new ParentNodes(i, i));
+                }
+            }
+
+            for (int e = 0; e < nTri; e++)
+            {
+                var nodes = mesh.NodesOf<Tri3, Node>(e);
+                int comp = componentOf[e];
+
+                int n0 = RemapNode(nodes[0], comp, interfaceNodes, duplicateMap);
+                int n1 = RemapNode(nodes[1], comp, interfaceNodes, duplicateMap);
+                int n2 = RemapNode(nodes[2], comp, interfaceNodes, duplicateMap);
+
+                int idx = newMesh.AddTriangle(n0, n1, n2);
+                newMesh.Set<Tri3, OriginalElement>(idx, mesh.Get<Tri3, OriginalElement>(e));
+            }
+
+            for (int e = 0; e < nTet; e++)
+            {
+                var nodes = mesh.NodesOf<Tet4, Node>(e);
+                int comp = componentOf[nTri + e];
+
+                int n0 = RemapNode(nodes[0], comp, interfaceNodes, duplicateMap);
+                int n1 = RemapNode(nodes[1], comp, interfaceNodes, duplicateMap);
+                int n2 = RemapNode(nodes[2], comp, interfaceNodes, duplicateMap);
+                int n3 = RemapNode(nodes[3], comp, interfaceNodes, duplicateMap);
+
+                int idx = newMesh.AddTetrahedron(n0, n1, n2, n3);
+                newMesh.Set<Tet4, OriginalElement>(idx, mesh.Get<Tet4, OriginalElement>(e));
+            }
+        });
+
+        return new DuplicationResult(newMesh, newCoords, componentCount, duplicateMap);
+    }
+
+    /// <summary>
+    ///     Remaps a node index for a given component.
+    ///     Non-interface nodes keep their original index; interface nodes use the duplicate map.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private static int RemapNode(
+        int nodeId, int component,
+        IReadOnlySet<int> interfaceNodes,
+        Dictionary<(int, int), int> duplicateMap)
+    {
+        if (interfaceNodes.Contains(nodeId))
+            return duplicateMap[(nodeId, component)];
+        return nodeId;
+    }
+
+    /// <summary>
+    ///     Finds connected components of elements when cutting along interface nodes.
+    ///     Useful for previewing the effect of node duplication without modifying the mesh.
+    /// </summary>
+    /// <param name="mesh">Input mesh.</param>
+    /// <param name="interfaceNodes">Nodes that define the cut interface.</param>
+    /// <returns>
+    ///     componentOf: array where result[i] is the component index for element i
+    ///     (0..nTri-1 = triangles, nTri..nTri+nTet-1 = tetrahedra).
+    ///     componentCount: total number of components found.
+    /// </returns>
+    public static (int[] componentOf, int componentCount) FindComponentsAlongInterface(
+        SimplexMesh mesh,
+        IReadOnlySet<int> interfaceNodes)
+    {
+        ArgumentNullException.ThrowIfNull(mesh);
+        ArgumentNullException.ThrowIfNull(interfaceNodes);
+
+        int nTri = mesh.Count<Tri3>();
+        int nTet = mesh.Count<Tet4>();
+        int totalElements = nTri + nTet;
+
+        if (totalElements == 0)
+            return (Array.Empty<int>(), 0);
+
+        // Build node→element map for non-interface nodes only
+        var nodeToElements = new Dictionary<int, List<int>>();
+
+        for (int e = 0; e < nTri; e++)
+        {
+            var nodes = mesh.NodesOf<Tri3, Node>(e);
+            for (int j = 0; j < nodes.Count; j++)
+            {
+                int n = nodes[j];
+                if (!interfaceNodes.Contains(n))
+                {
+                    if (!nodeToElements.TryGetValue(n, out var list))
+                    {
+                        list = new List<int>(4);
+                        nodeToElements[n] = list;
+                    }
+                    list.Add(e);
+                }
+            }
+        }
+
+        for (int e = 0; e < nTet; e++)
+        {
+            var nodes = mesh.NodesOf<Tet4, Node>(e);
+            for (int j = 0; j < nodes.Count; j++)
+            {
+                int n = nodes[j];
+                if (!interfaceNodes.Contains(n))
+                {
+                    if (!nodeToElements.TryGetValue(n, out var list))
+                    {
+                        list = new List<int>(4);
+                        nodeToElements[n] = list;
+                    }
+                    list.Add(nTri + e);
+                }
+            }
+        }
+
+        // Build element adjacency (shared non-interface node)
+        var adj = new List<HashSet<int>>(totalElements);
+        for (int i = 0; i < totalElements; i++)
+            adj.Add(new HashSet<int>());
+
+        foreach (var (_, elements) in nodeToElements)
+        {
+            for (int i = 0; i < elements.Count; i++)
+                for (int j = i + 1; j < elements.Count; j++)
+                {
+                    adj[elements[i]].Add(elements[j]);
+                    adj[elements[j]].Add(elements[i]);
+                }
+        }
+
+        // BFS connected components
+        var componentOf = new int[totalElements];
+        Array.Fill(componentOf, -1);
+        int componentCount = 0;
+
+        for (int seed = 0; seed < totalElements; seed++)
+        {
+            if (componentOf[seed] >= 0) continue;
+
+            int comp = componentCount++;
+            var queue = new Queue<int>();
+            queue.Enqueue(seed);
+            componentOf[seed] = comp;
+
+            while (queue.Count > 0)
+            {
+                int cur = queue.Dequeue();
+                foreach (int nb in adj[cur])
+                {
+                    if (componentOf[nb] < 0)
+                    {
+                        componentOf[nb] = comp;
+                        queue.Enqueue(nb);
+                    }
+                }
+            }
+        }
+
+        return (componentOf, componentCount);
+    }
+}
+
+#endregion
