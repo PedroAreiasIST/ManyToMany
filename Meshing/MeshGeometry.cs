@@ -1,6 +1,5 @@
-// GeometryCore.cs - Unified geometric operations for mesh library
-// Consolidates: MeshGeometry.cs, GeometryUtilities.cs, CurveUtilities.cs
-// Eliminates all duplicate geometric functions across the library
+// MeshGeometry.cs - All geometric operations for mesh library (single class)
+// Consolidates: MeshGeometry + GeometryUtilities + CurveUtilities
 // License: GPLv3
 
 using System.Text;
@@ -8,14 +7,17 @@ using static Numerical.MeshConstants;
 
 namespace Numerical;
 
-#region Element Geometry (from MeshGeometry.cs)
-
 /// <summary>
-///     Geometric operations for mesh elements: Jacobians, areas, volumes, quality metrics.
+///     All geometric operations for the mesh library:
+///     element Jacobians, areas, volumes, quality metrics,
+///     point-in-polygon tests, distances, projections, intersections,
+///     curve/boundary manipulation.
 /// </summary>
 public static class MeshGeometry
 {
-    #region 2D Triangle Operations
+    // ═════════════════════════════════════════════════════════════════════
+    // Triangle Operations
+    // ═════════════════════════════════════════════════════════════════════
 
     /// <summary>
     ///     Compute 2D Jacobian determinant for a triangle.
@@ -29,27 +31,15 @@ public static class MeshGeometry
         return (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
     }
 
-    /// <summary>
-    ///     Compute signed area of a triangle (half of Jacobian).
-    /// </summary>
     public static double ComputeTriangleArea(double[,] coords, int n0, int n1, int n2)
         => 0.5 * Math.Abs(ComputeTriangleJacobian(coords, n0, n1, n2));
 
-    /// <summary>
-    ///     Check if triangle has counter-clockwise (CCW) orientation.
-    /// </summary>
     public static bool IsTriangleCCW(double[,] coords, int n0, int n1, int n2)
         => ComputeTriangleJacobian(coords, n0, n1, n2) > Epsilon;
 
-    /// <summary>
-    ///     Check if triangle is degenerate (zero or near-zero area).
-    /// </summary>
     public static bool IsTriangleDegenerate(double[,] coords, int n0, int n1, int n2, double tolerance = Epsilon)
         => Math.Abs(ComputeTriangleJacobian(coords, n0, n1, n2)) < tolerance;
 
-    /// <summary>
-    ///     Compute aspect ratio of a triangle.
-    /// </summary>
     public static double ComputeTriangleAspectRatio(double[,] coords, int n0, int n1, int n2)
     {
         var area = ComputeTriangleArea(coords, n0, n1, n2);
@@ -66,9 +56,6 @@ public static class MeshGeometry
         return maxEdge / (2.0 * inradius);
     }
 
-    /// <summary>
-    ///     Compute minimum interior angle of a triangle in radians.
-    /// </summary>
     public static double ComputeTriangleMinAngle(double[,] coords, int n0, int n1, int n2)
     {
         var e1 = EdgeLength2D(coords, n0, n1);
@@ -82,14 +69,10 @@ public static class MeshGeometry
         return Math.Min(angle0, Math.Min(angle1, angle2));
     }
 
-    #endregion
+    // ═════════════════════════════════════════════════════════════════════
+    // Tetrahedron Operations
+    // ═════════════════════════════════════════════════════════════════════
 
-    #region 3D Tetrahedron Operations
-
-    /// <summary>
-    ///     Compute 3D Jacobian determinant for a tetrahedron.
-    ///     Returns 6 times the signed volume.
-    /// </summary>
     public static double ComputeTetrahedronJacobian(double[,] coords, int n0, int n1, int n2, int n3)
     {
         var v1x = coords[n1, 0] - coords[n0, 0];
@@ -109,27 +92,15 @@ public static class MeshGeometry
                v1z * (v2x * v3y - v2y * v3x);
     }
 
-    /// <summary>
-    ///     Compute volume of a tetrahedron (1/6 of Jacobian absolute value).
-    /// </summary>
     public static double ComputeTetrahedronVolume(double[,] coords, int n0, int n1, int n2, int n3)
         => Math.Abs(ComputeTetrahedronJacobian(coords, n0, n1, n2, n3)) / 6.0;
 
-    /// <summary>
-    ///     Check if tetrahedron has correct orientation (positive Jacobian).
-    /// </summary>
     public static bool IsTetrahedronCorrectOrientation(double[,] coords, int n0, int n1, int n2, int n3)
         => ComputeTetrahedronJacobian(coords, n0, n1, n2, n3) > Epsilon;
 
-    /// <summary>
-    ///     Check if tetrahedron is degenerate (zero or near-zero volume).
-    /// </summary>
     public static bool IsTetrahedronDegenerate(double[,] coords, int n0, int n1, int n2, int n3, double tolerance = Epsilon)
         => Math.Abs(ComputeTetrahedronJacobian(coords, n0, n1, n2, n3)) < tolerance;
 
-    /// <summary>
-    ///     Compute aspect ratio of a tetrahedron.
-    /// </summary>
     public static double ComputeTetrahedronAspectRatio(double[,] coords, int n0, int n1, int n2, int n3)
     {
         var volume = ComputeTetrahedronVolume(coords, n0, n1, n2, n3);
@@ -146,13 +117,10 @@ public static class MeshGeometry
         return maxEdge * maxEdge * maxEdge / (8.48 * volume);
     }
 
-    #endregion
+    // ═════════════════════════════════════════════════════════════════════
+    // Quadrilateral Operations
+    // ═════════════════════════════════════════════════════════════════════
 
-    #region 2D Quadrilateral Operations
-
-    /// <summary>
-    ///     Check if quadrilateral has counter-clockwise (CCW) orientation.
-    /// </summary>
     public static bool IsQuadCCW(double[,] coords, int n0, int n1, int n2, int n3)
     {
         var ax = coords[n1, 0] - coords[n0, 0];
@@ -162,15 +130,9 @@ public static class MeshGeometry
         return ax * by - ay * bx > Epsilon;
     }
 
-    /// <summary>
-    ///     Compute area of a quadrilateral (sum of two triangles).
-    /// </summary>
     public static double ComputeQuadArea(double[,] coords, int n0, int n1, int n2, int n3)
         => ComputeTriangleArea(coords, n0, n1, n2) + ComputeTriangleArea(coords, n0, n2, n3);
 
-    /// <summary>
-    ///     Check if quadrilateral is convex.
-    /// </summary>
     public static bool IsQuadConvex(double[,] coords, int n0, int n1, int n2, int n3)
     {
         var cross0 = CrossProductAtVertex(coords, n0, n1, n2);
@@ -191,13 +153,10 @@ public static class MeshGeometry
         return ax * by - ay * bx;
     }
 
-    #endregion
+    // ═════════════════════════════════════════════════════════════════════
+    // Edge Lengths
+    // ═════════════════════════════════════════════════════════════════════
 
-    #region Edge Length Functions (PUBLIC - used by many modules)
-
-    /// <summary>
-    ///     Compute 2D edge length between two nodes.
-    /// </summary>
     public static double EdgeLength2D(double[,] coords, int n0, int n1)
     {
         var dx = coords[n1, 0] - coords[n0, 0];
@@ -205,9 +164,6 @@ public static class MeshGeometry
         return Math.Sqrt(dx * dx + dy * dy);
     }
 
-    /// <summary>
-    ///     Compute 3D edge length between two nodes.
-    /// </summary>
     public static double EdgeLength3D(double[,] coords, int n0, int n1)
     {
         var dx = coords[n1, 0] - coords[n0, 0];
@@ -216,13 +172,10 @@ public static class MeshGeometry
         return Math.Sqrt(dx * dx + dy * dy + dz * dz);
     }
 
-    #endregion
+    // ═════════════════════════════════════════════════════════════════════
+    // Mesh-wide Quality Operations
+    // ═════════════════════════════════════════════════════════════════════
 
-    #region Mesh-wide Operations
-
-    /// <summary>
-    ///     Validate mesh quality: check all elements have positive Jacobians.
-    /// </summary>
     public static int ValidateMeshOrientation(SimplexMesh mesh, double[,] coords,
         out int invertedTris, out int invertedTets)
     {
@@ -246,9 +199,6 @@ public static class MeshGeometry
         return invertedTris + invertedTets;
     }
 
-    /// <summary>
-    ///     Find degenerate elements.
-    /// </summary>
     public static (int[] degenerateTris, int[] degenerateTets) FindDegenerateElements(
         SimplexMesh mesh, double[,] coords, double tolerance = Epsilon)
     {
@@ -272,9 +222,6 @@ public static class MeshGeometry
         return (badTris.ToArray(), badTets.ToArray());
     }
 
-    /// <summary>
-    ///     Compute mesh quality statistics.
-    /// </summary>
     public static MeshQualityStats ComputeQualityStatistics(SimplexMesh mesh, double[,] coords)
     {
         var stats = new MeshQualityStats();
@@ -329,57 +276,10 @@ public static class MeshGeometry
         return stats;
     }
 
-    #endregion
-}
+    // ═════════════════════════════════════════════════════════════════════
+    // Point-in-Polygon Tests (was GeometryUtilities)
+    // ═════════════════════════════════════════════════════════════════════
 
-/// <summary>
-///     Container for mesh quality statistics.
-/// </summary>
-public class MeshQualityStats
-{
-    public int TriangleCount { get; set; }
-    public int TetrahedronCount { get; set; }
-    public double MinTriangleAspectRatio { get; set; }
-    public double MaxTriangleAspectRatio { get; set; }
-    public double AvgTriangleAspectRatio { get; set; }
-    public double MinTetrahedronAspectRatio { get; set; }
-    public double MaxTetrahedronAspectRatio { get; set; }
-    public double AvgTetrahedronAspectRatio { get; set; }
-    public double MinTriangleAngleDegrees { get; set; }
-
-    public override string ToString()
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine("=== Mesh Quality Statistics ===");
-        if (TriangleCount > 0)
-        {
-            sb.AppendLine($"Triangles: {TriangleCount}");
-            sb.AppendLine($"  Aspect Ratio: {MinTriangleAspectRatio:F2} - {MaxTriangleAspectRatio:F2} (avg: {AvgTriangleAspectRatio:F2})");
-            sb.AppendLine($"  Min Angle: {MinTriangleAngleDegrees:F1}°");
-        }
-        if (TetrahedronCount > 0)
-        {
-            sb.AppendLine($"Tetrahedra: {TetrahedronCount}");
-            sb.AppendLine($"  Aspect Ratio: {MinTetrahedronAspectRatio:F2} - {MaxTetrahedronAspectRatio:F2} (avg: {AvgTetrahedronAspectRatio:F2})");
-        }
-        return sb.ToString();
-    }
-}
-
-#endregion
-
-#region Point/Polygon Geometry (from GeometryUtilities.cs)
-
-/// <summary>
-///     Fundamental 2D/3D geometric operations: point-in-polygon, distances, projections.
-/// </summary>
-public static class GeometryUtilities
-{
-    #region Point-in-Polygon Tests
-
-    /// <summary>
-    ///     Check if point is inside polygon using ray casting algorithm.
-    /// </summary>
     public static bool IsPointInPolygon((double x, double y) point, double[,] polygon)
     {
         var n = polygon.GetLength(0);
@@ -398,9 +298,6 @@ public static class GeometryUtilities
         return inside;
     }
 
-    /// <summary>
-    ///     Check if point is inside polygon (list format).
-    /// </summary>
     public static bool IsPointInPolygon((double x, double y) point, List<(double x, double y)> polygon)
     {
         var n = polygon.Count;
@@ -419,9 +316,6 @@ public static class GeometryUtilities
         return inside;
     }
 
-    /// <summary>
-    ///     Check if point is on polygon boundary.
-    /// </summary>
     public static bool IsPointOnPolygonBoundary((double x, double y) point, double[,] polygon, double tolerance = Epsilon)
     {
         var n = polygon.GetLength(0);
@@ -434,13 +328,10 @@ public static class GeometryUtilities
         return false;
     }
 
-    #endregion
+    // ═════════════════════════════════════════════════════════════════════
+    // Distance Calculations (was GeometryUtilities)
+    // ═════════════════════════════════════════════════════════════════════
 
-    #region Distance Calculations
-
-    /// <summary>
-    ///     Compute distance from point to infinite line.
-    /// </summary>
     public static double DistancePointToLine((double x, double y) point, (double x, double y) lineStart, (double x, double y) lineEnd)
     {
         var dx = lineEnd.x - lineStart.x;
@@ -454,9 +345,6 @@ public static class GeometryUtilities
         return cross / lineLength;
     }
 
-    /// <summary>
-    ///     Compute distance from point to line segment.
-    /// </summary>
     public static double DistancePointToSegment((double x, double y) point, (double x, double y) segStart, (double x, double y) segEnd)
     {
         var dx = segEnd.x - segStart.x;
@@ -469,9 +357,6 @@ public static class GeometryUtilities
         return Distance2D(point, (segStart.x + t * dx, segStart.y + t * dy));
     }
 
-    /// <summary>
-    ///     Compute 2D Euclidean distance between two points.
-    /// </summary>
     public static double Distance2D((double x, double y) p1, (double x, double y) p2)
     {
         var dx = p2.x - p1.x;
@@ -479,9 +364,6 @@ public static class GeometryUtilities
         return Math.Sqrt(dx * dx + dy * dy);
     }
 
-    /// <summary>
-    ///     Compute 3D Euclidean distance between two points.
-    /// </summary>
     public static double Distance3D((double x, double y, double z) p1, (double x, double y, double z) p2)
     {
         var dx = p2.x - p1.x;
@@ -490,13 +372,10 @@ public static class GeometryUtilities
         return Math.Sqrt(dx * dx + dy * dy + dz * dz);
     }
 
-    #endregion
+    // ═════════════════════════════════════════════════════════════════════
+    // Point Projections (was GeometryUtilities)
+    // ═════════════════════════════════════════════════════════════════════
 
-    #region Point Projections
-
-    /// <summary>
-    ///     Project point onto infinite line.
-    /// </summary>
     public static (double x, double y) ProjectPointToLine((double x, double y) point, (double x, double y) lineStart, (double x, double y) lineEnd)
     {
         var dx = lineEnd.x - lineStart.x;
@@ -509,9 +388,6 @@ public static class GeometryUtilities
         return (lineStart.x + t * dx, lineStart.y + t * dy);
     }
 
-    /// <summary>
-    ///     Project point onto line segment.
-    /// </summary>
     public static (double x, double y) ProjectPointToSegment((double x, double y) point, (double x, double y) segStart, (double x, double y) segEnd)
     {
         var dx = segEnd.x - segStart.x;
@@ -524,13 +400,10 @@ public static class GeometryUtilities
         return (segStart.x + t * dx, segStart.y + t * dy);
     }
 
-    #endregion
+    // ═════════════════════════════════════════════════════════════════════
+    // Line Intersections (was GeometryUtilities)
+    // ═════════════════════════════════════════════════════════════════════
 
-    #region Line Intersections
-
-    /// <summary>
-    ///     Find intersection point of two infinite lines.
-    /// </summary>
     public static ((double x, double y) point, bool intersects) IntersectLines(
         (double x, double y) line1Start, (double x, double y) line1End,
         (double x, double y) line2Start, (double x, double y) line2End)
@@ -545,9 +418,6 @@ public static class GeometryUtilities
         return ((x1 + t * (x2 - x1), y1 + t * (y2 - y1)), true);
     }
 
-    /// <summary>
-    ///     Find intersection point of two line segments.
-    /// </summary>
     public static ((double x, double y) point, bool intersects) IntersectSegments(
         (double x, double y) seg1Start, (double x, double y) seg1End,
         (double x, double y) seg2Start, (double x, double y) seg2End)
@@ -567,13 +437,10 @@ public static class GeometryUtilities
         return ((0, 0), false);
     }
 
-    #endregion
+    // ═════════════════════════════════════════════════════════════════════
+    // Bounding Box (was GeometryUtilities)
+    // ═════════════════════════════════════════════════════════════════════
 
-    #region Bounding Box Operations
-
-    /// <summary>
-    ///     Compute axis-aligned bounding box.
-    /// </summary>
     public static (double xMin, double xMax, double yMin, double yMax) ComputeBoundingBox2D(double[,] points)
     {
         var n = points.GetLength(0);
@@ -593,9 +460,6 @@ public static class GeometryUtilities
         return (xMin, xMax, yMin, yMax);
     }
 
-    /// <summary>
-    ///     Compute axis-aligned bounding box (list format).
-    /// </summary>
     public static (double xMin, double xMax, double yMin, double yMax) ComputeBoundingBox2D(List<(double x, double y)> points)
     {
         if (points.Count == 0) return (0, 0, 0, 0);
@@ -614,19 +478,13 @@ public static class GeometryUtilities
         return (xMin, xMax, yMin, yMax);
     }
 
-    /// <summary>
-    ///     Check if point is inside bounding box.
-    /// </summary>
     public static bool IsPointInBoundingBox((double x, double y) point, (double xMin, double xMax, double yMin, double yMax) bbox)
         => point.x >= bbox.xMin && point.x <= bbox.xMax && point.y >= bbox.yMin && point.y <= bbox.yMax;
 
-    #endregion
+    // ═════════════════════════════════════════════════════════════════════
+    // Angular and Vector Operations (was GeometryUtilities)
+    // ═════════════════════════════════════════════════════════════════════
 
-    #region Angular and Vector Operations
-
-    /// <summary>
-    ///     Compute angle between two 2D vectors in radians [0, π].
-    /// </summary>
     public static double AngleBetweenVectors2D((double x, double y) v1, (double x, double y) v2)
     {
         var dot = v1.x * v2.x + v1.y * v2.y;
@@ -638,9 +496,6 @@ public static class GeometryUtilities
         return Math.Acos(Math.Clamp(dot / (mag1 * mag2), -1.0, 1.0));
     }
 
-    /// <summary>
-    ///     Compute signed angle from v1 to v2 in radians [-π, π].
-    /// </summary>
     public static double SignedAngleBetweenVectors2D((double x, double y) v1, (double x, double y) v2)
     {
         var angle = AngleBetweenVectors2D(v1, v2);
@@ -648,21 +503,12 @@ public static class GeometryUtilities
         return cross < 0 ? -angle : angle;
     }
 
-    /// <summary>
-    ///     Compute 2D cross product (scalar).
-    /// </summary>
     public static double CrossProduct2D((double x, double y) v1, (double x, double y) v2)
         => v1.x * v2.y - v1.y * v2.x;
 
-    /// <summary>
-    ///     Compute 2D dot product.
-    /// </summary>
     public static double DotProduct2D((double x, double y) v1, (double x, double y) v2)
         => v1.x * v2.x + v1.y * v2.y;
 
-    /// <summary>
-    ///     Normalize 2D vector to unit length.
-    /// </summary>
     public static (double x, double y) Normalize2D((double x, double y) v)
     {
         var length = Math.Sqrt(v.x * v.x + v.y * v.y);
@@ -670,9 +516,6 @@ public static class GeometryUtilities
         return (v.x / length, v.y / length);
     }
 
-    /// <summary>
-    ///     Rotate 2D vector by angle (radians, counter-clockwise).
-    /// </summary>
     public static (double x, double y) Rotate2D((double x, double y) v, double angle)
     {
         var cos = Math.Cos(angle);
@@ -680,27 +523,18 @@ public static class GeometryUtilities
         return (v.x * cos - v.y * sin, v.x * sin + v.y * cos);
     }
 
-    #endregion
+    // ═════════════════════════════════════════════════════════════════════
+    // Interpolation (was GeometryUtilities)
+    // ═════════════════════════════════════════════════════════════════════
 
-    #region Interpolation
-
-    /// <summary>
-    ///     Linear interpolation between two points.
-    /// </summary>
     public static (double x, double y) Lerp2D((double x, double y) p1, (double x, double y) p2, double t)
         => (p1.x + t * (p2.x - p1.x), p1.y + t * (p2.y - p1.y));
 
-    /// <summary>
-    ///     Barycentric interpolation in a triangle.
-    /// </summary>
     public static (double x, double y) BarycentricInterpolation(
         (double x, double y) p0, (double x, double y) p1, (double x, double y) p2,
         double w0, double w1, double w2)
         => (w0 * p0.x + w1 * p1.x + w2 * p2.x, w0 * p0.y + w1 * p1.y + w2 * p2.y);
 
-    /// <summary>
-    ///     Compute barycentric coordinates of point in triangle.
-    /// </summary>
     public static (double w0, double w1, double w2) ComputeBarycentricCoordinates(
         (double x, double y) point, (double x, double y) p0, (double x, double y) p1, (double x, double y) p2)
     {
@@ -725,23 +559,10 @@ public static class GeometryUtilities
         return (1.0 - w1 - w2, w1, w2);
     }
 
-    #endregion
-}
+    // ═════════════════════════════════════════════════════════════════════
+    // Curve/Boundary Operations (was CurveUtilities)
+    // ═════════════════════════════════════════════════════════════════════
 
-#endregion
-
-#region Curve/Boundary Utilities (from CurveUtilities.cs)
-
-/// <summary>
-///     Curve and boundary manipulation: refinement, resampling, orientation.
-/// </summary>
-public static class CurveUtilities
-{
-    #region Boundary Refinement
-
-    /// <summary>
-    ///     Refines boundary edges to ensure good mesh quality.
-    /// </summary>
     public static double[,] RefineBoundary(double[,] boundary, double maxEdgeRatio = 2.0, int minEdgeCount = 200)
     {
         var n = boundary.GetLength(0);
@@ -812,13 +633,6 @@ public static class CurveUtilities
         return Math.Sqrt(dx * dx + dy * dy);
     }
 
-    #endregion
-
-    #region Curve Resampling
-
-    /// <summary>
-    ///     Resample curve to have specified number of points uniformly distributed by arc length.
-    /// </summary>
     public static List<(double x, double y)> ResampleCurve(List<(double x, double y)> curve, int targetPoints, bool closedCurve = false)
     {
         if (curve.Count >= targetPoints) return new List<(double x, double y)>(curve);
@@ -867,9 +681,6 @@ public static class CurveUtilities
         return resampled;
     }
 
-    /// <summary>
-    ///     Resample curve from array format.
-    /// </summary>
     public static double[,] ResampleCurveArray(double[,] curve, int targetPoints, bool closedCurve = false)
     {
         var curveList = ExtractCurve2D(curve);
@@ -885,13 +696,6 @@ public static class CurveUtilities
         return result;
     }
 
-    #endregion
-
-    #region Arc Length and Geometry
-
-    /// <summary>
-    ///     Compute total arc length of a curve.
-    /// </summary>
     public static double ComputeArcLength(List<(double x, double y)> curve, bool closedCurve = false)
     {
         double length = 0;
@@ -913,9 +717,6 @@ public static class CurveUtilities
         return length;
     }
 
-    /// <summary>
-    ///     Compute average edge length of a boundary.
-    /// </summary>
     public static double ComputeAverageEdgeLength(double[,] boundary)
     {
         var n = boundary.GetLength(0);
@@ -931,9 +732,6 @@ public static class CurveUtilities
         return totalLength / n;
     }
 
-    /// <summary>
-    ///     Compute average edge length of a boundary (list format).
-    /// </summary>
     public static double ComputeAverageEdgeLength(List<(double x, double y)> points)
     {
         var n = points.Count;
@@ -952,9 +750,6 @@ public static class CurveUtilities
         return totalLength / n;
     }
 
-    /// <summary>
-    ///     Compute centroid of a boundary.
-    /// </summary>
     public static (double x, double y) ComputeCentroid(double[,] boundary)
     {
         var n = boundary.GetLength(0);
@@ -970,9 +765,6 @@ public static class CurveUtilities
         return (sumX / n, sumY / n);
     }
 
-    /// <summary>
-    ///     Compute signed area of a boundary (2D). Positive = CCW, negative = CW.
-    /// </summary>
     public static double ComputeSignedArea(double[,] boundary)
     {
         var n = boundary.GetLength(0);
@@ -988,19 +780,13 @@ public static class CurveUtilities
         return area / 2.0;
     }
 
-    #endregion
+    // ═════════════════════════════════════════════════════════════════════
+    // Orientation (was CurveUtilities)
+    // ═════════════════════════════════════════════════════════════════════
 
-    #region Orientation
-
-    /// <summary>
-    ///     Check if boundary has counter-clockwise (CCW) orientation.
-    /// </summary>
     public static bool IsBoundaryCCW(double[,] boundary)
         => ComputeSignedArea(boundary) > 0;
 
-    /// <summary>
-    ///     Reverse boundary orientation.
-    /// </summary>
     public static double[,] ReverseBoundary(double[,] boundary)
     {
         var n = boundary.GetLength(0);
@@ -1014,25 +800,16 @@ public static class CurveUtilities
         return reversed;
     }
 
-    /// <summary>
-    ///     Ensure boundary has CCW orientation.
-    /// </summary>
     public static double[,] EnsureCCW(double[,] boundary)
         => IsBoundaryCCW(boundary) ? boundary : ReverseBoundary(boundary);
 
-    /// <summary>
-    ///     Ensure boundary has CW orientation.
-    /// </summary>
     public static double[,] EnsureCW(double[,] boundary)
         => IsBoundaryCCW(boundary) ? ReverseBoundary(boundary) : boundary;
 
-    #endregion
+    // ═════════════════════════════════════════════════════════════════════
+    // Conversion Utilities (was CurveUtilities)
+    // ═════════════════════════════════════════════════════════════════════
 
-    #region Conversion Utilities
-
-    /// <summary>
-    ///     Extract 2D curve from array format to list of tuples.
-    /// </summary>
     public static List<(double x, double y)> ExtractCurve2D(double[,] curve)
     {
         var points = new List<(double x, double y)>();
@@ -1041,9 +818,6 @@ public static class CurveUtilities
         return points;
     }
 
-    /// <summary>
-    ///     Convert list of tuples to array format.
-    /// </summary>
     public static double[,] ConvertToArray(List<(double x, double y)> curve, int dim = 2)
     {
         var n = curve.Count;
@@ -1058,8 +832,38 @@ public static class CurveUtilities
 
         return result;
     }
-
-    #endregion
 }
 
-#endregion
+/// <summary>
+///     Container for mesh quality statistics.
+/// </summary>
+public class MeshQualityStats
+{
+    public int TriangleCount { get; set; }
+    public int TetrahedronCount { get; set; }
+    public double MinTriangleAspectRatio { get; set; }
+    public double MaxTriangleAspectRatio { get; set; }
+    public double AvgTriangleAspectRatio { get; set; }
+    public double MinTetrahedronAspectRatio { get; set; }
+    public double MaxTetrahedronAspectRatio { get; set; }
+    public double AvgTetrahedronAspectRatio { get; set; }
+    public double MinTriangleAngleDegrees { get; set; }
+
+    public override string ToString()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("=== Mesh Quality Statistics ===");
+        if (TriangleCount > 0)
+        {
+            sb.AppendLine($"Triangles: {TriangleCount}");
+            sb.AppendLine($"  Aspect Ratio: {MinTriangleAspectRatio:F2} - {MaxTriangleAspectRatio:F2} (avg: {AvgTriangleAspectRatio:F2})");
+            sb.AppendLine($"  Min Angle: {MinTriangleAngleDegrees:F1}°");
+        }
+        if (TetrahedronCount > 0)
+        {
+            sb.AppendLine($"Tetrahedra: {TetrahedronCount}");
+            sb.AppendLine($"  Aspect Ratio: {MinTetrahedronAspectRatio:F2} - {MaxTetrahedronAspectRatio:F2} (avg: {AvgTetrahedronAspectRatio:F2})");
+        }
+        return sb.ToString();
+    }
+}
