@@ -28,6 +28,15 @@ public static class SimplexRemesher
     public static (SimplexMesh Mesh, double[,] Coordinates) CreateRectangularMesh(
         int nx, int ny, double xMin, double xMax, double yMin, double yMax)
     {
+        if (nx <= 0)
+            throw new ArgumentOutOfRangeException(nameof(nx), nx, "nx must be > 0.");
+        if (ny <= 0)
+            throw new ArgumentOutOfRangeException(nameof(ny), ny, "ny must be > 0.");
+        if (xMax <= xMin)
+            throw new ArgumentException("xMax must be greater than xMin.", nameof(xMax));
+        if (yMax <= yMin)
+            throw new ArgumentException("yMax must be greater than yMin.", nameof(yMax));
+
         var mesh = new SimplexMesh();
         var coords = new double[(nx + 1) * (ny + 1), 3];
 
@@ -72,6 +81,15 @@ public static class SimplexRemesher
     public static (SimplexMesh Mesh, double[,] Coordinates) CreateRectangularQuadMesh(
         int nx, int ny, double xMin, double xMax, double yMin, double yMax)
     {
+        if (nx <= 0)
+            throw new ArgumentOutOfRangeException(nameof(nx), nx, "nx must be > 0.");
+        if (ny <= 0)
+            throw new ArgumentOutOfRangeException(nameof(ny), ny, "ny must be > 0.");
+        if (xMax <= xMin)
+            throw new ArgumentException("xMax must be greater than xMin.", nameof(xMax));
+        if (yMax <= yMin)
+            throw new ArgumentException("yMax must be greater than yMin.", nameof(yMax));
+
         var mesh = new SimplexMesh();
         var coords = new double[(nx + 1) * (ny + 1), 3];
 
@@ -116,6 +134,19 @@ public static class SimplexRemesher
         int nx, int ny, int nz,
         double xMin, double xMax, double yMin, double yMax, double zMin, double zMax)
     {
+        if (nx <= 0)
+            throw new ArgumentOutOfRangeException(nameof(nx), nx, "nx must be > 0.");
+        if (ny <= 0)
+            throw new ArgumentOutOfRangeException(nameof(ny), ny, "ny must be > 0.");
+        if (nz <= 0)
+            throw new ArgumentOutOfRangeException(nameof(nz), nz, "nz must be > 0.");
+        if (xMax <= xMin)
+            throw new ArgumentException("xMax must be greater than xMin.", nameof(xMax));
+        if (yMax <= yMin)
+            throw new ArgumentException("yMax must be greater than yMin.", nameof(yMax));
+        if (zMax <= zMin)
+            throw new ArgumentException("zMax must be greater than zMin.", nameof(zMax));
+
         var mesh = new SimplexMesh();
         int nodeCount = (nx + 1) * (ny + 1) * (nz + 1);
         var coords = new double[nodeCount, 3];
