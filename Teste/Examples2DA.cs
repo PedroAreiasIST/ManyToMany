@@ -107,11 +107,11 @@ public static class Examples2DA
         var holes = new List<double[,]> { hole };
 
         // Mesh with QUADS
-        var (meshQuad, coordsQuad) = UnifiedMesher.TriangulateWithHoles(
+        var (meshQuad, coordsQuad) = SimplexRemesher.TriangulateWithHoles(
             outer, holes, convertToQuads: true);
 
         // Mesh with TRIS
-        var (meshTri, coordsTri) = UnifiedMesher.TriangulateWithHoles(
+        var (meshTri, coordsTri) = SimplexRemesher.TriangulateWithHoles(
             outer, holes, convertToQuads: false);
 
         Console.WriteLine(
@@ -159,10 +159,10 @@ public static class Examples2DA
             { 0, 2 }
         };
 
-        var (meshTri, coordsTri) = UnifiedMesher.Triangulate(
+        var (meshTri, coordsTri) = SimplexRemesher.Triangulate(
             boundary, convertToQuads: false, enableSmoothing: false);
 
-        var (meshQuad, coordsQuad) = UnifiedMesher.Triangulate(
+        var (meshQuad, coordsQuad) = SimplexRemesher.Triangulate(
             boundary, convertToQuads: true, enableSmoothing: false);
 
         Console.WriteLine($"  TRI mesh:  {meshTri.Count<Node>()} nodes, {meshTri.Count<Tri3>()} triangles");
@@ -199,10 +199,10 @@ public static class Examples2DA
         var holes = new List<double[,]> { inner };
 
         // Create TRI and QUAD versions
-        var (meshTri, coordsTri) = UnifiedMesher.TriangulateWithHoles(
+        var (meshTri, coordsTri) = SimplexRemesher.TriangulateWithHoles(
             outer, holes, convertToQuads: false);
 
-        var (meshQuad, coordsQuad) = UnifiedMesher.TriangulateWithHoles(
+        var (meshQuad, coordsQuad) = SimplexRemesher.TriangulateWithHoles(
             outer, holes, convertToQuads: true);
 
         Console.WriteLine("  Annulus: R_outer=2.0, R_inner=1.0");
@@ -245,10 +245,10 @@ public static class Examples2DA
 
         var boundaryArray = ConvertListToArray(boundary);
 
-        var (meshTri, coordsTri) = UnifiedMesher.Triangulate(
+        var (meshTri, coordsTri) = SimplexRemesher.Triangulate(
             boundaryArray, convertToQuads: false);
 
-        var (meshQuad, coordsQuad) = UnifiedMesher.Triangulate(
+        var (meshQuad, coordsQuad) = SimplexRemesher.Triangulate(
             boundaryArray, convertToQuads: true);
 
         Console.WriteLine("  Wedge: 60° sector, R=2");
@@ -286,10 +286,10 @@ public static class Examples2DA
         var hole3 = CreateCircle(3.2, 2.2, 0.25, 16);
         var holes = new List<double[,]> { hole1, hole2, hole3 };
 
-        var (meshTri, coordsTri) = UnifiedMesher.TriangulateWithHoles(
+        var (meshTri, coordsTri) = SimplexRemesher.TriangulateWithHoles(
             boundary, holes, convertToQuads: false);
 
-        var (meshQuad, coordsQuad) = UnifiedMesher.TriangulateWithHoles(
+        var (meshQuad, coordsQuad) = SimplexRemesher.TriangulateWithHoles(
             boundary, holes, convertToQuads: true);
 
         Console.WriteLine("  Domain: 4×3 rectangle with 3 circular holes");
@@ -327,10 +327,10 @@ public static class Examples2DA
             boundary[i, 1] = r * Math.Sin(theta);
         }
 
-        var (meshTri, coordsTri) = UnifiedMesher.Triangulate(
+        var (meshTri, coordsTri) = SimplexRemesher.Triangulate(
             boundary, convertToQuads: false);
 
-        var (meshQuad, coordsQuad) = UnifiedMesher.Triangulate(
+        var (meshQuad, coordsQuad) = SimplexRemesher.Triangulate(
             boundary, convertToQuads: true);
 
         Console.WriteLine("  Star: 5-pointed with radial modulation");
@@ -362,10 +362,10 @@ public static class Examples2DA
             { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 }
         };
 
-        var (meshTri, coordsTri) = UnifiedMesher.Triangulate(
+        var (meshTri, coordsTri) = SimplexRemesher.Triangulate(
             boundary, refine: true, maxArea: 0.01, convertToQuads: false);
 
-        var (meshQuad, coordsQuad) = UnifiedMesher.Triangulate(
+        var (meshQuad, coordsQuad) = SimplexRemesher.Triangulate(
             boundary, refine: true, maxArea: 0.01, convertToQuads: true);
 
         var statsTri = MeshGeometry.ComputeQualityStatistics(meshTri, coordsTri);
@@ -416,7 +416,7 @@ public static class Examples2DA
         var holes = new List<double[,]> { hole };
 
         // Generate base mesh (triangles only for crack insertion)
-        var (mesh, coords) = UnifiedMesher.TriangulateWithHoles(
+        var (mesh, coords) = SimplexRemesher.TriangulateWithHoles(
             boundary, holes,
             refine: true,
             maxArea: 0.05,
@@ -523,11 +523,11 @@ public static class Examples2DA
         var boundaryArray = ConvertListToArray(boundary);
 
         // TRI mesh
-        var (meshTri, coordsTri) = UnifiedMesher.Triangulate(
+        var (meshTri, coordsTri) = SimplexRemesher.Triangulate(
             boundaryArray, convertToQuads: false);
 
         // QUAD mesh
-        var (meshQuad, coordsQuad) = UnifiedMesher.Triangulate(
+        var (meshQuad, coordsQuad) = SimplexRemesher.Triangulate(
             boundaryArray, convertToQuads: true);
 
         Console.WriteLine($"  Gear: {nTeeth} teeth, R_base={rBase}, R_tip={rTip}");
@@ -592,7 +592,7 @@ public static class Examples2DA
         var holes = new List<double[,]> { hole1, hole2 };
 
         // TRI mesh with UNIFORM sizing (sizeGradation = 0)
-        var (meshTri, coordsTri) = UnifiedMesher.TriangulateWithHoles(
+        var (meshTri, coordsTri) = SimplexRemesher.TriangulateWithHoles(
             boundaryArray,
             holes,
             refine: true,
@@ -601,7 +601,7 @@ public static class Examples2DA
             convertToQuads: false);
 
         // QUAD mesh with UNIFORM sizing
-        var (meshQuad, coordsQuad) = UnifiedMesher.TriangulateWithHoles(
+        var (meshQuad, coordsQuad) = SimplexRemesher.TriangulateWithHoles(
             boundaryArray,
             holes,
             refine: true,
@@ -649,7 +649,7 @@ public static class Examples2DA
 
         // REDUCED MESH DENSITY: 51x101 instead of 101x201
         var boundary = CreateRectangle(0, W, 0, H, 51, 101);
-        var (baseMesh, baseCoords) = UnifiedMesher.Triangulate(
+        var (baseMesh, baseCoords) = SimplexRemesher.Triangulate(
             boundary, refine: true, maxArea: 5.0, convertToQuads: false,
             enableSmoothing: false); // Keep smoothing for quality 5.0 instead of 1.5
 
@@ -692,7 +692,7 @@ public static class Examples2DA
 
         // REDUCED MESH DENSITY: 51x51 instead of 101x101
         var boundary = CreateRectangle(0, L, 0, L, 101, 101); // Finer mesh for multi-crack patterns
-        var (baseMesh, baseCoords) = UnifiedMesher.Triangulate(
+        var (baseMesh, baseCoords) = SimplexRemesher.Triangulate(
             boundary, refine: true, maxArea: 2.0, convertToQuads: false,
             enableSmoothing: false); // Finer mesh, no smoothing for multi-crack
 
@@ -742,7 +742,7 @@ public static class Examples2DA
 
         // REDUCED MESH DENSITY: 51x101 instead of 101x201
         var boundary = CreateRectangle(0, W, 0, H, 51, 101);
-        var (baseMesh, baseCoords) = UnifiedMesher.Triangulate(
+        var (baseMesh, baseCoords) = SimplexRemesher.Triangulate(
             boundary, refine: true, maxArea: 5.0, convertToQuads: false,
             enableSmoothing: false); // Keep smoothing for quality 5.0 instead of 1.5
 
@@ -799,7 +799,7 @@ public static class Examples2DA
 
         // REDUCED MESH DENSITY: 51x51 instead of 101x101
         var boundary = CreateRectangle(0, L, 0, L, 101, 101); // Finer mesh for multi-crack patterns
-        var (baseMesh, baseCoords) = UnifiedMesher.Triangulate(
+        var (baseMesh, baseCoords) = SimplexRemesher.Triangulate(
             boundary, refine: true, maxArea: 2.0, convertToQuads: false,
             enableSmoothing: false); // Finer mesh, no smoothing for multi-crack
 
@@ -859,7 +859,7 @@ public static class Examples2DA
         var hole = CreateCircle(L / 2, L / 2, R, 30); // 30 points instead of 40
         var holes = new List<double[,]> { hole };
 
-        var (baseMesh, baseCoords) = UnifiedMesher.TriangulateWithHoles(
+        var (baseMesh, baseCoords) = SimplexRemesher.TriangulateWithHoles(
             outer, holes, refine: true, maxArea: 2.0, convertToQuads: false,
             enableSmoothing: false); // Finer mesh, no smoothing for multi-crack
 
@@ -909,7 +909,7 @@ public static class Examples2DA
 
         // Fine mesh for curves (balanced between speed and quality)
         var boundary = CreateRectangle(0, L, 0, L, 101, 101);
-        var (baseMesh, baseCoords) = UnifiedMesher.Triangulate(
+        var (baseMesh, baseCoords) = SimplexRemesher.Triangulate(
             boundary, refine: true, maxArea: 1.0, convertToQuads: false, enableSmoothing: false);
 
         Console.WriteLine($"Base mesh: {baseMesh.Count<Node>()} nodes, {baseMesh.Count<Tri3>()} triangles");
@@ -994,7 +994,7 @@ public static class Examples2DA
 
         // REDUCED MESH DENSITY: 51x51 instead of 101x101
         var boundary = CreateRectangle(0, L, 0, L, 101, 101); // Finer mesh for multi-crack patterns
-        var (baseMesh, baseCoords) = UnifiedMesher.Triangulate(
+        var (baseMesh, baseCoords) = SimplexRemesher.Triangulate(
             boundary, refine: true, maxArea: 2.0, convertToQuads: false,
             enableSmoothing: false); // Finer mesh, no smoothing for multi-crack
 
@@ -1070,7 +1070,7 @@ public static class Examples2DA
 
         // REDUCED MESH DENSITY: 51x51 instead of 101x101
         var boundary = CreateRectangle(0, L, 0, L, 101, 101); // Finer mesh for multi-crack patterns
-        var (baseMesh, baseCoords) = UnifiedMesher.Triangulate(
+        var (baseMesh, baseCoords) = SimplexRemesher.Triangulate(
             boundary, refine: true, maxArea: 2.0, convertToQuads: false,
             enableSmoothing: false); // Finer mesh, no smoothing for multi-crack
 
@@ -1127,7 +1127,7 @@ public static class Examples2DA
 
         // REDUCED MESH DENSITY: 51x51 instead of 101x101
         var boundary = CreateRectangle(0, L, 0, L, 101, 101); // Finer mesh for multi-crack patterns
-        var (baseMesh, baseCoords) = UnifiedMesher.Triangulate(
+        var (baseMesh, baseCoords) = SimplexRemesher.Triangulate(
             boundary, refine: true, maxArea: 2.0, convertToQuads: false,
             enableSmoothing: false); // Finer mesh, no smoothing for multi-crack
 
@@ -1185,7 +1185,7 @@ public static class Examples2DA
 
         // Fine mesh for curves (balanced between speed and quality)
         var boundary = CreateRectangle(0, L, 0, L, 101, 101);
-        var (baseMesh, baseCoords) = UnifiedMesher.Triangulate(
+        var (baseMesh, baseCoords) = SimplexRemesher.Triangulate(
             boundary, refine: true, maxArea: 1.0, convertToQuads: false, enableSmoothing: false);
 
         Console.WriteLine($"Base mesh: {baseMesh.Count<Node>()} nodes, {baseMesh.Count<Tri3>()} triangles");

@@ -1,18 +1,5 @@
-// SimplexRemesher.cs - Mesh I/O, utilities, and backward-compatible wrappers
-// Mesh file I/O (GiD, Gmsh, ASCII) and utility functions
-// 
-// This file provides:
-//   ✓ Backward-compatible wrappers for refactored functions:
-//     - CreateRectangularMesh() → calls MeshGeneration.CreateRectangularMesh()
-//     - CreateBoxMesh()         → calls MeshGeneration.CreateBoxMesh()
-//     - Refine()                → calls MeshRefinement.Refine()
-//     - InterpolateCoordinates() → calls MeshRefinement.InterpolateCoordinates()
-//   ✓ GiD I/O (SaveGiD, LoadGiD)
-//   ✓ Gmsh I/O (SaveMSH, LoadMSH)
-//   ✓ ASCII I/O (SaveASCII)
-//   ✓ Utilities (PrintStats, DiscoverEdges)
-//   ✓ Advanced (CreateCrackFromSignedField, CreateCrackFromSignedField3D)
-//
+// SimplexRemesher.cs - Unified mesh operations: generation, I/O, smoothing, cracks, quad conversion
+// Consolidates: SimplexRemesher + MeshGeneration + UnifiedMesher + MeshOptimization + QuadConversion + CrackDuplication
 // License: GPLv3
 
 using System;
@@ -22,81 +9,207 @@ using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
+using static Numerical.MeshConstants;
 using static Numerical.MeshGeometry;
 
 namespace Numerical;
 
 
-// NOTE: SimplexMesh class definition is in SimplexMesh.cs
-// This file contains only the SimplexRemesher static class with I/O functions
-
 /// <summary>
-/// Simplex mesh refinement by edge bisection with conforming subdivision.
+///     Unified mesh operations: generation, I/O, smoothing, crack insertion, quad conversion.
+///     Consolidates all mesh manipulation into a single class.
 /// </summary>
 public static class SimplexRemesher
 {
     // ═══════════════════════════════════════════════════════════════════════════
-    // Mesh Generation Functions (wrappers to MeshGeneration.cs)
+    // Mesh Generation - Structured Meshes
     // ═══════════════════════════════════════════════════════════════════════════
-    
-    /// <summary>
-    /// Creates a rectangular triangular mesh.
-    /// </summary>
-    /// <param name="nx">Number of divisions in x direction</param>
-    /// <param name="ny">Number of divisions in y direction</param>
-    /// <param name="xMin">Minimum x coordinate</param>
-    /// <param name="xMax">Maximum x coordinate</param>
-    /// <param name="yMin">Minimum y coordinate</param>
-    /// <param name="yMax">Maximum y coordinate</param>
-    /// <returns>Mesh and coordinates array</returns>
+
     public static (SimplexMesh Mesh, double[,] Coordinates) CreateRectangularMesh(
         int nx, int ny, double xMin, double xMax, double yMin, double yMax)
-        => MeshGeneration.CreateRectangularMesh(nx, ny, xMin, xMax, yMin, yMax);
+    {
+        var mesh = new SimplexMesh();
+        var coords = new double[(nx + 1) * (ny + 1), 3];
 
-    /// <summary>
-    /// Creates a rectangular triangular mesh with default bounds [0,1] x [0,1].
-    /// </summary>
+        double dx = (xMax - xMin) / nx;
+        double dy = (yMax - yMin) / ny;
+
+        mesh.WithBatch(() =>
+        {
+            for (int j = 0; j <= ny; j++)
+            {
+                for (int i = 0; i <= nx; i++)
+                {
+                    int idx = j * (nx + 1) + i;
+                    coords[idx, 0] = xMin + i * dx;
+                    coords[idx, 1] = yMin + j * dy;
+                    coords[idx, 2] = 0.0;
+                    mesh.AddNode(idx);
+                }
+            }
+
+            for (int j = 0; j < ny; j++)
+            {
+                for (int i = 0; i < nx; i++)
+                {
+                    int n0 = j * (nx + 1) + i;
+                    int n1 = n0 + 1;
+                    int n2 = n0 + (nx + 1);
+                    int n3 = n2 + 1;
+
+                    mesh.AddTriangle(n0, n1, n2);
+                    mesh.AddTriangle(n1, n3, n2);
+                }
+            }
+        });
+
+        return (mesh, coords);
+    }
+
     public static (SimplexMesh Mesh, double[,] Coordinates) CreateRectangularMesh(int nx, int ny)
-        => MeshGeneration.CreateRectangularMesh(nx, ny, 0, 1, 0, 1);
+        => CreateRectangularMesh(nx, ny, 0, 1, 0, 1);
 
-    /// <summary>
-    /// Creates a 3D box mesh of tetrahedra.
-    /// </summary>
+    public static (SimplexMesh Mesh, double[,] Coordinates) CreateRectangularQuadMesh(
+        int nx, int ny, double xMin, double xMax, double yMin, double yMax)
+    {
+        var mesh = new SimplexMesh();
+        var coords = new double[(nx + 1) * (ny + 1), 3];
+
+        double dx = (xMax - xMin) / nx;
+        double dy = (yMax - yMin) / ny;
+
+        mesh.WithBatch(() =>
+        {
+            for (int j = 0; j <= ny; j++)
+            {
+                for (int i = 0; i <= nx; i++)
+                {
+                    int idx = j * (nx + 1) + i;
+                    coords[idx, 0] = xMin + i * dx;
+                    coords[idx, 1] = yMin + j * dy;
+                    coords[idx, 2] = 0.0;
+                    mesh.AddNode(idx);
+                }
+            }
+
+            for (int j = 0; j < ny; j++)
+            {
+                for (int i = 0; i < nx; i++)
+                {
+                    int n0 = j * (nx + 1) + i;
+                    int n1 = n0 + 1;
+                    int n2 = n0 + (nx + 1);
+                    int n3 = n2 + 1;
+
+                    mesh.AddQuad(n0, n1, n3, n2);
+                }
+            }
+        });
+
+        return (mesh, coords);
+    }
+
+    public static (SimplexMesh Mesh, double[,] Coordinates) CreateUnitSquareMesh(int n)
+        => CreateRectangularMesh(n, n, 0.0, 1.0, 0.0, 1.0);
+
     public static (SimplexMesh Mesh, double[,] Coordinates) CreateBoxMesh(
         int nx, int ny, int nz,
         double xMin, double xMax, double yMin, double yMax, double zMin, double zMax)
-        => MeshGeneration.CreateBoxMesh(nx, ny, nz, xMin, xMax, yMin, yMax, zMin, zMax);
+    {
+        var mesh = new SimplexMesh();
+        int nodeCount = (nx + 1) * (ny + 1) * (nz + 1);
+        var coords = new double[nodeCount, 3];
 
-    /// <summary>
-    /// Creates a 3D box mesh with default bounds [0,1] x [0,1] x [0,1].
-    /// </summary>
+        double dx = (xMax - xMin) / nx;
+        double dy = (yMax - yMin) / ny;
+        double dz = (zMax - zMin) / nz;
+
+        int NodeIndex(int i, int j, int k) => k * (nx + 1) * (ny + 1) + j * (nx + 1) + i;
+
+        mesh.WithBatch(() =>
+        {
+            for (int k = 0; k <= nz; k++)
+                for (int j = 0; j <= ny; j++)
+                    for (int i = 0; i <= nx; i++)
+                    {
+                        int idx = NodeIndex(i, j, k);
+                        coords[idx, 0] = xMin + i * dx;
+                        coords[idx, 1] = yMin + j * dy;
+                        coords[idx, 2] = zMin + k * dz;
+                        mesh.AddNode(idx);
+                    }
+
+            for (int k = 0; k < nz; k++)
+                for (int j = 0; j < ny; j++)
+                    for (int i = 0; i < nx; i++)
+                    {
+                        int n0 = NodeIndex(i, j, k);
+                        int n1 = NodeIndex(i + 1, j, k);
+                        int n2 = NodeIndex(i, j + 1, k);
+                        int n3 = NodeIndex(i + 1, j + 1, k);
+                        int n4 = NodeIndex(i, j, k + 1);
+                        int n5 = NodeIndex(i + 1, j, k + 1);
+                        int n6 = NodeIndex(i, j + 1, k + 1);
+                        int n7 = NodeIndex(i + 1, j + 1, k + 1);
+
+                        mesh.AddTetrahedron(n0, n1, n3, n7);
+                        mesh.AddTetrahedron(n0, n3, n2, n7);
+                        mesh.AddTetrahedron(n0, n2, n6, n7);
+                        mesh.AddTetrahedron(n0, n6, n4, n7);
+                        mesh.AddTetrahedron(n0, n4, n5, n7);
+                        mesh.AddTetrahedron(n0, n5, n1, n7);
+                    }
+        });
+
+        FixInvertedTetrahedra(mesh, coords);
+        Console.WriteLine($"[CreateBoxMesh] Created {mesh.Count<Node>()} nodes, {mesh.Count<Tet4>()} tetrahedra");
+
+        return (mesh, coords);
+    }
+
     public static (SimplexMesh Mesh, double[,] Coordinates) CreateBoxMesh(int nx, int ny, int nz)
-        => MeshGeneration.CreateBoxMesh(nx, ny, nz, 0, 1, 0, 1, 0, 1);
+        => CreateBoxMesh(nx, ny, nz, 0, 1, 0, 1, 0, 1);
+
+    public static (SimplexMesh Mesh, double[,] Coordinates) CreateUnitCubeMesh(int n)
+        => CreateBoxMesh(n, n, n, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0);
+
+    private static void FixInvertedTetrahedra(SimplexMesh mesh, double[,] coords)
+    {
+        var tetsToFix = new List<(int index, int[] nodes)>();
+
+        for (int i = 0; i < mesh.Count<Tet4>(); i++)
+        {
+            var nodes = mesh.NodesOf<Tet4, Node>(i);
+            double jac = ComputeTetrahedronJacobian(coords, nodes[0], nodes[1], nodes[2], nodes[3]);
+
+            if (jac <= 0)
+                tetsToFix.Add((i, new[] { nodes[1], nodes[0], nodes[2], nodes[3] }));
+        }
+
+        tetsToFix.Sort((a, b) => b.index.CompareTo(a.index));
+
+        foreach (var (index, swappedNodes) in tetsToFix)
+        {
+            mesh.Remove<Tet4>(index);
+            mesh.AddTetrahedron(swappedNodes[0], swappedNodes[1], swappedNodes[2], swappedNodes[3]);
+        }
+
+        if (tetsToFix.Count > 0)
+            Console.WriteLine($"[CreateBoxMesh] Fixed {tetsToFix.Count} inverted tetrahedra");
+    }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // Edge Refinement Functions (wrappers to MeshRefinement.cs)
+    // Refinement Wrappers
     // ═══════════════════════════════════════════════════════════════════════════
-    
-    /// <summary>
-    /// Refines a mesh by bisecting marked edges. Wrapper for MeshRefinement.Refine.
-    /// </summary>
-    /// <param name="mesh">Input mesh</param>
-    /// <param name="markedEdges">Edges to refine (node pairs)</param>
-    /// <returns>Refined mesh and node remapping array</returns>
+
     public static (SimplexMesh Mesh, int[] NodeRemap) Refine(
         SimplexMesh mesh, List<(int, int)> markedEdges)
         => MeshRefinement.Refine(mesh, markedEdges);
 
-    /// <summary>
-    /// Refines a mesh by bisecting marked edges. Wrapper for MeshRefinement.Refine.
-    /// </summary>
     public static (SimplexMesh Mesh, int[] NodeRemap) Refine(
         SimplexMesh mesh, IEnumerable<(int, int)> markedEdges)
         => MeshRefinement.Refine(mesh, markedEdges.ToList());
 
-    /// <summary>
-    /// Interpolates coordinates for refined mesh nodes. Wrapper for MeshRefinement.InterpolateCoordinates.
-    /// </summary>
     public static double[,] InterpolateCoordinates(SimplexMesh refinedMesh, double[,] originalCoords)
         => MeshRefinement.InterpolateCoordinates(refinedMesh, originalCoords);
 
@@ -104,10 +217,8 @@ public static class SimplexRemesher
     // Edge Refinement Internal Structures
     // ═══════════════════════════════════════════════════════════════════════════
 
-    // Edge definitions: TetEdges[e] = (nodeA, nodeB)
     static readonly (int A, int B)[] TetEdges = new (int A, int B)[] { (0,1), (1,2), (0,2), (2,3), (0,3), (1,3) };
-    
-    // O(1) edge lookup: EdgeIdx[n1,n2] = edge index (-1 if invalid)
+
     static readonly int[,] EdgeIdx = BuildEdgeIndex();
     static int[,] BuildEdgeIndex()
     {
@@ -413,20 +524,6 @@ public static class SimplexRemesher
         Console.WriteLine($"  Tri3: {mesh.Count<Tri3>()}");
         Console.WriteLine($"  Tet4: {mesh.Count<Tet4>()}");
     }
-    // ═══════════════════════════════════════════════════════════════════════════
-    // REMOVED: InterpolateCoordinates() Function (now in MeshRefinement.cs)
-    // ═══════════════════════════════════════════════════════════════════════════
-    // The InterpolateCoordinates() function has been REMOVED to eliminate duplication.
-    //
-    // Use instead: MeshRefinement.InterpolateCoordinates()
-    //
-    // Example usage:
-    //   using static Numerical.MeshRefinement;
-    //   var newCoords = InterpolateCoordinates(refinedMesh, oldCoords);
-    //
-    // The refactored version is identical in functionality.
-    // ═══════════════════════════════════════════════════════════════════════════
-    
     public static (SimplexMesh Mesh, double[,] Coordinates) LoadMSH(string path)
     {
         ArgumentNullException.ThrowIfNull(path);
@@ -2955,4 +3052,1490 @@ if (TryFindEdgeRootOnSegment(signedField,
     }
     
     #endregion
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Delaunay Triangulation (was MeshGeneration)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    public static (List<(double x, double y)> points, List<(int v0, int v1, int v2)> triangles)
+        DelaunayTriangulate(
+            double[,] outerBoundary,
+            List<double[,]>? holes = null,
+            double[,]? interiorPoints = null,
+            double targetEdgeLength = 0.0)
+    {
+        Console.WriteLine("[DelaunayTriangulation] Starting...");
+        Console.WriteLine($"  Outer boundary: {outerBoundary.GetLength(0)} points");
+
+        var outerPts = ExtractCurve2D(outerBoundary);
+        var holePts = new List<List<(double x, double y)>>();
+
+        if (holes != null)
+        {
+            foreach (var hole in holes) holePts.Add(ExtractCurve2D(hole));
+            Console.WriteLine($"  Holes: {holePts.Count}");
+        }
+
+        var points = new List<(double x, double y)>();
+        points.AddRange(outerPts);
+
+        foreach (var hole in holePts)
+            points.AddRange(hole);
+
+        if (interiorPoints == null && targetEdgeLength > 0)
+        {
+            var interiorList = GenerateInteriorGrid(outerBoundary, holes, targetEdgeLength);
+            points.AddRange(interiorList);
+            Console.WriteLine($"  Generated {interiorList.Count} interior points");
+        }
+        else if (interiorPoints != null)
+        {
+            for (var i = 0; i < interiorPoints.GetLength(0); i++)
+                points.Add((interiorPoints[i, 0], interiorPoints[i, 1]));
+        }
+        else
+        {
+            var avgEdgeLength = ComputeAverageEdgeLength(outerPts);
+            var autoSpacing = avgEdgeLength * 1.5;
+            var interiorList = GenerateInteriorGrid(outerBoundary, holes, autoSpacing);
+            points.AddRange(interiorList);
+            Console.WriteLine($"  Generated {interiorList.Count} interior points");
+        }
+
+        var totalPoints = points.Count;
+
+        var (xMin, xMax, yMin, yMax) = ComputeBoundingBox2D(points);
+        var margin = Math.Max(xMax - xMin, yMax - yMin) * 0.1;
+
+        var superTriangle = CreateSuperTriangle(xMin - margin, xMax + margin, yMin - margin, yMax + margin);
+
+        var st0 = points.Count;
+        var st1 = st0 + 1;
+        var st2 = st0 + 2;
+        points.Add(superTriangle.v0);
+        points.Add(superTriangle.v1);
+        points.Add(superTriangle.v2);
+
+        var triangles = new List<(int v0, int v1, int v2)> { (st0, st1, st2) };
+        var circumcenters = new List<(double x, double y, double rSq)>();
+        circumcenters.Add(ComputeCircumcircle(superTriangle.v0, superTriangle.v1, superTriangle.v2));
+
+        Console.WriteLine($"  Inserting {totalPoints} points via Bowyer-Watson...");
+
+        for (var i = 0; i < totalPoints; i++)
+            AddPointBW(i, points, triangles, circumcenters);
+
+        Console.WriteLine($"  → Triangulation complete: {triangles.Count} triangles");
+
+        var validTriangles = triangles
+            .Where(t => t.v0 < totalPoints && t.v1 < totalPoints && t.v2 < totalPoints)
+            .ToList();
+
+        validTriangles = FilterTriangles(validTriangles, points, outerPts, holePts);
+
+        Console.WriteLine($"  → After filtering: {validTriangles.Count} triangles");
+
+        points.RemoveRange(totalPoints, 3);
+
+        return (points, validTriangles);
+    }
+
+    public static (SimplexMesh mesh, double[,] coords) DelaunayToSimplexMesh(
+        List<(double x, double y)> points, List<(int v0, int v1, int v2)> triangles)
+    {
+        var mesh = new SimplexMesh();
+        var coords = new double[points.Count, 3];
+
+        mesh.WithBatch(() =>
+        {
+            for (int i = 0; i < points.Count; i++)
+            {
+                coords[i, 0] = points[i].x;
+                coords[i, 1] = points[i].y;
+                coords[i, 2] = 0;
+                mesh.AddNode(i);
+            }
+
+            foreach (var (v0, v1, v2) in triangles)
+                mesh.AddTriangle(v0, v1, v2);
+        });
+
+        return (mesh, coords);
+    }
+
+    #region Bowyer-Watson Implementation
+
+    private static ((double x, double y) v0, (double x, double y) v1, (double x, double y) v2)
+        CreateSuperTriangle(double xMin, double xMax, double yMin, double yMax)
+    {
+        var dx = xMax - xMin;
+        var dy = yMax - yMin;
+        var dMax = Math.Max(dx, dy);
+
+        var cx = (xMin + xMax) / 2;
+        var cy = (yMin + yMax) / 2;
+
+        var scale = 3.0;
+        return (
+            (cx - scale * dMax, cy - scale * dMax),
+            (cx + scale * dMax, cy - scale * dMax),
+            (cx, cy + scale * dMax)
+        );
+    }
+
+    private static (double x, double y, double rSq) ComputeCircumcircle(
+        (double x, double y) p0, (double x, double y) p1, (double x, double y) p2)
+    {
+        var ax = p1.x - p0.x;
+        var ay = p1.y - p0.y;
+        var bx = p2.x - p0.x;
+        var by = p2.y - p0.y;
+
+        var d = 2 * (ax * by - ay * bx);
+
+        if (Math.Abs(d) < Epsilon)
+            return (0, 0, double.MaxValue);
+
+        var aSq = ax * ax + ay * ay;
+        var bSq = bx * bx + by * by;
+
+        var ux = (by * aSq - ay * bSq) / d;
+        var uy = (ax * bSq - bx * aSq) / d;
+
+        return (p0.x + ux, p0.y + uy, ux * ux + uy * uy);
+    }
+
+    private static void AddPointBW(
+        int pointIdx,
+        List<(double x, double y)> points,
+        List<(int v0, int v1, int v2)> triangles,
+        List<(double x, double y, double rSq)> circumcenters)
+    {
+        var point = points[pointIdx];
+        var badTriangles = new List<int>();
+
+        for (var i = 0; i < triangles.Count; i++)
+        {
+            var (cx, cy, rSq) = circumcenters[i];
+            var dx = point.x - cx;
+            var dy = point.y - cy;
+            var distSq = dx * dx + dy * dy;
+
+            if (distSq < rSq - Epsilon) badTriangles.Add(i);
+        }
+
+        if (badTriangles.Count == 0) return;
+
+        var polygon = new List<(int v0, int v1)>();
+
+        foreach (var ti in badTriangles)
+        {
+            var (v0, v1, v2) = triangles[ti];
+            var edges = new[] { (v0, v1), (v1, v2), (v2, v0) };
+
+            foreach (var edge in edges)
+            {
+                var isShared = false;
+
+                foreach (var tj in badTriangles)
+                {
+                    if (ti == tj) continue;
+
+                    var (u0, u1, u2) = triangles[tj];
+
+                    if (SharesEdge(edge, (u0, u1)) ||
+                        SharesEdge(edge, (u1, u2)) ||
+                        SharesEdge(edge, (u2, u0)))
+                    {
+                        isShared = true;
+                        break;
+                    }
+                }
+
+                if (!isShared) polygon.Add(edge);
+            }
+        }
+
+        badTriangles.Sort();
+        for (var i = badTriangles.Count - 1; i >= 0; i--)
+        {
+            var idx = badTriangles[i];
+            triangles.RemoveAt(idx);
+            circumcenters.RemoveAt(idx);
+        }
+
+        foreach (var (v0, v1) in polygon)
+        {
+            triangles.Add((pointIdx, v0, v1));
+            circumcenters.Add(ComputeCircumcircle(points[pointIdx], points[v0], points[v1]));
+        }
+    }
+
+    private static bool SharesEdge((int a, int b) edge1, (int a, int b) edge2)
+        => (edge1.a == edge2.a && edge1.b == edge2.b) || (edge1.a == edge2.b && edge1.b == edge2.a);
+
+    private static List<(int v0, int v1, int v2)> FilterTriangles(
+        List<(int v0, int v1, int v2)> triangles,
+        List<(double x, double y)> points,
+        List<(double x, double y)> outerBoundary,
+        List<List<(double x, double y)>> holes)
+    {
+        var filtered = new List<(int v0, int v1, int v2)>();
+
+        var outerArray = ConvertToArray(outerBoundary);
+        var holeArrays = holes.Select(h => ConvertToArray(h)).ToList();
+
+        foreach (var tri in triangles)
+        {
+            var p0 = points[tri.v0];
+            var p1 = points[tri.v1];
+            var p2 = points[tri.v2];
+
+            var centroid = ((p0.x + p1.x + p2.x) / 3.0, (p0.y + p1.y + p2.y) / 3.0);
+
+            if (!IsPointInPolygon(centroid, outerArray))
+                continue;
+
+            var inHole = holeArrays.Any(hole => IsPointInPolygon(centroid, hole));
+            if (inHole) continue;
+
+            filtered.Add(tri);
+        }
+
+        return filtered;
+    }
+
+    public static List<(double x, double y)> GenerateInteriorGrid(
+        double[,] outerBoundary, List<double[,]>? holes, double spacing)
+    {
+        var interiorPoints = new List<(double x, double y)>();
+
+        var n = outerBoundary.GetLength(0);
+        double minX = double.MaxValue, maxX = double.MinValue;
+        double minY = double.MaxValue, maxY = double.MinValue;
+
+        for (var i = 0; i < n; i++)
+        {
+            var x = outerBoundary[i, 0];
+            var y = outerBoundary[i, 1];
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+        }
+
+        var random = new Random(12345);
+        var perturbation = spacing * GridPerturbationFactor;
+
+        var rowIndex = 0;
+        for (var y2 = minY + spacing; y2 < maxY; y2 += spacing * HexRowSpacing)
+        {
+            var xOffset = rowIndex % 2 == 1 ? spacing * 0.5 : 0.0;
+            for (var x2 = minX + spacing + xOffset; x2 < maxX; x2 += spacing)
+            {
+                var px = x2 + (random.NextDouble() - 0.5) * 2 * perturbation;
+                var py = y2 + (random.NextDouble() - 0.5) * 2 * perturbation;
+
+                var point = (px, py);
+                if (!IsPointInPolygon(point, outerBoundary))
+                    continue;
+
+                var inHole = false;
+                if (holes != null)
+                {
+                    foreach (var hole in holes)
+                    {
+                        if (IsPointInPolygon(point, hole))
+                        {
+                            inHole = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!inHole)
+                    interiorPoints.Add(point);
+            }
+
+            rowIndex++;
+        }
+
+        return interiorPoints;
+    }
+
+    #endregion
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Unified Mesher - High-Level Triangulation API (was UnifiedMesher)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    public static (SimplexMesh mesh, double[,] coords) Triangulate(
+        double[,] boundaryCoords,
+        double[,]? interiorCoords = null,
+        bool refine = true,
+        double maxArea = 0.0,
+        double sizeGradation = 1.3,
+        bool convertToQuads = true,
+        bool enableSmoothing = true)
+    {
+        return TriangulateWithHoles(boundaryCoords, null, interiorCoords, refine, maxArea, sizeGradation,
+            convertToQuads, enableSmoothing);
+    }
+
+    public static (SimplexMesh mesh, double[,] coords) TriangulateWithHoles(
+        double[,] outerBoundary,
+        List<double[,]>? holes = null,
+        double[,]? interiorCoords = null,
+        bool refine = true,
+        double maxArea = 0.0,
+        double sizeGradation = 1.3,
+        bool convertToQuads = true,
+        bool enableSmoothing = true)
+    {
+        Console.WriteLine("\n=== TRIANGULATION START ===");
+        Console.WriteLine($"Input: {outerBoundary.GetLength(0)} boundary points");
+        Console.WriteLine($"Refine: {refine}, SizeGradation: {sizeGradation}");
+
+        if (!IsBoundaryCCW(outerBoundary))
+        {
+            Console.WriteLine("  Outer boundary is CW, reversing to CCW");
+            outerBoundary = ReverseBoundary(outerBoundary);
+        }
+
+        var avgEdgeLength = ComputeAverageEdgeLength(outerBoundary);
+        double targetEdgeLength;
+
+        if (sizeGradation > 0)
+        {
+            targetEdgeLength = avgEdgeLength * sizeGradation;
+            Console.WriteLine($"  Adaptive sizing: target edge = {targetEdgeLength:F4}");
+        }
+        else if (maxArea > 0)
+        {
+            targetEdgeLength = Math.Sqrt(maxArea * 2.0);
+            Console.WriteLine($"  Fixed sizing: target edge = {targetEdgeLength:F4}");
+        }
+        else
+        {
+            targetEdgeLength = avgEdgeLength * 1.5;
+            Console.WriteLine($"  Auto sizing: target edge = {targetEdgeLength:F4}");
+        }
+
+        var (points, triangles) = DelaunayTriangulate(outerBoundary, holes, interiorCoords, targetEdgeLength);
+        var (mesh, coords) = DelaunayToSimplexMesh(points, triangles);
+
+        Console.WriteLine($"  Initial mesh: {mesh.Count<Tri3>()} triangles");
+
+        if (enableSmoothing && mesh.Count<Tri3>() > 0)
+        {
+            Console.WriteLine("  Applying CVT smoothing...");
+            coords = CVTSmoothing(mesh, coords, iterations: 5);
+        }
+
+        if (convertToQuads && mesh.Count<Tri3>() > 0)
+        {
+            Console.WriteLine("  Converting to quad-dominant mesh...");
+            (mesh, coords) = ConvertToQuads(mesh, coords, passes: 2);
+        }
+
+        var stats = ComputeQualityStatistics(mesh, coords);
+        Console.WriteLine("\n=== MESH COMPLETE ===");
+        Console.WriteLine(stats);
+
+        return (mesh, coords);
+    }
+
+    public static (SimplexMesh mesh, double[,] coords) CreateRectangle(
+        double xMin, double yMin, double xMax, double yMax,
+        double targetEdgeLength = 0.0,
+        bool convertToQuads = true)
+    {
+        var boundary = new double[4, 3]
+        {
+            { xMin, yMin, 0 },
+            { xMax, yMin, 0 },
+            { xMax, yMax, 0 },
+            { xMin, yMax, 0 }
+        };
+
+        if (targetEdgeLength > 0)
+        {
+            var maxArea = 0.5 * targetEdgeLength * targetEdgeLength;
+            return Triangulate(boundary, null, true, maxArea, 0, convertToQuads);
+        }
+
+        return Triangulate(boundary, null, true, 0, 1.3, convertToQuads);
+    }
+
+    public static (SimplexMesh mesh, double[,] coords) CreateFromPolygon(
+        List<(double x, double y)> polygon,
+        bool convertToQuads = true,
+        double sizeGradation = 1.3)
+    {
+        var boundary = ConvertToArray(polygon, 3);
+        return Triangulate(boundary, null, true, 0, sizeGradation, convertToQuads);
+    }
+
+    public static (SimplexMesh mesh, double[,] coords) CreateWithHole(
+        List<(double x, double y)> outerPolygon,
+        List<(double x, double y)> holePolygon,
+        bool convertToQuads = true,
+        double sizeGradation = 1.3)
+    {
+        var outer = ConvertToArray(outerPolygon, 3);
+        var hole = ConvertToArray(holePolygon, 3);
+        var holes = new List<double[,]> { hole };
+
+        return TriangulateWithHoles(outer, holes, null, true, 0, sizeGradation, convertToQuads);
+    }
+
+    public static void PrintQualityReport(SimplexMesh mesh, double[,] coords, string title = "Mesh Quality Report")
+    {
+        Console.WriteLine($"\n=== {title} ===");
+
+        var stats = ComputeQualityStatistics(mesh, coords);
+        Console.WriteLine(stats);
+
+        var inverted = ValidateMeshOrientation(mesh, coords, out int invertedTris, out int invertedTets);
+        if (inverted > 0)
+            Console.WriteLine($"WARNING: {invertedTris} inverted triangles, {invertedTets} inverted tetrahedra");
+        else
+            Console.WriteLine("All elements have correct orientation");
+
+        var (degTris, degTets) = FindDegenerateElements(mesh, coords);
+        if (degTris.Length > 0 || degTets.Length > 0)
+            Console.WriteLine($"WARNING: {degTris.Length} degenerate triangles, {degTets.Length} degenerate tetrahedra");
+        else
+            Console.WriteLine("No degenerate elements");
+    }
+
+    public static (double minAngle, double maxAspectRatio, double avgAspectRatio) GetQualityMetrics(
+        SimplexMesh mesh, double[,] coords)
+    {
+        var stats = ComputeQualityStatistics(mesh, coords);
+
+        if (stats.TriangleCount > 0)
+            return (stats.MinTriangleAngleDegrees, stats.MaxTriangleAspectRatio, stats.AvgTriangleAspectRatio);
+        else if (stats.TetrahedronCount > 0)
+            return (0, stats.MaxTetrahedronAspectRatio, stats.AvgTetrahedronAspectRatio);
+
+        return (0, 0, 0);
+    }
+
+    public static void ExportToConsole(SimplexMesh mesh, double[,] coords)
+    {
+        Console.WriteLine("\n--- Mesh Export ---");
+        Console.WriteLine($"Nodes: {mesh.Count<Node>()}");
+
+        for (int i = 0; i < Math.Min(mesh.Count<Node>(), 10); i++)
+            Console.WriteLine($"  Node {i}: ({coords[i, 0]:F4}, {coords[i, 1]:F4}, {coords[i, 2]:F4})");
+
+        if (mesh.Count<Node>() > 10)
+            Console.WriteLine($"  ... and {mesh.Count<Node>() - 10} more nodes");
+
+        Console.WriteLine($"Triangles: {mesh.Count<Tri3>()}");
+        for (int i = 0; i < Math.Min(mesh.Count<Tri3>(), 5); i++)
+        {
+            var nodes = mesh.NodesOf<Tri3, Node>(i);
+            Console.WriteLine($"  Tri {i}: ({nodes[0]}, {nodes[1]}, {nodes[2]})");
+        }
+
+        Console.WriteLine($"Quads: {mesh.Count<Quad4>()}");
+        Console.WriteLine($"Tetrahedra: {mesh.Count<Tet4>()}");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Mesh Smoothing (was MeshOptimization)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    public static double[,] LaplacianSmoothing(
+        SimplexMesh mesh, double[,] coords,
+        int iterations = 5, HashSet<int>? fixedNodes = null,
+        double relaxation = 1.0, bool keepBoundaryFixed = true)
+    {
+        var nNodes = coords.GetLength(0);
+        var newCoords = (double[,])coords.Clone();
+
+        var boundaryNodes = keepBoundaryFixed ? IdentifyBoundaryNodes(mesh) : new HashSet<int>();
+        var allFixedNodes = new HashSet<int>(boundaryNodes);
+        if (fixedNodes != null) allFixedNodes.UnionWith(fixedNodes);
+
+        Console.WriteLine($"[LaplacianSmoothing] Starting {iterations} iterations...");
+        Console.WriteLine($"[LaplacianSmoothing] Fixed nodes: {allFixedNodes.Count}/{nNodes}");
+
+        for (var iter = 0; iter < iterations; iter++)
+        {
+            var neighbors = BuildNodeNeighbors(mesh, nNodes);
+            var smoothedCount = 0;
+
+            for (var nodeId = 0; nodeId < nNodes; nodeId++)
+            {
+                if (allFixedNodes.Contains(nodeId)) continue;
+
+                var nodeNeighbors = neighbors[nodeId];
+                if (nodeNeighbors.Count == 0) continue;
+
+                double avgX = 0, avgY = 0, avgZ = 0;
+                foreach (var neighborId in nodeNeighbors)
+                {
+                    avgX += newCoords[neighborId, 0];
+                    avgY += newCoords[neighborId, 1];
+                    avgZ += newCoords[neighborId, 2];
+                }
+
+                var count = nodeNeighbors.Count;
+                avgX /= count;
+                avgY /= count;
+                avgZ /= count;
+
+                newCoords[nodeId, 0] += relaxation * (avgX - newCoords[nodeId, 0]);
+                newCoords[nodeId, 1] += relaxation * (avgY - newCoords[nodeId, 1]);
+                newCoords[nodeId, 2] += relaxation * (avgZ - newCoords[nodeId, 2]);
+
+                smoothedCount++;
+            }
+
+            if ((iter + 1) % Math.Max(1, iterations / 5) == 0 || iter == iterations - 1)
+                Console.WriteLine($"[LaplacianSmoothing] Iteration {iter + 1}/{iterations}: smoothed {smoothedCount} nodes");
+        }
+
+        Console.WriteLine("[LaplacianSmoothing] Complete");
+        return newCoords;
+    }
+
+    public static double[,] CVTSmoothing(
+        SimplexMesh mesh, double[,] coords,
+        int iterations = 5, HashSet<int>? fixedNodes = null, double relaxation = 1.0)
+    {
+        var nNodes = coords.GetLength(0);
+        var newCoords = (double[,])coords.Clone();
+
+        var boundaryNodes = IdentifyBoundaryNodes(mesh);
+        var allFixedNodes = new HashSet<int>(boundaryNodes);
+        if (fixedNodes != null) allFixedNodes.UnionWith(fixedNodes);
+
+        Console.WriteLine($"[CVTSmoothing] Starting {iterations} iterations...");
+
+        for (var iter = 0; iter < iterations; iter++)
+        {
+            var nodeTris = BuildNodeToTriangles(mesh, nNodes);
+            var smoothedCount = 0;
+
+            for (var nodeId = 0; nodeId < nNodes; nodeId++)
+            {
+                if (allFixedNodes.Contains(nodeId)) continue;
+
+                var nodeTriangles = nodeTris[nodeId];
+                if (nodeTriangles.Count == 0) continue;
+
+                double totalArea = 0;
+                double centroidX = 0, centroidY = 0;
+
+                foreach (var triId in nodeTriangles)
+                {
+                    var nodes = mesh.NodesOf<Tri3, Node>(triId);
+
+                    var cx = (newCoords[nodes[0], 0] + newCoords[nodes[1], 0] + newCoords[nodes[2], 0]) / 3.0;
+                    var cy = (newCoords[nodes[0], 1] + newCoords[nodes[1], 1] + newCoords[nodes[2], 1]) / 3.0;
+
+                    var area = ComputeTriangleArea(newCoords, nodes[0], nodes[1], nodes[2]);
+
+                    totalArea += area;
+                    centroidX += area * cx;
+                    centroidY += area * cy;
+                }
+
+                if (totalArea > Epsilon)
+                {
+                    centroidX /= totalArea;
+                    centroidY /= totalArea;
+
+                    newCoords[nodeId, 0] += relaxation * (centroidX - newCoords[nodeId, 0]);
+                    newCoords[nodeId, 1] += relaxation * (centroidY - newCoords[nodeId, 1]);
+
+                    smoothedCount++;
+                }
+            }
+
+            if ((iter + 1) % Math.Max(1, iterations / 5) == 0 || iter == iterations - 1)
+                Console.WriteLine($"[CVTSmoothing] Iteration {iter + 1}/{iterations}: smoothed {smoothedCount} nodes");
+        }
+
+        Console.WriteLine("[CVTSmoothing] Complete");
+        return newCoords;
+    }
+
+    public static (SimplexMesh mesh, double[,] coords) RemoveDegenerateTriangles(
+        SimplexMesh mesh, double[,] coords, double tolerance = Epsilon)
+    {
+        Console.WriteLine($"[RemoveDegenerateTriangles] Checking {mesh.Count<Tri3>()} triangles...");
+
+        var degenerateTris = new HashSet<int>();
+
+        for (var i = 0; i < mesh.Count<Tri3>(); i++)
+        {
+            var nodes = mesh.NodesOf<Tri3, Node>(i);
+            if (IsTriangleDegenerate(coords, nodes[0], nodes[1], nodes[2], tolerance))
+                degenerateTris.Add(i);
+        }
+
+        Console.WriteLine($"[RemoveDegenerateTriangles] Found {degenerateTris.Count} degenerate triangles");
+
+        if (degenerateTris.Count == 0)
+            return (mesh, coords);
+
+        return RebuildMeshWithoutElements(mesh, coords, degenerateTris, new HashSet<int>());
+    }
+
+    public static (SimplexMesh mesh, double[,] coords) RemoveDegenerateTetrahedra(
+        SimplexMesh mesh, double[,] coords, double tolerance = Epsilon)
+    {
+        Console.WriteLine($"[RemoveDegenerateTetrahedra] Checking {mesh.Count<Tet4>()} tetrahedra...");
+
+        var degenerateTets = new HashSet<int>();
+
+        for (var i = 0; i < mesh.Count<Tet4>(); i++)
+        {
+            var nodes = mesh.NodesOf<Tet4, Node>(i);
+            if (IsTetrahedronDegenerate(coords, nodes[0], nodes[1], nodes[2], nodes[3], tolerance))
+                degenerateTets.Add(i);
+        }
+
+        Console.WriteLine($"[RemoveDegenerateTetrahedra] Found {degenerateTets.Count} degenerate tetrahedra");
+
+        if (degenerateTets.Count == 0)
+            return (mesh, coords);
+
+        return RebuildMeshWithoutElements(mesh, coords, new HashSet<int>(), degenerateTets);
+    }
+
+    public static HashSet<int> IdentifyBoundaryNodes(SimplexMesh mesh)
+    {
+        var boundaryNodes = new HashSet<int>();
+
+        if (mesh.Count<Tri3>() > 0)
+        {
+            var edgeCount = new Dictionary<(int, int), int>();
+
+            for (var i = 0; i < mesh.Count<Tri3>(); i++)
+            {
+                var nodes = mesh.NodesOf<Tri3, Node>(i);
+                IncrementEdgeCount(edgeCount, nodes[0], nodes[1]);
+                IncrementEdgeCount(edgeCount, nodes[1], nodes[2]);
+                IncrementEdgeCount(edgeCount, nodes[2], nodes[0]);
+            }
+
+            foreach (var (edge, count) in edgeCount)
+            {
+                if (count == 1)
+                {
+                    boundaryNodes.Add(edge.Item1);
+                    boundaryNodes.Add(edge.Item2);
+                }
+            }
+        }
+
+        if (mesh.Count<Tet4>() > 0)
+        {
+            var faceCount = new Dictionary<(int, int, int), int>();
+
+            for (var i = 0; i < mesh.Count<Tet4>(); i++)
+            {
+                var nodes = mesh.NodesOf<Tet4, Node>(i);
+                IncrementFaceCount(faceCount, nodes[0], nodes[1], nodes[2]);
+                IncrementFaceCount(faceCount, nodes[0], nodes[1], nodes[3]);
+                IncrementFaceCount(faceCount, nodes[0], nodes[2], nodes[3]);
+                IncrementFaceCount(faceCount, nodes[1], nodes[2], nodes[3]);
+            }
+
+            foreach (var (face, count) in faceCount)
+            {
+                if (count == 1)
+                {
+                    boundaryNodes.Add(face.Item1);
+                    boundaryNodes.Add(face.Item2);
+                    boundaryNodes.Add(face.Item3);
+                }
+            }
+        }
+
+        return boundaryNodes;
+    }
+
+    private static List<HashSet<int>> BuildNodeNeighbors(SimplexMesh mesh, int nNodes)
+    {
+        var neighbors = new List<HashSet<int>>(nNodes);
+        for (var i = 0; i < nNodes; i++) neighbors.Add(new HashSet<int>());
+
+        for (var i = 0; i < mesh.Count<Tri3>(); i++)
+        {
+            var nodes = mesh.NodesOf<Tri3, Node>(i);
+            neighbors[nodes[0]].Add(nodes[1]);
+            neighbors[nodes[0]].Add(nodes[2]);
+            neighbors[nodes[1]].Add(nodes[0]);
+            neighbors[nodes[1]].Add(nodes[2]);
+            neighbors[nodes[2]].Add(nodes[0]);
+            neighbors[nodes[2]].Add(nodes[1]);
+        }
+
+        for (var i = 0; i < mesh.Count<Tet4>(); i++)
+        {
+            var nodes = mesh.NodesOf<Tet4, Node>(i);
+            for (var j = 0; j < 4; j++)
+                for (var k = 0; k < 4; k++)
+                    if (j != k) neighbors[nodes[j]].Add(nodes[k]);
+        }
+
+        return neighbors;
+    }
+
+    private static List<HashSet<int>> BuildNodeToTriangles(SimplexMesh mesh, int nNodes)
+    {
+        var nodeTris = new List<HashSet<int>>(nNodes);
+        for (var i = 0; i < nNodes; i++) nodeTris.Add(new HashSet<int>());
+
+        for (var i = 0; i < mesh.Count<Tri3>(); i++)
+        {
+            var nodes = mesh.NodesOf<Tri3, Node>(i);
+            nodeTris[nodes[0]].Add(i);
+            nodeTris[nodes[1]].Add(i);
+            nodeTris[nodes[2]].Add(i);
+        }
+
+        return nodeTris;
+    }
+
+    private static void IncrementEdgeCount(Dictionary<(int, int), int> dict, int n0, int n1)
+    {
+        var edge = n0 < n1 ? (n0, n1) : (n1, n0);
+        dict[edge] = dict.GetValueOrDefault(edge, 0) + 1;
+    }
+
+    private static void IncrementFaceCount(Dictionary<(int, int, int), int> dict, int n0, int n1, int n2)
+    {
+        var sorted = new[] { n0, n1, n2 }.OrderBy(x => x).ToArray();
+        var face = (sorted[0], sorted[1], sorted[2]);
+        dict[face] = dict.GetValueOrDefault(face, 0) + 1;
+    }
+
+    private static (SimplexMesh mesh, double[,] coords) RebuildMeshWithoutElements(
+        SimplexMesh mesh, double[,] coords,
+        HashSet<int> excludeTriangles, HashSet<int> excludeTetrahedra)
+    {
+        var usedNodes = new HashSet<int>();
+
+        for (var i = 0; i < mesh.Count<Tri3>(); i++)
+        {
+            if (excludeTriangles.Contains(i)) continue;
+            var nodes = mesh.NodesOf<Tri3, Node>(i);
+            usedNodes.Add(nodes[0]); usedNodes.Add(nodes[1]); usedNodes.Add(nodes[2]);
+        }
+
+        for (var i = 0; i < mesh.Count<Tet4>(); i++)
+        {
+            if (excludeTetrahedra.Contains(i)) continue;
+            var nodes = mesh.NodesOf<Tet4, Node>(i);
+            usedNodes.Add(nodes[0]); usedNodes.Add(nodes[1]); usedNodes.Add(nodes[2]); usedNodes.Add(nodes[3]);
+        }
+
+        for (var i = 0; i < mesh.Count<Bar2>(); i++)
+        {
+            var nodes = mesh.NodesOf<Bar2, Node>(i);
+            usedNodes.Add(nodes[0]); usedNodes.Add(nodes[1]);
+        }
+
+        for (var i = 0; i < mesh.Count<Point>(); i++)
+        {
+            var nodes = mesh.NodesOf<Point, Node>(i);
+            usedNodes.Add(nodes[0]);
+        }
+
+        var nodeMap = new Dictionary<int, int>();
+        var newCoordsList = new List<double[]>();
+
+        foreach (var oldId in usedNodes.OrderBy(x => x))
+        {
+            nodeMap[oldId] = newCoordsList.Count;
+            newCoordsList.Add(new[] { coords[oldId, 0], coords[oldId, 1], coords[oldId, 2] });
+        }
+
+        var newCoords = new double[newCoordsList.Count, 3];
+        for (var i = 0; i < newCoordsList.Count; i++)
+        {
+            newCoords[i, 0] = newCoordsList[i][0];
+            newCoords[i, 1] = newCoordsList[i][1];
+            newCoords[i, 2] = newCoordsList[i][2];
+        }
+
+        var newMesh = new SimplexMesh();
+
+        newMesh.WithBatch(() =>
+        {
+            for (var i = 0; i < newCoordsList.Count; i++) newMesh.AddNode(i);
+
+            for (var i = 0; i < mesh.Count<Tri3>(); i++)
+            {
+                if (excludeTriangles.Contains(i)) continue;
+                var nodes = mesh.NodesOf<Tri3, Node>(i);
+                var idx = newMesh.AddTriangle(nodeMap[nodes[0]], nodeMap[nodes[1]], nodeMap[nodes[2]]);
+                var orig = mesh.Get<Tri3, OriginalElement>(i);
+                newMesh.Set<Tri3, OriginalElement>(idx, orig);
+            }
+
+            for (var i = 0; i < mesh.Count<Tet4>(); i++)
+            {
+                if (excludeTetrahedra.Contains(i)) continue;
+                var nodes = mesh.NodesOf<Tet4, Node>(i);
+                var idx = newMesh.AddTetrahedron(nodeMap[nodes[0]], nodeMap[nodes[1]], nodeMap[nodes[2]], nodeMap[nodes[3]]);
+                var orig = mesh.Get<Tet4, OriginalElement>(i);
+                newMesh.Set<Tet4, OriginalElement>(idx, orig);
+            }
+
+            for (var i = 0; i < mesh.Count<Bar2>(); i++)
+            {
+                var nodes = mesh.NodesOf<Bar2, Node>(i);
+                var idx = newMesh.AddBar(nodeMap[nodes[0]], nodeMap[nodes[1]]);
+                var orig = mesh.Get<Bar2, OriginalElement>(i);
+                newMesh.Set<Bar2, OriginalElement>(idx, orig);
+            }
+
+            for (var i = 0; i < mesh.Count<Point>(); i++)
+            {
+                var nodes = mesh.NodesOf<Point, Node>(i);
+                var idx = newMesh.AddPoint(nodeMap[nodes[0]]);
+                var orig = mesh.Get<Point, OriginalElement>(i);
+                newMesh.Set<Point, OriginalElement>(idx, orig);
+            }
+        });
+
+        var removedCount = excludeTriangles.Count + excludeTetrahedra.Count;
+        Console.WriteLine($"[RebuildMesh] Removed {removedCount} degenerate elements");
+
+        return (newMesh, newCoords);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Quad Conversion (was QuadConversion)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    public static (SimplexMesh mesh, double[,] coords) ConvertToQuads(
+        SimplexMesh mesh, double[,] coords,
+        int passes = 2, double minQualityThreshold = 0.3)
+    {
+        Console.WriteLine("[QuadConversion] Starting triangle-to-quad conversion...");
+        Console.WriteLine($"  Input: {mesh.Count<Tri3>()} triangles");
+
+        var adjacency = BuildTriangleAdjacency(mesh);
+        var converted = new HashSet<int>();
+        var quads = new List<(int n0, int n1, int n2, int n3)>();
+
+        for (var pass = 0; pass < passes; pass++)
+        {
+            Console.WriteLine($"  Pass {pass + 1}/{passes}...");
+            var quadsThisPass = 0;
+
+            quadsThisPass += PairByQuality(mesh, coords, adjacency, converted, quads, minQualityThreshold);
+            quadsThisPass += PairByValence(mesh, coords, adjacency, converted, quads, minQualityThreshold);
+            quadsThisPass += PairByGeometry(mesh, coords, adjacency, converted, quads, minQualityThreshold);
+
+            Console.WriteLine($"    Created {quadsThisPass} quads in pass {pass + 1}");
+            if (quadsThisPass == 0) break;
+        }
+
+        Console.WriteLine($"  Total quads created: {quads.Count}");
+
+        var newMesh = BuildQuadMesh(mesh, quads, converted);
+        return (newMesh, coords);
+    }
+
+    private static Dictionary<int, List<int>> BuildTriangleAdjacency(SimplexMesh mesh)
+    {
+        var edgeToTriangles = new Dictionary<(int, int), List<int>>();
+
+        for (var i = 0; i < mesh.Count<Tri3>(); i++)
+        {
+            var nodes = mesh.NodesOf<Tri3, Node>(i);
+            var edges = new[]
+            {
+                MakeEdge(nodes[0], nodes[1]),
+                MakeEdge(nodes[1], nodes[2]),
+                MakeEdge(nodes[2], nodes[0])
+            };
+
+            foreach (var edge in edges)
+            {
+                if (!edgeToTriangles.ContainsKey(edge))
+                    edgeToTriangles[edge] = new List<int>();
+                edgeToTriangles[edge].Add(i);
+            }
+        }
+
+        var adjacency = new Dictionary<int, List<int>>();
+
+        for (var i = 0; i < mesh.Count<Tri3>(); i++)
+        {
+            adjacency[i] = new List<int>();
+            var nodes = mesh.NodesOf<Tri3, Node>(i);
+            var edges = new[]
+            {
+                MakeEdge(nodes[0], nodes[1]),
+                MakeEdge(nodes[1], nodes[2]),
+                MakeEdge(nodes[2], nodes[0])
+            };
+
+            foreach (var edge in edges)
+                foreach (var neighbor in edgeToTriangles[edge])
+                    if (neighbor != i && !adjacency[i].Contains(neighbor))
+                        adjacency[i].Add(neighbor);
+        }
+
+        return adjacency;
+    }
+
+    private static (int, int) MakeEdge(int v0, int v1) => v0 < v1 ? (v0, v1) : (v1, v0);
+
+    private static int PairByQuality(SimplexMesh mesh, double[,] coords,
+        Dictionary<int, List<int>> adjacency, HashSet<int> converted,
+        List<(int, int, int, int)> quads, double minQuality)
+    {
+        var count = 0;
+        for (var i = 0; i < mesh.Count<Tri3>(); i++)
+        {
+            if (converted.Contains(i)) continue;
+            var nodesI = mesh.NodesOf<Tri3, Node>(i);
+            var bestQuality = minQuality;
+            var bestNeighbor = -1;
+            var bestQuad = (0, 0, 0, 0);
+            foreach (var j in adjacency[i])
+            {
+                if (converted.Contains(j)) continue;
+                var nodesJ = mesh.NodesOf<Tri3, Node>(j);
+                var quadNodes = TryFormQuad(nodesI, nodesJ);
+                if (!quadNodes.HasValue) continue;
+                var quality = ComputeQuadQuality(coords, quadNodes.Value.n0, quadNodes.Value.n1, quadNodes.Value.n2, quadNodes.Value.n3);
+                if (quality > bestQuality) { bestQuality = quality; bestNeighbor = j; bestQuad = quadNodes.Value; }
+            }
+            if (bestNeighbor >= 0) { quads.Add(bestQuad); converted.Add(i); converted.Add(bestNeighbor); count++; }
+        }
+        return count;
+    }
+
+    private static int PairByValence(SimplexMesh mesh, double[,] coords,
+        Dictionary<int, List<int>> adjacency, HashSet<int> converted,
+        List<(int, int, int, int)> quads, double minQuality)
+    {
+        var valence = ComputeNodeValence(mesh, converted);
+        var count = 0;
+        for (var i = 0; i < mesh.Count<Tri3>(); i++)
+        {
+            if (converted.Contains(i)) continue;
+            var nodesI = mesh.NodesOf<Tri3, Node>(i);
+            var bestNeighbor = -1;
+            var bestScore = double.MinValue;
+            var bestQuad = (0, 0, 0, 0);
+            foreach (var j in adjacency[i])
+            {
+                if (converted.Contains(j)) continue;
+                var nodesJ = mesh.NodesOf<Tri3, Node>(j);
+                var quadNodes = TryFormQuad(nodesI, nodesJ);
+                if (!quadNodes.HasValue) continue;
+                var quality = ComputeQuadQuality(coords, quadNodes.Value.n0, quadNodes.Value.n1, quadNodes.Value.n2, quadNodes.Value.n3);
+                if (quality < minQuality) continue;
+                double valenceScore = 0;
+                var qn = new[] { quadNodes.Value.n0, quadNodes.Value.n1, quadNodes.Value.n2, quadNodes.Value.n3 };
+                foreach (var node in qn) { var v = valence.GetValueOrDefault(node, 0); if (v == 3 || v == 5) valenceScore += 1.0; }
+                var score = quality + 0.2 * valenceScore;
+                if (score > bestScore) { bestScore = score; bestNeighbor = j; bestQuad = quadNodes.Value; }
+            }
+            if (bestNeighbor >= 0) { quads.Add(bestQuad); converted.Add(i); converted.Add(bestNeighbor); count++; }
+        }
+        return count;
+    }
+
+    private static int PairByGeometry(SimplexMesh mesh, double[,] coords,
+        Dictionary<int, List<int>> adjacency, HashSet<int> converted,
+        List<(int, int, int, int)> quads, double minQuality)
+    {
+        var count = 0;
+        for (var i = 0; i < mesh.Count<Tri3>(); i++)
+        {
+            if (converted.Contains(i)) continue;
+            var nodesI = mesh.NodesOf<Tri3, Node>(i);
+            foreach (var j in adjacency[i])
+            {
+                if (converted.Contains(j)) continue;
+                var nodesJ = mesh.NodesOf<Tri3, Node>(j);
+                var quadNodes = TryFormQuad(nodesI, nodesJ);
+                if (!quadNodes.HasValue) continue;
+                var quality = ComputeQuadQuality(coords, quadNodes.Value.n0, quadNodes.Value.n1, quadNodes.Value.n2, quadNodes.Value.n3);
+                if (quality >= minQuality) { quads.Add(quadNodes.Value); converted.Add(i); converted.Add(j); count++; break; }
+            }
+        }
+        return count;
+    }
+
+    private static (int n0, int n1, int n2, int n3)? TryFormQuad(IReadOnlyList<int> tri1, IReadOnlyList<int> tri2)
+    {
+        var shared = FindSharedEdge(tri1, tri2);
+        if (!shared.HasValue) return null;
+        var (s0, s1) = shared.Value;
+        int unique1 = -1, unique2 = -1;
+        foreach (var v in tri1) if (v != s0 && v != s1) { unique1 = v; break; }
+        foreach (var v in tri2) if (v != s0 && v != s1) { unique2 = v; break; }
+        if (unique1 < 0 || unique2 < 0) return null;
+        return (s0, unique1, s1, unique2);
+    }
+
+    private static (int, int)? FindSharedEdge(IReadOnlyList<int> tri1, IReadOnlyList<int> tri2)
+    {
+        var edges1 = new[] { MakeEdge(tri1[0], tri1[1]), MakeEdge(tri1[1], tri1[2]), MakeEdge(tri1[2], tri1[0]) };
+        var edges2 = new[] { MakeEdge(tri2[0], tri2[1]), MakeEdge(tri2[1], tri2[2]), MakeEdge(tri2[2], tri2[0]) };
+        foreach (var e1 in edges1) foreach (var e2 in edges2) if (e1 == e2) return e1;
+        return null;
+    }
+
+    private static double ComputeQuadQuality(double[,] coords, int n0, int n1, int n2, int n3)
+    {
+        if (!IsQuadConvex(coords, n0, n1, n2, n3)) return 0.0;
+        var e0 = EdgeLength2D(coords, n0, n1);
+        var e1 = EdgeLength2D(coords, n1, n2);
+        var e2 = EdgeLength2D(coords, n2, n3);
+        var e3 = EdgeLength2D(coords, n3, n0);
+        var minEdge = Math.Min(Math.Min(e0, e1), Math.Min(e2, e3));
+        var maxEdge = Math.Max(Math.Max(e0, e1), Math.Max(e2, e3));
+        if (maxEdge < Epsilon) return 0.0;
+        var aspectRatio = minEdge / maxEdge;
+        var angles = new[] { ComputeAngle(coords, n3, n0, n1), ComputeAngle(coords, n0, n1, n2), ComputeAngle(coords, n1, n2, n3), ComputeAngle(coords, n2, n3, n0) };
+        double angleQuality = 0;
+        foreach (var angle in angles) angleQuality += Math.Max(0, 1.0 - Math.Abs(angle - 90.0) / 90.0);
+        angleQuality /= 4.0;
+        return 0.5 * aspectRatio + 0.5 * angleQuality;
+    }
+
+    private static double ComputeAngle(double[,] coords, int a, int center, int b)
+    {
+        var ax = coords[a, 0] - coords[center, 0]; var ay = coords[a, 1] - coords[center, 1];
+        var bx = coords[b, 0] - coords[center, 0]; var by = coords[b, 1] - coords[center, 1];
+        var dot = ax * bx + ay * by;
+        var lenA = Math.Sqrt(ax * ax + ay * ay); var lenB = Math.Sqrt(bx * bx + by * by);
+        if (lenA < Epsilon || lenB < Epsilon) return 90.0;
+        var cosAngle = Math.Clamp(dot / (lenA * lenB), -1.0, 1.0);
+        return Math.Acos(cosAngle) * 180.0 / Math.PI;
+    }
+
+    private static Dictionary<int, int> ComputeNodeValence(SimplexMesh mesh, HashSet<int> excludeTriangles)
+    {
+        var valence = new Dictionary<int, int>();
+        for (var i = 0; i < mesh.Count<Tri3>(); i++)
+        {
+            if (excludeTriangles.Contains(i)) continue;
+            var nodes = mesh.NodesOf<Tri3, Node>(i);
+            foreach (var node in nodes) valence[node] = valence.GetValueOrDefault(node, 0) + 1;
+        }
+        return valence;
+    }
+
+    private static SimplexMesh BuildQuadMesh(SimplexMesh oldMesh, List<(int n0, int n1, int n2, int n3)> quads, HashSet<int> convertedTriangles)
+    {
+        var newMesh = new SimplexMesh();
+        newMesh.WithBatch(() =>
+        {
+            for (var i = 0; i < oldMesh.Count<Node>(); i++) newMesh.AddNode(i);
+            foreach (var (n0, n1, n2, n3) in quads) newMesh.AddQuad(n0, n1, n2, n3);
+            for (var i = 0; i < oldMesh.Count<Tri3>(); i++)
+            {
+                if (convertedTriangles.Contains(i)) continue;
+                var nodes = oldMesh.NodesOf<Tri3, Node>(i);
+                newMesh.AddTriangle(nodes[0], nodes[1], nodes[2]);
+            }
+        });
+        Console.WriteLine($"[QuadConversion] Built mesh: {newMesh.Count<Quad4>()} quads, {newMesh.Count<Tri3>()} triangles");
+        return newMesh;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Crack Duplication (was CrackDuplication)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    public static (SimplexMesh mesh, double[,] coords) CreateCrack(
+        SimplexMesh mesh, double[,] coords,
+        List<(int, int)> crackEdges,
+        Func<double, double, double> levelSetFunction,
+        int smoothingIterations = 5)
+    {
+        var originalNodeCount = mesh.Count<Node>();
+
+        Console.WriteLine($"[CreateCrack] Refining {crackEdges.Count} crack edges...");
+        var (refinedMesh, _) = Refine(mesh, crackEdges);
+        var refinedCoords = InterpolateCoordinates(refinedMesh, coords);
+
+        Console.WriteLine($"[CreateCrack] After refinement: {refinedMesh.Count<Node>()} nodes");
+
+        var newNodes = IdentifyCrackMidpointNodes(refinedMesh, originalNodeCount);
+        Console.WriteLine($"[CreateCrack] Found {newNodes.Count} new midpoint nodes");
+
+        if (smoothingIterations > 0)
+        {
+            Console.WriteLine($"[CreateCrack] Smoothing mesh ({smoothingIterations} iterations)...");
+            refinedCoords = LaplacianSmoothing(refinedMesh, refinedCoords, smoothingIterations, newNodes);
+        }
+
+        var tipNodes = IdentifyCrackTipNodes(refinedMesh, newNodes, crackEdges);
+        Console.WriteLine($"[CreateCrack] Identified {tipNodes.Count} tip nodes (will NOT be duplicated)");
+
+        var nodesToDuplicate = new HashSet<int>(newNodes);
+        nodesToDuplicate.ExceptWith(tipNodes);
+
+        Console.WriteLine($"[CreateCrack] Duplicating {nodesToDuplicate.Count} interior crack nodes...");
+
+        var (crackedMesh, crackedCoords) = DuplicateCrackNodesAndAssignSides(
+            refinedMesh, refinedCoords, nodesToDuplicate, newNodes, levelSetFunction);
+
+        return RenumberCrackedMesh(crackedMesh, crackedCoords);
+    }
+
+    public static (SimplexMesh mesh, double[,] coords) CreateCrackFromRefinedMesh(
+        SimplexMesh refinedMesh, double[,] refinedCoords,
+        int originalNodeCount,
+        List<(int, int)> crackEdges,
+        Func<double, double, double> levelSetFunction,
+        int smoothingIterations = 5)
+    {
+        Console.WriteLine("[CreateCrackFromRefinedMesh] Using pre-refined mesh with exact geometry");
+
+        var newNodes = IdentifyCrackMidpointNodes(refinedMesh, originalNodeCount);
+        Console.WriteLine($"[CreateCrackFromRefinedMesh] Found {newNodes.Count} crack nodes");
+
+        DiagnoseCrackZeroAreaTriangles(refinedMesh, refinedCoords);
+
+        var nodeMapping = new Dictionary<int, int>();
+        (refinedMesh, refinedCoords, nodeMapping) = MergeCrackDuplicateNodes(refinedMesh, refinedCoords, newNodes);
+
+        if (nodeMapping.Count > 0)
+        {
+            var updatedNewNodes = new HashSet<int>();
+            foreach (var node in newNodes)
+            {
+                var canonical = node;
+                while (nodeMapping.ContainsKey(canonical)) canonical = nodeMapping[canonical];
+                updatedNewNodes.Add(canonical);
+            }
+            newNodes = updatedNewNodes;
+        }
+
+        (refinedMesh, refinedCoords) = RemoveDegenerateTriangles(refinedMesh, refinedCoords);
+
+        if (smoothingIterations > 0)
+        {
+            refinedCoords = LaplacianSmoothing(refinedMesh, refinedCoords, smoothingIterations, newNodes);
+        }
+
+        var tipNodes = IdentifyCrackTipNodes(refinedMesh, newNodes, crackEdges);
+
+        var nodesToDuplicate = new HashSet<int>(newNodes);
+        nodesToDuplicate.ExceptWith(tipNodes);
+
+        var (crackedMesh, crackedCoords) = DuplicateCrackNodesAndAssignSides(
+            refinedMesh, refinedCoords, nodesToDuplicate, newNodes, levelSetFunction);
+
+        return RenumberCrackedMesh(crackedMesh, crackedCoords);
+    }
+
+    private static HashSet<int> IdentifyCrackMidpointNodes(SimplexMesh mesh, int originalNodeCount)
+    {
+        var midpointNodes = new HashSet<int>();
+        for (var i = originalNodeCount; i < mesh.Count<Node>(); i++)
+        {
+            var parents = mesh.Get<Node, ParentNodes>(i);
+            if (parents.Parent1 != parents.Parent2) midpointNodes.Add(i);
+        }
+        return midpointNodes;
+    }
+
+    private static HashSet<int> IdentifyCrackTipNodes(
+        SimplexMesh mesh, HashSet<int> newNodes, List<(int, int)> originalCrackEdges)
+    {
+        var tipNodes = new HashSet<int>();
+        var refinedCrackEdges = new HashSet<(int, int)>();
+
+        foreach (var (n0, n1) in originalCrackEdges)
+        {
+            var nodesOnEdge = new List<int>();
+            foreach (var nodeId in newNodes)
+            {
+                var parents = mesh.Get<Node, ParentNodes>(nodeId);
+                if ((parents.Parent1 == n0 && parents.Parent2 == n1) ||
+                    (parents.Parent1 == n1 && parents.Parent2 == n0))
+                    nodesOnEdge.Add(nodeId);
+            }
+
+            if (nodesOnEdge.Count > 0)
+            {
+                nodesOnEdge.Sort();
+                for (var i = 0; i < nodesOnEdge.Count - 1; i++)
+                {
+                    var edge = (Math.Min(nodesOnEdge[i], nodesOnEdge[i + 1]),
+                        Math.Max(nodesOnEdge[i], nodesOnEdge[i + 1]));
+                    refinedCrackEdges.Add(edge);
+                }
+            }
+        }
+
+        var edgeCount = new Dictionary<int, int>();
+        foreach (var (n0, n1) in refinedCrackEdges)
+        {
+            if (newNodes.Contains(n0)) edgeCount[n0] = edgeCount.GetValueOrDefault(n0, 0) + 1;
+            if (newNodes.Contains(n1)) edgeCount[n1] = edgeCount.GetValueOrDefault(n1, 0) + 1;
+        }
+
+        foreach (var (nodeId, count) in edgeCount)
+            if (count == 1) tipNodes.Add(nodeId);
+
+        return tipNodes;
+    }
+
+    private static (SimplexMesh mesh, double[,] coords) DuplicateCrackNodesAndAssignSides(
+        SimplexMesh mesh, double[,] coords,
+        HashSet<int> nodesToDuplicate, HashSet<int> allCrackNodes,
+        Func<double, double, double> levelSetFunction)
+    {
+        var nNodes = mesh.Count<Node>();
+        var nNewNodes = nNodes + nodesToDuplicate.Count;
+        var newCoords = new double[nNewNodes, 3];
+
+        for (var i = 0; i < nNodes; i++)
+        {
+            newCoords[i, 0] = coords[i, 0]; newCoords[i, 1] = coords[i, 1]; newCoords[i, 2] = coords[i, 2];
+        }
+
+        var nodeDuplicates = new Dictionary<int, int>();
+        var nextId = nNodes;
+
+        foreach (var nodeId in nodesToDuplicate)
+        {
+            var dupId = nextId++;
+            nodeDuplicates[nodeId] = dupId;
+            newCoords[dupId, 0] = coords[nodeId, 0]; newCoords[dupId, 1] = coords[nodeId, 1]; newCoords[dupId, 2] = coords[nodeId, 2];
+        }
+
+        Console.WriteLine($"[DuplicateNodes] Created {nodeDuplicates.Count} duplicate nodes, total: {nNodes} -> {nNewNodes}");
+
+        var newMesh = new SimplexMesh();
+        newMesh.WithBatch(() =>
+        {
+            for (var i = 0; i < nNewNodes; i++) newMesh.AddNode(i);
+            CopyCrackElementsWithSideAssignment(mesh, newMesh, allCrackNodes, nodeDuplicates, newCoords, levelSetFunction);
+        });
+
+        return (newMesh, newCoords);
+    }
+
+    private static void CopyCrackElementsWithSideAssignment(
+        SimplexMesh mesh, SimplexMesh newMesh,
+        HashSet<int> crackNodes, Dictionary<int, int> nodeDuplicates,
+        double[,] coords, Func<double, double, double> levelSet)
+    {
+        int RemapNode(int nodeId, bool useDup)
+        {
+            if (useDup && nodeDuplicates.ContainsKey(nodeId)) return nodeDuplicates[nodeId];
+            return nodeId;
+        }
+
+        bool ShouldUseDuplicates(IReadOnlyList<int> nodes)
+        {
+            for (var i = 0; i < nodes.Count; i++)
+            {
+                var nodeId = nodes[i];
+                if (!crackNodes.Contains(nodeId))
+                {
+                    var phi = levelSet(coords[nodeId, 0], coords[nodeId, 1]);
+                    if (phi <= 0) return false;
+                }
+            }
+            return true;
+        }
+
+        for (var i = 0; i < mesh.Count<Point>(); i++)
+        {
+            var nodes = mesh.NodesOf<Point, Node>(i);
+            var idx = newMesh.AddPoint(nodes[0]);
+            newMesh.Set<Point, OriginalElement>(idx, mesh.Get<Point, OriginalElement>(i));
+        }
+
+        for (var i = 0; i < mesh.Count<Tri3>(); i++)
+        {
+            var nodes = mesh.NodesOf<Tri3, Node>(i);
+            var useDup = ShouldUseDuplicates(nodes);
+            var idx = newMesh.AddTriangle(RemapNode(nodes[0], useDup), RemapNode(nodes[1], useDup), RemapNode(nodes[2], useDup));
+            newMesh.Set<Tri3, OriginalElement>(idx, mesh.Get<Tri3, OriginalElement>(i));
+        }
+
+        for (var i = 0; i < mesh.Count<Tet4>(); i++)
+        {
+            var nodes = mesh.NodesOf<Tet4, Node>(i);
+            var useDup = ShouldUseDuplicates(nodes);
+            var idx = newMesh.AddTetrahedron(RemapNode(nodes[0], useDup), RemapNode(nodes[1], useDup),
+                RemapNode(nodes[2], useDup), RemapNode(nodes[3], useDup));
+            newMesh.Set<Tet4, OriginalElement>(idx, mesh.Get<Tet4, OriginalElement>(i));
+        }
+    }
+
+    private static (SimplexMesh mesh, double[,] coords) RenumberCrackedMesh(SimplexMesh mesh, double[,] coords)
+    {
+        var nNodes = mesh.Count<Node>();
+        var usedNodes = new HashSet<int>();
+
+        for (var i = 0; i < mesh.Count<Tri3>(); i++) foreach (var n in mesh.NodesOf<Tri3, Node>(i)) usedNodes.Add(n);
+        for (var i = 0; i < mesh.Count<Tet4>(); i++) foreach (var n in mesh.NodesOf<Tet4, Node>(i)) usedNodes.Add(n);
+        for (var i = 0; i < mesh.Count<Bar2>(); i++) foreach (var n in mesh.NodesOf<Bar2, Node>(i)) usedNodes.Add(n);
+        for (var i = 0; i < mesh.Count<Point>(); i++) foreach (var n in mesh.NodesOf<Point, Node>(i)) usedNodes.Add(n);
+
+        var sortedNodes = usedNodes.OrderBy(x => x).ToList();
+        var needsRenumbering = sortedNodes.Count != nNodes;
+
+        if (!needsRenumbering)
+        {
+            for (int i = 0; i < sortedNodes.Count; i++)
+                if (sortedNodes[i] != i) { needsRenumbering = true; break; }
+        }
+
+        if (!needsRenumbering) return (mesh, coords);
+
+        for (int i = mesh.Count<Edge>() - 1; i >= 0; i--) mesh.Remove<Edge>(i);
+        for (int i = 0; i < nNodes; i++) if (!usedNodes.Contains(i)) mesh.Remove<Node>(i);
+        mesh.Compress();
+
+        var newCoords = new double[sortedNodes.Count, 3];
+        for (int i = 0; i < sortedNodes.Count; i++)
+        {
+            var oldId = sortedNodes[i];
+            newCoords[i, 0] = coords[oldId, 0]; newCoords[i, 1] = coords[oldId, 1]; newCoords[i, 2] = coords[oldId, 2];
+        }
+
+        Console.WriteLine($"[RenumberMesh] Renumbered: {nNodes} -> {sortedNodes.Count} nodes");
+        return (mesh, newCoords);
+    }
+
+    private static (SimplexMesh mesh, double[,] coords, Dictionary<int, int> mapping)
+        MergeCrackDuplicateNodes(SimplexMesh mesh, double[,] coords, HashSet<int> crackNodes, double tolerance = 1e-12)
+    {
+        var nNodes = mesh.Count<Node>();
+        var nodeMapping = new Dictionary<int, int>();
+        var spatialBuckets = new Dictionary<(int, int, int), List<int>>();
+        var bucketSize = Math.Max(tolerance * 100, 1e-6);
+
+        for (var i = 0; i < nNodes; i++)
+        {
+            var key = ((int)Math.Floor(coords[i, 0] / bucketSize),
+                       (int)Math.Floor(coords[i, 1] / bucketSize),
+                       (int)Math.Floor(coords[i, 2] / bucketSize));
+            if (!spatialBuckets.ContainsKey(key)) spatialBuckets[key] = new List<int>();
+            spatialBuckets[key].Add(i);
+        }
+
+        var merged = new HashSet<int>();
+        var mergeCount = 0;
+
+        foreach (var bucket in spatialBuckets.Values)
+        {
+            if (bucket.Count < 2) continue;
+            for (var i = 0; i < bucket.Count; i++)
+            {
+                var id1 = bucket[i];
+                if (merged.Contains(id1)) continue;
+                for (var j = i + 1; j < bucket.Count; j++)
+                {
+                    var id2 = bucket[j];
+                    if (merged.Contains(id2)) continue;
+                    var dx = coords[id1, 0] - coords[id2, 0];
+                    var dy = coords[id1, 1] - coords[id2, 1];
+                    var dz = coords[id1, 2] - coords[id2, 2];
+                    var dist = Math.Sqrt(dx * dx + dy * dy + dz * dz);
+                    if (dist < tolerance)
+                    {
+                        if (!(crackNodes.Contains(id1) && crackNodes.Contains(id2)))
+                        {
+                            var canonicalId = Math.Min(id1, id2);
+                            var mergedId = Math.Max(id1, id2);
+                            nodeMapping[mergedId] = canonicalId;
+                            merged.Add(mergedId);
+                            mergeCount++;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (mergeCount == 0) return (mesh, coords, nodeMapping);
+
+        var GetCanonicalNode = (int nodeId) =>
+        {
+            while (nodeMapping.ContainsKey(nodeId)) nodeId = nodeMapping[nodeId];
+            return nodeId;
+        };
+
+        for (var i = 0; i < mesh.Count<Tri3>(); i++)
+        {
+            var nodes = mesh.NodesOf<Tri3, Node>(i);
+            var c0 = GetCanonicalNode(nodes[0]); var c1 = GetCanonicalNode(nodes[1]); var c2 = GetCanonicalNode(nodes[2]);
+            if (c0 != nodes[0] || c1 != nodes[1] || c2 != nodes[2])
+                mesh.ReplaceElementNodes<Tri3, Node>(i, c0, c1, c2);
+        }
+
+        for (var i = 0; i < mesh.Count<Tet4>(); i++)
+        {
+            var nodes = mesh.NodesOf<Tet4, Node>(i);
+            var c0 = GetCanonicalNode(nodes[0]); var c1 = GetCanonicalNode(nodes[1]);
+            var c2 = GetCanonicalNode(nodes[2]); var c3 = GetCanonicalNode(nodes[3]);
+            if (c0 != nodes[0] || c1 != nodes[1] || c2 != nodes[2] || c3 != nodes[3])
+                mesh.ReplaceElementNodes<Tet4, Node>(i, c0, c1, c2, c3);
+        }
+
+        var usedNodes = new HashSet<int>();
+        for (var i = 0; i < mesh.Count<Tri3>(); i++) foreach (var n in mesh.NodesOf<Tri3, Node>(i)) usedNodes.Add(n);
+        for (var i = 0; i < mesh.Count<Tet4>(); i++) foreach (var n in mesh.NodesOf<Tet4, Node>(i)) usedNodes.Add(n);
+
+        for (int i = mesh.Count<Edge>() - 1; i >= 0; i--) mesh.Remove<Edge>(i);
+        for (int i = 0; i < nNodes; i++) if (!usedNodes.Contains(i)) mesh.Remove<Node>(i);
+
+        var sortedUsed = usedNodes.OrderBy(x => x).ToList();
+        mesh.Compress();
+
+        var newCoords = new double[sortedUsed.Count, 3];
+        for (int i = 0; i < sortedUsed.Count; i++)
+        {
+            var oldId = sortedUsed[i];
+            newCoords[i, 0] = coords[oldId, 0]; newCoords[i, 1] = coords[oldId, 1]; newCoords[i, 2] = coords[oldId, 2];
+        }
+
+        var compactMapping = new Dictionary<int, int>();
+        for (int i = 0; i < sortedUsed.Count; i++) compactMapping[sortedUsed[i]] = i;
+
+        var finalMapping = new Dictionary<int, int>();
+        foreach (var (oldId, _) in nodeMapping)
+        {
+            var finalCanonical = GetCanonicalNode(oldId);
+            if (compactMapping.ContainsKey(finalCanonical))
+                finalMapping[oldId] = compactMapping[finalCanonical];
+        }
+
+        Console.WriteLine($"[MergeDuplicateNodes] Merged {mergeCount} nodes: {nNodes} -> {mesh.Count<Node>()} nodes");
+        return (mesh, newCoords, finalMapping);
+    }
+
+    private static void DiagnoseCrackZeroAreaTriangles(SimplexMesh mesh, double[,] coords, double tolerance = 1e-10)
+    {
+        var zeroAreaCount = 0;
+        for (var i = 0; i < mesh.Count<Tri3>(); i++)
+        {
+            var nodes = mesh.NodesOf<Tri3, Node>(i);
+            if (IsTriangleDegenerate(coords, nodes[0], nodes[1], nodes[2], tolerance))
+                zeroAreaCount++;
+        }
+
+        if (zeroAreaCount > 0)
+            Console.WriteLine($"[Diagnostic] Found {zeroAreaCount} zero-area triangles!");
+        else
+            Console.WriteLine("[Diagnostic] No zero-area triangles found");
+    }
 }
