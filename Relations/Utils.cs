@@ -34,8 +34,7 @@ public sealed class TypeMap<T0, T1> : ITypeMap
 
     public int IndexOf<T>()
     {
-        if (typeof(T) == typeof(T0)) return 0;
-        if (typeof(T) == typeof(T1)) return 1;
+        if (TryIndexOf<T>(out var index)) return index;
         throw new KeyNotFoundException($"Type {typeof(T).Name} is not in this TypeMap.");
     }
 
@@ -65,9 +64,7 @@ public sealed class TypeMap<T0, T1, T2> : ITypeMap
 
     public int IndexOf<T>()
     {
-        if (typeof(T) == typeof(T0)) return 0;
-        if (typeof(T) == typeof(T1)) return 1;
-        if (typeof(T) == typeof(T2)) return 2;
+        if (TryIndexOf<T>(out var index)) return index;
         throw new KeyNotFoundException($"Type {typeof(T).Name} is not in this TypeMap.");
     }
 
@@ -103,10 +100,7 @@ public sealed class TypeMap<T0, T1, T2, T3> : ITypeMap
 
     public int IndexOf<T>()
     {
-        if (typeof(T) == typeof(T0)) return 0;
-        if (typeof(T) == typeof(T1)) return 1;
-        if (typeof(T) == typeof(T2)) return 2;
-        if (typeof(T) == typeof(T3)) return 3;
+        if (TryIndexOf<T>(out var index)) return index;
         throw new KeyNotFoundException($"Type {typeof(T).Name} is not in this TypeMap.");
     }
 
@@ -148,11 +142,7 @@ public sealed class TypeMap<T0, T1, T2, T3, T4> : ITypeMap
 
     public int IndexOf<T>()
     {
-        if (typeof(T) == typeof(T0)) return 0;
-        if (typeof(T) == typeof(T1)) return 1;
-        if (typeof(T) == typeof(T2)) return 2;
-        if (typeof(T) == typeof(T3)) return 3;
-        if (typeof(T) == typeof(T4)) return 4;
+        if (TryIndexOf<T>(out var index)) return index;
         throw new KeyNotFoundException($"Type {typeof(T).Name} is not in this TypeMap.");
     }
 
@@ -200,12 +190,7 @@ public sealed class TypeMap<T0, T1, T2, T3, T4, T5> : ITypeMap
 
     public int IndexOf<T>()
     {
-        if (typeof(T) == typeof(T0)) return 0;
-        if (typeof(T) == typeof(T1)) return 1;
-        if (typeof(T) == typeof(T2)) return 2;
-        if (typeof(T) == typeof(T3)) return 3;
-        if (typeof(T) == typeof(T4)) return 4;
-        if (typeof(T) == typeof(T5)) return 5;
+        if (TryIndexOf<T>(out var index)) return index;
         throw new KeyNotFoundException($"Type {typeof(T).Name} is not in this TypeMap.");
     }
 
@@ -259,13 +244,7 @@ public sealed class TypeMap<T0, T1, T2, T3, T4, T5, T6> : ITypeMap
 
     public int IndexOf<T>()
     {
-        if (typeof(T) == typeof(T0)) return 0;
-        if (typeof(T) == typeof(T1)) return 1;
-        if (typeof(T) == typeof(T2)) return 2;
-        if (typeof(T) == typeof(T3)) return 3;
-        if (typeof(T) == typeof(T4)) return 4;
-        if (typeof(T) == typeof(T5)) return 5;
-        if (typeof(T) == typeof(T6)) return 6;
+        if (TryIndexOf<T>(out var index)) return index;
         throw new KeyNotFoundException($"Type {typeof(T).Name} is not in this TypeMap.");
     }
 
@@ -325,14 +304,7 @@ public sealed class TypeMap<T0, T1, T2, T3, T4, T5, T6, T7> : ITypeMap
 
     public int IndexOf<T>()
     {
-        if (typeof(T) == typeof(T0)) return 0;
-        if (typeof(T) == typeof(T1)) return 1;
-        if (typeof(T) == typeof(T2)) return 2;
-        if (typeof(T) == typeof(T3)) return 3;
-        if (typeof(T) == typeof(T4)) return 4;
-        if (typeof(T) == typeof(T5)) return 5;
-        if (typeof(T) == typeof(T6)) return 6;
-        if (typeof(T) == typeof(T7)) return 7;
+        if (TryIndexOf<T>(out var index)) return index;
         throw new KeyNotFoundException($"Type {typeof(T).Name} is not in this TypeMap.");
     }
 
@@ -398,15 +370,7 @@ public sealed class TypeMap<T0, T1, T2, T3, T4, T5, T6, T7, T8> : ITypeMap
 
     public int IndexOf<T>()
     {
-        if (typeof(T) == typeof(T0)) return 0;
-        if (typeof(T) == typeof(T1)) return 1;
-        if (typeof(T) == typeof(T2)) return 2;
-        if (typeof(T) == typeof(T3)) return 3;
-        if (typeof(T) == typeof(T4)) return 4;
-        if (typeof(T) == typeof(T5)) return 5;
-        if (typeof(T) == typeof(T6)) return 6;
-        if (typeof(T) == typeof(T7)) return 7;
-        if (typeof(T) == typeof(T8)) return 8;
+        if (TryIndexOf<T>(out var index)) return index;
         throw new KeyNotFoundException($"Type {typeof(T).Name} is not in this TypeMap.");
     }
 
@@ -478,16 +442,7 @@ public sealed class TypeMap<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9> : ITypeMap
 
     public int IndexOf<T>()
     {
-        if (typeof(T) == typeof(T0)) return 0;
-        if (typeof(T) == typeof(T1)) return 1;
-        if (typeof(T) == typeof(T2)) return 2;
-        if (typeof(T) == typeof(T3)) return 3;
-        if (typeof(T) == typeof(T4)) return 4;
-        if (typeof(T) == typeof(T5)) return 5;
-        if (typeof(T) == typeof(T6)) return 6;
-        if (typeof(T) == typeof(T7)) return 7;
-        if (typeof(T) == typeof(T8)) return 8;
-        if (typeof(T) == typeof(T9)) return 9;
+        if (TryIndexOf<T>(out var index)) return index;
         throw new KeyNotFoundException($"Type {typeof(T).Name} is not in this TypeMap.");
     }
 
@@ -565,17 +520,7 @@ public sealed class TypeMap<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10> : IType
 
     public int IndexOf<T>()
     {
-        if (typeof(T) == typeof(T0)) return 0;
-        if (typeof(T) == typeof(T1)) return 1;
-        if (typeof(T) == typeof(T2)) return 2;
-        if (typeof(T) == typeof(T3)) return 3;
-        if (typeof(T) == typeof(T4)) return 4;
-        if (typeof(T) == typeof(T5)) return 5;
-        if (typeof(T) == typeof(T6)) return 6;
-        if (typeof(T) == typeof(T7)) return 7;
-        if (typeof(T) == typeof(T8)) return 8;
-        if (typeof(T) == typeof(T9)) return 9;
-        if (typeof(T) == typeof(T10)) return 10;
+        if (TryIndexOf<T>(out var index)) return index;
         throw new KeyNotFoundException($"Type {typeof(T).Name} is not in this TypeMap.");
     }
 
@@ -659,18 +604,7 @@ public sealed class TypeMap<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11> : 
 
     public int IndexOf<T>()
     {
-        if (typeof(T) == typeof(T0)) return 0;
-        if (typeof(T) == typeof(T1)) return 1;
-        if (typeof(T) == typeof(T2)) return 2;
-        if (typeof(T) == typeof(T3)) return 3;
-        if (typeof(T) == typeof(T4)) return 4;
-        if (typeof(T) == typeof(T5)) return 5;
-        if (typeof(T) == typeof(T6)) return 6;
-        if (typeof(T) == typeof(T7)) return 7;
-        if (typeof(T) == typeof(T8)) return 8;
-        if (typeof(T) == typeof(T9)) return 9;
-        if (typeof(T) == typeof(T10)) return 10;
-        if (typeof(T) == typeof(T11)) return 11;
+        if (TryIndexOf<T>(out var index)) return index;
         throw new KeyNotFoundException($"Type {typeof(T).Name} is not in this TypeMap.");
     }
 
@@ -760,19 +694,7 @@ public sealed class TypeMap<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T1
 
     public int IndexOf<T>()
     {
-        if (typeof(T) == typeof(T0)) return 0;
-        if (typeof(T) == typeof(T1)) return 1;
-        if (typeof(T) == typeof(T2)) return 2;
-        if (typeof(T) == typeof(T3)) return 3;
-        if (typeof(T) == typeof(T4)) return 4;
-        if (typeof(T) == typeof(T5)) return 5;
-        if (typeof(T) == typeof(T6)) return 6;
-        if (typeof(T) == typeof(T7)) return 7;
-        if (typeof(T) == typeof(T8)) return 8;
-        if (typeof(T) == typeof(T9)) return 9;
-        if (typeof(T) == typeof(T10)) return 10;
-        if (typeof(T) == typeof(T11)) return 11;
-        if (typeof(T) == typeof(T12)) return 12;
+        if (TryIndexOf<T>(out var index)) return index;
         throw new KeyNotFoundException($"Type {typeof(T).Name} is not in this TypeMap.");
     }
 
@@ -868,20 +790,7 @@ public sealed class TypeMap<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T1
 
     public int IndexOf<T>()
     {
-        if (typeof(T) == typeof(T0)) return 0;
-        if (typeof(T) == typeof(T1)) return 1;
-        if (typeof(T) == typeof(T2)) return 2;
-        if (typeof(T) == typeof(T3)) return 3;
-        if (typeof(T) == typeof(T4)) return 4;
-        if (typeof(T) == typeof(T5)) return 5;
-        if (typeof(T) == typeof(T6)) return 6;
-        if (typeof(T) == typeof(T7)) return 7;
-        if (typeof(T) == typeof(T8)) return 8;
-        if (typeof(T) == typeof(T9)) return 9;
-        if (typeof(T) == typeof(T10)) return 10;
-        if (typeof(T) == typeof(T11)) return 11;
-        if (typeof(T) == typeof(T12)) return 12;
-        if (typeof(T) == typeof(T13)) return 13;
+        if (TryIndexOf<T>(out var index)) return index;
         throw new KeyNotFoundException($"Type {typeof(T).Name} is not in this TypeMap.");
     }
 
@@ -983,21 +892,7 @@ public sealed class TypeMap<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T1
 
     public int IndexOf<T>()
     {
-        if (typeof(T) == typeof(T0)) return 0;
-        if (typeof(T) == typeof(T1)) return 1;
-        if (typeof(T) == typeof(T2)) return 2;
-        if (typeof(T) == typeof(T3)) return 3;
-        if (typeof(T) == typeof(T4)) return 4;
-        if (typeof(T) == typeof(T5)) return 5;
-        if (typeof(T) == typeof(T6)) return 6;
-        if (typeof(T) == typeof(T7)) return 7;
-        if (typeof(T) == typeof(T8)) return 8;
-        if (typeof(T) == typeof(T9)) return 9;
-        if (typeof(T) == typeof(T10)) return 10;
-        if (typeof(T) == typeof(T11)) return 11;
-        if (typeof(T) == typeof(T12)) return 12;
-        if (typeof(T) == typeof(T13)) return 13;
-        if (typeof(T) == typeof(T14)) return 14;
+        if (TryIndexOf<T>(out var index)) return index;
         throw new KeyNotFoundException($"Type {typeof(T).Name} is not in this TypeMap.");
     }
 
@@ -1105,22 +1000,7 @@ public sealed class TypeMap<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T1
 
     public int IndexOf<T>()
     {
-        if (typeof(T) == typeof(T0)) return 0;
-        if (typeof(T) == typeof(T1)) return 1;
-        if (typeof(T) == typeof(T2)) return 2;
-        if (typeof(T) == typeof(T3)) return 3;
-        if (typeof(T) == typeof(T4)) return 4;
-        if (typeof(T) == typeof(T5)) return 5;
-        if (typeof(T) == typeof(T6)) return 6;
-        if (typeof(T) == typeof(T7)) return 7;
-        if (typeof(T) == typeof(T8)) return 8;
-        if (typeof(T) == typeof(T9)) return 9;
-        if (typeof(T) == typeof(T10)) return 10;
-        if (typeof(T) == typeof(T11)) return 11;
-        if (typeof(T) == typeof(T12)) return 12;
-        if (typeof(T) == typeof(T13)) return 13;
-        if (typeof(T) == typeof(T14)) return 14;
-        if (typeof(T) == typeof(T15)) return 15;
+        if (TryIndexOf<T>(out var index)) return index;
         throw new KeyNotFoundException($"Type {typeof(T).Name} is not in this TypeMap.");
     }
 
@@ -1234,23 +1114,7 @@ public sealed class TypeMap<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T1
 
     public int IndexOf<T>()
     {
-        if (typeof(T) == typeof(T0)) return 0;
-        if (typeof(T) == typeof(T1)) return 1;
-        if (typeof(T) == typeof(T2)) return 2;
-        if (typeof(T) == typeof(T3)) return 3;
-        if (typeof(T) == typeof(T4)) return 4;
-        if (typeof(T) == typeof(T5)) return 5;
-        if (typeof(T) == typeof(T6)) return 6;
-        if (typeof(T) == typeof(T7)) return 7;
-        if (typeof(T) == typeof(T8)) return 8;
-        if (typeof(T) == typeof(T9)) return 9;
-        if (typeof(T) == typeof(T10)) return 10;
-        if (typeof(T) == typeof(T11)) return 11;
-        if (typeof(T) == typeof(T12)) return 12;
-        if (typeof(T) == typeof(T13)) return 13;
-        if (typeof(T) == typeof(T14)) return 14;
-        if (typeof(T) == typeof(T15)) return 15;
-        if (typeof(T) == typeof(T16)) return 16;
+        if (TryIndexOf<T>(out var index)) return index;
         throw new KeyNotFoundException($"Type {typeof(T).Name} is not in this TypeMap.");
     }
 
@@ -1370,24 +1234,7 @@ public sealed class TypeMap<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T1
 
     public int IndexOf<T>()
     {
-        if (typeof(T) == typeof(T0)) return 0;
-        if (typeof(T) == typeof(T1)) return 1;
-        if (typeof(T) == typeof(T2)) return 2;
-        if (typeof(T) == typeof(T3)) return 3;
-        if (typeof(T) == typeof(T4)) return 4;
-        if (typeof(T) == typeof(T5)) return 5;
-        if (typeof(T) == typeof(T6)) return 6;
-        if (typeof(T) == typeof(T7)) return 7;
-        if (typeof(T) == typeof(T8)) return 8;
-        if (typeof(T) == typeof(T9)) return 9;
-        if (typeof(T) == typeof(T10)) return 10;
-        if (typeof(T) == typeof(T11)) return 11;
-        if (typeof(T) == typeof(T12)) return 12;
-        if (typeof(T) == typeof(T13)) return 13;
-        if (typeof(T) == typeof(T14)) return 14;
-        if (typeof(T) == typeof(T15)) return 15;
-        if (typeof(T) == typeof(T16)) return 16;
-        if (typeof(T) == typeof(T17)) return 17;
+        if (TryIndexOf<T>(out var index)) return index;
         throw new KeyNotFoundException($"Type {typeof(T).Name} is not in this TypeMap.");
     }
 
@@ -1514,25 +1361,7 @@ public sealed class
 
     public int IndexOf<T>()
     {
-        if (typeof(T) == typeof(T0)) return 0;
-        if (typeof(T) == typeof(T1)) return 1;
-        if (typeof(T) == typeof(T2)) return 2;
-        if (typeof(T) == typeof(T3)) return 3;
-        if (typeof(T) == typeof(T4)) return 4;
-        if (typeof(T) == typeof(T5)) return 5;
-        if (typeof(T) == typeof(T6)) return 6;
-        if (typeof(T) == typeof(T7)) return 7;
-        if (typeof(T) == typeof(T8)) return 8;
-        if (typeof(T) == typeof(T9)) return 9;
-        if (typeof(T) == typeof(T10)) return 10;
-        if (typeof(T) == typeof(T11)) return 11;
-        if (typeof(T) == typeof(T12)) return 12;
-        if (typeof(T) == typeof(T13)) return 13;
-        if (typeof(T) == typeof(T14)) return 14;
-        if (typeof(T) == typeof(T15)) return 15;
-        if (typeof(T) == typeof(T16)) return 16;
-        if (typeof(T) == typeof(T17)) return 17;
-        if (typeof(T) == typeof(T18)) return 18;
+        if (TryIndexOf<T>(out var index)) return index;
         throw new KeyNotFoundException($"Type {typeof(T).Name} is not in this TypeMap.");
     }
 
@@ -1665,26 +1494,7 @@ public sealed class TypeMap<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T1
 
     public int IndexOf<T>()
     {
-        if (typeof(T) == typeof(T0)) return 0;
-        if (typeof(T) == typeof(T1)) return 1;
-        if (typeof(T) == typeof(T2)) return 2;
-        if (typeof(T) == typeof(T3)) return 3;
-        if (typeof(T) == typeof(T4)) return 4;
-        if (typeof(T) == typeof(T5)) return 5;
-        if (typeof(T) == typeof(T6)) return 6;
-        if (typeof(T) == typeof(T7)) return 7;
-        if (typeof(T) == typeof(T8)) return 8;
-        if (typeof(T) == typeof(T9)) return 9;
-        if (typeof(T) == typeof(T10)) return 10;
-        if (typeof(T) == typeof(T11)) return 11;
-        if (typeof(T) == typeof(T12)) return 12;
-        if (typeof(T) == typeof(T13)) return 13;
-        if (typeof(T) == typeof(T14)) return 14;
-        if (typeof(T) == typeof(T15)) return 15;
-        if (typeof(T) == typeof(T16)) return 16;
-        if (typeof(T) == typeof(T17)) return 17;
-        if (typeof(T) == typeof(T18)) return 18;
-        if (typeof(T) == typeof(T19)) return 19;
+        if (TryIndexOf<T>(out var index)) return index;
         throw new KeyNotFoundException($"Type {typeof(T).Name} is not in this TypeMap.");
     }
 
@@ -1823,27 +1633,7 @@ public sealed class TypeMap<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T1
 
     public int IndexOf<T>()
     {
-        if (typeof(T) == typeof(T0)) return 0;
-        if (typeof(T) == typeof(T1)) return 1;
-        if (typeof(T) == typeof(T2)) return 2;
-        if (typeof(T) == typeof(T3)) return 3;
-        if (typeof(T) == typeof(T4)) return 4;
-        if (typeof(T) == typeof(T5)) return 5;
-        if (typeof(T) == typeof(T6)) return 6;
-        if (typeof(T) == typeof(T7)) return 7;
-        if (typeof(T) == typeof(T8)) return 8;
-        if (typeof(T) == typeof(T9)) return 9;
-        if (typeof(T) == typeof(T10)) return 10;
-        if (typeof(T) == typeof(T11)) return 11;
-        if (typeof(T) == typeof(T12)) return 12;
-        if (typeof(T) == typeof(T13)) return 13;
-        if (typeof(T) == typeof(T14)) return 14;
-        if (typeof(T) == typeof(T15)) return 15;
-        if (typeof(T) == typeof(T16)) return 16;
-        if (typeof(T) == typeof(T17)) return 17;
-        if (typeof(T) == typeof(T18)) return 18;
-        if (typeof(T) == typeof(T19)) return 19;
-        if (typeof(T) == typeof(T20)) return 20;
+        if (TryIndexOf<T>(out var index)) return index;
         throw new KeyNotFoundException($"Type {typeof(T).Name} is not in this TypeMap.");
     }
 
@@ -1988,28 +1778,7 @@ public sealed class TypeMap<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T1
 
     public int IndexOf<T>()
     {
-        if (typeof(T) == typeof(T0)) return 0;
-        if (typeof(T) == typeof(T1)) return 1;
-        if (typeof(T) == typeof(T2)) return 2;
-        if (typeof(T) == typeof(T3)) return 3;
-        if (typeof(T) == typeof(T4)) return 4;
-        if (typeof(T) == typeof(T5)) return 5;
-        if (typeof(T) == typeof(T6)) return 6;
-        if (typeof(T) == typeof(T7)) return 7;
-        if (typeof(T) == typeof(T8)) return 8;
-        if (typeof(T) == typeof(T9)) return 9;
-        if (typeof(T) == typeof(T10)) return 10;
-        if (typeof(T) == typeof(T11)) return 11;
-        if (typeof(T) == typeof(T12)) return 12;
-        if (typeof(T) == typeof(T13)) return 13;
-        if (typeof(T) == typeof(T14)) return 14;
-        if (typeof(T) == typeof(T15)) return 15;
-        if (typeof(T) == typeof(T16)) return 16;
-        if (typeof(T) == typeof(T17)) return 17;
-        if (typeof(T) == typeof(T18)) return 18;
-        if (typeof(T) == typeof(T19)) return 19;
-        if (typeof(T) == typeof(T20)) return 20;
-        if (typeof(T) == typeof(T21)) return 21;
+        if (TryIndexOf<T>(out var index)) return index;
         throw new KeyNotFoundException($"Type {typeof(T).Name} is not in this TypeMap.");
     }
 
@@ -2160,29 +1929,7 @@ public sealed class TypeMap<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T1
 
     public int IndexOf<T>()
     {
-        if (typeof(T) == typeof(T0)) return 0;
-        if (typeof(T) == typeof(T1)) return 1;
-        if (typeof(T) == typeof(T2)) return 2;
-        if (typeof(T) == typeof(T3)) return 3;
-        if (typeof(T) == typeof(T4)) return 4;
-        if (typeof(T) == typeof(T5)) return 5;
-        if (typeof(T) == typeof(T6)) return 6;
-        if (typeof(T) == typeof(T7)) return 7;
-        if (typeof(T) == typeof(T8)) return 8;
-        if (typeof(T) == typeof(T9)) return 9;
-        if (typeof(T) == typeof(T10)) return 10;
-        if (typeof(T) == typeof(T11)) return 11;
-        if (typeof(T) == typeof(T12)) return 12;
-        if (typeof(T) == typeof(T13)) return 13;
-        if (typeof(T) == typeof(T14)) return 14;
-        if (typeof(T) == typeof(T15)) return 15;
-        if (typeof(T) == typeof(T16)) return 16;
-        if (typeof(T) == typeof(T17)) return 17;
-        if (typeof(T) == typeof(T18)) return 18;
-        if (typeof(T) == typeof(T19)) return 19;
-        if (typeof(T) == typeof(T20)) return 20;
-        if (typeof(T) == typeof(T21)) return 21;
-        if (typeof(T) == typeof(T22)) return 22;
+        if (TryIndexOf<T>(out var index)) return index;
         throw new KeyNotFoundException($"Type {typeof(T).Name} is not in this TypeMap.");
     }
 
@@ -2339,30 +2086,7 @@ public sealed class TypeMap<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T1
 
     public int IndexOf<T>()
     {
-        if (typeof(T) == typeof(T0)) return 0;
-        if (typeof(T) == typeof(T1)) return 1;
-        if (typeof(T) == typeof(T2)) return 2;
-        if (typeof(T) == typeof(T3)) return 3;
-        if (typeof(T) == typeof(T4)) return 4;
-        if (typeof(T) == typeof(T5)) return 5;
-        if (typeof(T) == typeof(T6)) return 6;
-        if (typeof(T) == typeof(T7)) return 7;
-        if (typeof(T) == typeof(T8)) return 8;
-        if (typeof(T) == typeof(T9)) return 9;
-        if (typeof(T) == typeof(T10)) return 10;
-        if (typeof(T) == typeof(T11)) return 11;
-        if (typeof(T) == typeof(T12)) return 12;
-        if (typeof(T) == typeof(T13)) return 13;
-        if (typeof(T) == typeof(T14)) return 14;
-        if (typeof(T) == typeof(T15)) return 15;
-        if (typeof(T) == typeof(T16)) return 16;
-        if (typeof(T) == typeof(T17)) return 17;
-        if (typeof(T) == typeof(T18)) return 18;
-        if (typeof(T) == typeof(T19)) return 19;
-        if (typeof(T) == typeof(T20)) return 20;
-        if (typeof(T) == typeof(T21)) return 21;
-        if (typeof(T) == typeof(T22)) return 22;
-        if (typeof(T) == typeof(T23)) return 23;
+        if (TryIndexOf<T>(out var index)) return index;
         throw new KeyNotFoundException($"Type {typeof(T).Name} is not in this TypeMap.");
     }
 
@@ -2525,31 +2249,7 @@ public sealed class TypeMap<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T1
 
     public int IndexOf<T>()
     {
-        if (typeof(T) == typeof(T0)) return 0;
-        if (typeof(T) == typeof(T1)) return 1;
-        if (typeof(T) == typeof(T2)) return 2;
-        if (typeof(T) == typeof(T3)) return 3;
-        if (typeof(T) == typeof(T4)) return 4;
-        if (typeof(T) == typeof(T5)) return 5;
-        if (typeof(T) == typeof(T6)) return 6;
-        if (typeof(T) == typeof(T7)) return 7;
-        if (typeof(T) == typeof(T8)) return 8;
-        if (typeof(T) == typeof(T9)) return 9;
-        if (typeof(T) == typeof(T10)) return 10;
-        if (typeof(T) == typeof(T11)) return 11;
-        if (typeof(T) == typeof(T12)) return 12;
-        if (typeof(T) == typeof(T13)) return 13;
-        if (typeof(T) == typeof(T14)) return 14;
-        if (typeof(T) == typeof(T15)) return 15;
-        if (typeof(T) == typeof(T16)) return 16;
-        if (typeof(T) == typeof(T17)) return 17;
-        if (typeof(T) == typeof(T18)) return 18;
-        if (typeof(T) == typeof(T19)) return 19;
-        if (typeof(T) == typeof(T20)) return 20;
-        if (typeof(T) == typeof(T21)) return 21;
-        if (typeof(T) == typeof(T22)) return 22;
-        if (typeof(T) == typeof(T23)) return 23;
-        if (typeof(T) == typeof(T24)) return 24;
+        if (TryIndexOf<T>(out var index)) return index;
         throw new KeyNotFoundException($"Type {typeof(T).Name} is not in this TypeMap.");
     }
 
@@ -3156,10 +2856,23 @@ public static class Utils
 
     #region Set Operations (Sorted Lists)
 
+    [System.Diagnostics.Conditional("DEBUG")]
+    private static void AssertSorted(List<int> list, string paramName)
+    {
+        var span = CollectionsMarshal.AsSpan(list);
+        for (var i = 1; i < span.Length; i++)
+            if (span[i] < span[i - 1])
+                throw new ArgumentException(
+                    $"List is not sorted: value {span[i]} at index {i} is less than {span[i - 1]} at index {i - 1}.",
+                    paramName);
+    }
+
     public static List<int> UnionSorted(List<int> a, List<int> b)
     {
         ArgumentNullException.ThrowIfNull(a);
         ArgumentNullException.ThrowIfNull(b);
+        AssertSorted(a, nameof(a));
+        AssertSorted(b, nameof(b));
 
         var result = new List<int>(a.Count + b.Count);
         var aSpan = CollectionsMarshal.AsSpan(a);
@@ -3190,6 +2903,8 @@ public static class Utils
     {
         ArgumentNullException.ThrowIfNull(a);
         ArgumentNullException.ThrowIfNull(b);
+        AssertSorted(a, nameof(a));
+        AssertSorted(b, nameof(b));
 
         var result = new List<int>(Math.Min(a.Count, b.Count));
         var aSpan = CollectionsMarshal.AsSpan(a);
@@ -3218,6 +2933,8 @@ public static class Utils
     {
         ArgumentNullException.ThrowIfNull(a);
         ArgumentNullException.ThrowIfNull(b);
+        AssertSorted(a, nameof(a));
+        AssertSorted(b, nameof(b));
 
         var result = new List<int>(a.Count);
         var aSpan = CollectionsMarshal.AsSpan(a);

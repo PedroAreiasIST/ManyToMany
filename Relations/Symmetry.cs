@@ -79,16 +79,14 @@ public sealed class Symmetry
                 "Permutation group must include the identity permutation [0, 1, 2, ..., n-1].",
                 nameof(permutations));
 
-        // Check for duplicate permutations
-        var uniquePerms = new HashSet<string>();
+        // Check for duplicate permutations using structural comparison (avoids string allocations)
+        var comparer = new PermutationComparer();
+        var uniquePerms = new HashSet<List<int>>(comparer);
         foreach (var perm in permutations)
-        {
-            var key = string.Join(",", perm);
-            if (!uniquePerms.Add(key))
+            if (!uniquePerms.Add(perm))
                 throw new ArgumentException(
-                    $"Permutation group contains duplicate: [{key}].",
+                    $"Permutation group contains duplicate: [{string.Join(",", perm)}].",
                     nameof(permutations));
-        }
 
         // DEFENSIVE COPY: Create deep copy to prevent external mutation
         // The caller could mutate their list after construction, corrupting canonicalization
@@ -482,7 +480,8 @@ public sealed class Symmetry
         if (n < 1)
             throw new ArgumentException("Node count must be at least 1.", nameof(n));
 
-        var seen = new HashSet<string>();
+        var comparer = new PermutationComparer();
+        var seen = new HashSet<List<int>>(comparer);
         var perms = new List<List<int>>();
 
         // Rotations
@@ -491,8 +490,7 @@ public sealed class Symmetry
             var perm = new List<int>(n);
             for (var i = 0; i < n; i++)
                 perm.Add((i + r) % n);
-            var key = string.Join(",", perm);
-            if (seen.Add(key))
+            if (seen.Add(perm))
                 perms.Add(perm);
         }
 
@@ -502,8 +500,7 @@ public sealed class Symmetry
             var perm = new List<int>(n);
             for (var i = 0; i < n; i++)
                 perm.Add((r - i + n) % n);
-            var key = string.Join(",", perm);
-            if (seen.Add(key))
+            if (seen.Add(perm))
                 perms.Add(perm);
         }
 
