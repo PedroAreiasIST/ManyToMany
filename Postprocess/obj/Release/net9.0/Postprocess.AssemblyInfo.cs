@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Postprocess")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+343816593cd564ffd373e1884519a36330962e87")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e76a2cdcd93cf8297df7d7de93290e986d726f8f")]
 [assembly: System.Reflection.AssemblyProductAttribute("Postprocess")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Postprocess")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
