@@ -1,6 +1,6 @@
 // Examples2DA.cs - Advanced 2D meshing examples with intricate geometries + Fracture Mechanics
 // Demonstrates: Complex boundaries, holes, wedges, TRI and QUAD elements, Crack insertion
-// Output: ALL examples save to GiD/CIMNE .msh format
+// Output: ALL examples save to GiD/CIMNE .msh format and Ensight 6.0 format
 // License: GPLv3
 //
 // PERFORMANCE: Fracture examples use REDUCED mesh density for speed:
@@ -15,7 +15,8 @@ namespace Numerical.Examples;
 ///     Advanced 2D meshing examples with intricate geometries + Fracture Mechanics.
 ///     Shows real-world complex shapes, holes, wedges, TRI and QUAD meshes, and crack insertion.
 ///     OUTPUT: ALL examples automatically save to GiD/CIMNE .msh format
-///     using SimplexRemesher.SaveGiD() for visualization in GiD (www.gidhome.com).
+///     using SimplexRemesher.SaveGiD() for visualization in GiD (www.gidhome.com),
+///     and to Ensight 6.0 format using EnsightWriter.SaveEnsight() for ParaView.
 ///     Files saved:
 ///     - Advanced Meshing (1-10): ex1-ex10 with _tri.msh and/or _quad.msh
 ///     - Fracture examples (11-20): anderson2005, griffith1921, etc. with _tri.msh
@@ -126,7 +127,11 @@ public static class Examples2DA
         // Save to GiD format
         SimplexRemesher.SaveGiD(meshQuad, coordsQuad, "01_ex1_circular_hole_quad.msh");
         SimplexRemesher.SaveGiD(meshTri, coordsTri, "01_ex1_circular_hole_tri.msh");
-        Console.WriteLine("  ✓ Saved to GiD .msh format");
+
+        // Save to Ensight format
+        EnsightWriter.SaveEnsight(meshQuad, coordsQuad, "01_ex1_circular_hole_quad");
+        EnsightWriter.SaveEnsight(meshTri, coordsTri, "01_ex1_circular_hole_tri");
+        Console.WriteLine("  ✓ Saved to GiD and Ensight formats");
         Console.WriteLine();
     }
 
@@ -175,7 +180,10 @@ public static class Examples2DA
 
         SimplexRemesher.SaveGiD(meshTri, coordsTri, "02_ex2_lshape_tri.msh");
         SimplexRemesher.SaveGiD(meshQuad, coordsQuad, "02_ex2_lshape_quad.msh");
-        Console.WriteLine("  ✓ Saved to GiD .msh format");
+
+        EnsightWriter.SaveEnsight(meshTri, coordsTri, "02_ex2_lshape_tri");
+        EnsightWriter.SaveEnsight(meshQuad, coordsQuad, "02_ex2_lshape_quad");
+        Console.WriteLine("  ✓ Saved to GiD and Ensight formats");
         Console.WriteLine();
     }
 
@@ -212,7 +220,10 @@ public static class Examples2DA
 
         SimplexRemesher.SaveGiD(meshTri, coordsTri, "03_ex3_annulus_tri.msh");
         SimplexRemesher.SaveGiD(meshQuad, coordsQuad, "03_ex3_annulus_quad.msh");
-        Console.WriteLine("  ✓ Saved to GiD .msh format");
+
+        EnsightWriter.SaveEnsight(meshTri, coordsTri, "03_ex3_annulus_tri");
+        EnsightWriter.SaveEnsight(meshQuad, coordsQuad, "03_ex3_annulus_quad");
+        Console.WriteLine("  ✓ Saved to GiD and Ensight formats");
         Console.WriteLine();
     }
 
@@ -258,7 +269,10 @@ public static class Examples2DA
 
         SimplexRemesher.SaveGiD(meshTri, coordsTri, "04_ex4_wedge_tri.msh");
         SimplexRemesher.SaveGiD(meshQuad, coordsQuad, "04_ex4_wedge_quad.msh");
-        Console.WriteLine("  ✓ Saved to GiD .msh format");
+
+        EnsightWriter.SaveEnsight(meshTri, coordsTri, "04_ex4_wedge_tri");
+        EnsightWriter.SaveEnsight(meshQuad, coordsQuad, "04_ex4_wedge_quad");
+        Console.WriteLine("  ✓ Saved to GiD and Ensight formats");
         Console.WriteLine();
     }
 
@@ -299,7 +313,10 @@ public static class Examples2DA
 
         SimplexRemesher.SaveGiD(meshTri, coordsTri, "05_ex5_multiple_holes_tri.msh");
         SimplexRemesher.SaveGiD(meshQuad, coordsQuad, "05_ex5_multiple_holes_quad.msh");
-        Console.WriteLine("  ✓ Saved to GiD .msh format");
+
+        EnsightWriter.SaveEnsight(meshTri, coordsTri, "05_ex5_multiple_holes_tri");
+        EnsightWriter.SaveEnsight(meshQuad, coordsQuad, "05_ex5_multiple_holes_quad");
+        Console.WriteLine("  ✓ Saved to GiD and Ensight formats");
         Console.WriteLine();
     }
 
@@ -340,7 +357,10 @@ public static class Examples2DA
 
         SimplexRemesher.SaveGiD(meshTri, coordsTri, "06_ex6_star_tri.msh");
         SimplexRemesher.SaveGiD(meshQuad, coordsQuad, "06_ex6_star_quad.msh");
-        Console.WriteLine("  ✓ Saved to GiD .msh format");
+
+        EnsightWriter.SaveEnsight(meshTri, coordsTri, "06_ex6_star_tri");
+        EnsightWriter.SaveEnsight(meshQuad, coordsQuad, "06_ex6_star_quad");
+        Console.WriteLine("  ✓ Saved to GiD and Ensight formats");
         Console.WriteLine();
     }
 
@@ -389,7 +409,10 @@ public static class Examples2DA
         // Save both for visual comparison
         SimplexRemesher.SaveGiD(meshTri, coordsTri, "07_ex7_comparison_tri.msh");
         SimplexRemesher.SaveGiD(meshQuad, coordsQuad, "07_ex7_comparison_quad.msh");
-        Console.WriteLine("  ✓ Saved both meshes for comparison");
+
+        EnsightWriter.SaveEnsight(meshTri, coordsTri, "07_ex7_comparison_tri");
+        EnsightWriter.SaveEnsight(meshQuad, coordsQuad, "07_ex7_comparison_quad");
+        Console.WriteLine("  ✓ Saved both meshes for comparison (GiD + Ensight)");
         Console.WriteLine();
     }
 
@@ -453,9 +476,10 @@ public static class Examples2DA
         var stats = MeshGeometry.ComputeQualityStatistics(crackedMesh, crackedCoords);
         Console.WriteLine($"  Final quality: min angle = {stats.MinTriangleAngleDegrees:F1}°");
 
-        // Save cracked mesh to GiD
+        // Save cracked mesh to GiD and Ensight
         SimplexRemesher.SaveGiD(crackedMesh, crackedCoords, "08_ex8_cracked_plate.msh");
-        Console.WriteLine("  ✓ Saved cracked mesh to GiD .msh format");
+        EnsightWriter.SaveEnsight(crackedMesh, crackedCoords, "08_ex8_cracked_plate");
+        Console.WriteLine("  ✓ Saved cracked mesh to GiD and Ensight formats");
         Console.WriteLine();
     }
 
@@ -538,7 +562,10 @@ public static class Examples2DA
 
         SimplexRemesher.SaveGiD(meshTri, coordsTri, "09_ex9_gear_tri.msh");
         SimplexRemesher.SaveGiD(meshQuad, coordsQuad, "09_ex9_gear_quad.msh");
-        Console.WriteLine("  ✓ Saved to GiD .msh format");
+
+        EnsightWriter.SaveEnsight(meshTri, coordsTri, "09_ex9_gear_tri");
+        EnsightWriter.SaveEnsight(meshQuad, coordsQuad, "09_ex9_gear_quad");
+        Console.WriteLine("  ✓ Saved to GiD and Ensight formats");
         Console.WriteLine();
     }
 
@@ -623,7 +650,10 @@ public static class Examples2DA
 
         SimplexRemesher.SaveGiD(meshTri, coordsTri, "10_ex10_bracket_tri.msh");
         SimplexRemesher.SaveGiD(meshQuad, coordsQuad, "10_ex10_bracket_quad.msh");
-        Console.WriteLine("  ✓ Saved to GiD .msh format");
+
+        EnsightWriter.SaveEnsight(meshTri, coordsTri, "10_ex10_bracket_tri");
+        EnsightWriter.SaveEnsight(meshQuad, coordsQuad, "10_ex10_bracket_quad");
+        Console.WriteLine("  ✓ Saved to GiD and Ensight formats");
         Console.WriteLine();
     }
 
