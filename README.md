@@ -674,6 +674,650 @@ Extended documentation is available in the `Docs/` directory:
 
 ---
 
+## Public API Reference
+
+This section lists every public type in each module. With autocomplete, these are all the entry points a user needs.
+
+---
+
+### Relations
+
+#### Core relationship types
+
+| Type | Kind | Description |
+|---|---|---|
+| `O2M` | `sealed class` | One-to-many sparse adjacency list. Implements `IComparable<O2M>`, `IEquatable<O2M>`, `ICloneable`. Internal storage is `List<List<int>>`; parallel cloning via `GC.AllocateUninitializedArray` above a configurable threshold. |
+| `M2M` | `sealed class` | Thread-safe many-to-many wrapping `O2M` with `ReaderWriterLockSlim`. Adds transpose caching, O(1)-per-row position lookup, and set operations (intersection, union, difference). Implements `IComparable<M2M>`, `IEquatable<M2M>`, `IDisposable`. |
+| `MM2M` | `sealed class` | Block-structured multi-type many-to-many. Stores a `[typeCount × typeCount]` array of `M2M` blocks indexed by `(type_i, type_j)`. Implements `IDisposable`. |
+
+#### `Topology<TTypes>` — primary user-facing API
+
+```csharp
+public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
+```
+
+The main container combining `MM2M` adjacency with per-entity attribute dictionaries under a single `ReaderWriterLockSlim`.
+
+**Entity management**
+
+| Method | Description |
+|---|---|
+| `int Add<TEntity>()` | Add an entity of the given type; returns its index. |
+| `int Add<TElement, TNode>(params int[] nodes)` | Add an element connected to node indices; returns element index. |
+| `void Remove<TEntity>(int index)` | Remove an entity and all its adjacency entries. |
+| `int Count<TEntity>()` | Number of entities of the given type. |
+
+**Attribute storage**
+
+| Method | Description |
+|---|---|
+| `void Set<TEntity, TData>(int index, TData value)` | Attach attribute data to an entity. |
+| `TData Get<TEntity, TData>(int index)` | Retrieve attribute data from an entity. |
+| `bool TryGet<TEntity, TData>(int index, out TData value)` | Non-throwing attribute retrieval. |
+| `void RemoveData<TEntity, TData>(int index)` | Remove a specific attribute from an entity. |
+
+**Adjacency queries**
+
+| Method | Description |
+|---|---|
+| `IReadOnlyList<int> GetConnected<TFrom, TTo>(int index)` | Get all entities of type `TTo` connected to entity `index` of type `TFrom`. |
+| `bool AreConnected<TA, TB>(int a, int b)` | Test whether two entities are directly connected. |
+| `int GetPosition<TFrom, TTo>(int from, int to)` | Index of `to` in the adjacency list of `from`. |
+
+**Sub-entity discovery**
+
+| Method | Description |
+|---|---|
+| `void DiscoverSubEntities<TElement, TSubEntity, TNode>(SubEntityDefinition def)` | Enumerate and register all sub-entities (faces, edges) implied by element connectivity. |
+| `void WithSymmetry<TEntity>(Symmetry symmetry)` | Register a symmetry group so that canonically equivalent entities are deduplicated. |
+
+**Graph algorithms**
+
+| Method | Description |
+|---|---|
+| `List<int> TopologicalOrder<TNode, TElement>()` | Kahn's algorithm topological sort over the entity adjacency DAG. |
+| `int[] ColorEntities<TEntity>()` | Greedy graph coloring; returns color index per entity (useful for parallel assembly scheduling). |
+| `List<int> BFS<TEntity>(int start)` | Breadth-first search from a starting entity. |
+| `List<int> DFS<TEntity>(int start)` | Depth-first search from a starting entity. |
+
+**Serialization**
+
+| Method | Description |
+|---|---|
+| `void Serialize(BinaryWriter writer)` | Binary serialization for checkpointing. |
+| `static Topology<TTypes> Deserialize(BinaryReader reader)` | Reconstruct from binary data. |
+| `TopologyDto ToDto()` | Serialize to a JSON-friendly DTO. |
+| `static Topology<TTypes> FromDto(TopologyDto dto)` | Reconstruct from a DTO. |
+| `ConnectivityStatistics GetStatistics()` | Summary of entity counts and adjacency density. |
+| `ValidationResult Validate()` | Consistency checks on the adjacency structure. |
+
+**Iterators / circulators**
+
+| Type | Description |
+|---|---|
+| `SmartEntity<TEntity>` | `readonly record struct` pairing a `Topology` reference with an entity index; supports dot-access to methods. |
+| `EntityCirculator<TEntity>` | `IEnumerable<int>` over all entities of one type. |
+| `IncidentCirculator<TEntity, TIncident>` | `IEnumerable<int>` over entities incident to a given entity. |
+| `BoundaryCirculator<TElement, TNode>` | `IEnumerable<int>` over boundary nodes of an element. |
+
+**Nested result types**
+
+| Type | Kind | Description |
+|---|---|---|
+| `ConnectivityStatistics` | `sealed class` | Entity counts, average/max adjacency degree. |
+| `ValidationResult` | `readonly struct` | Pass/fail + error description from `Validate()`. |
+| `SubEntityBoundaryResult` | `readonly struct` | Output of boundary sub-entity queries. |
+| `ColoringStatistics` | `readonly struct` | Number of colors used, distribution per color. |
+| `DualGraph` | `sealed class` | Element-to-element adjacency graph derived from shared nodes. |
+| `ElementStatistics` | `readonly struct` | Per-element quality and connectivity metrics. |
+
+#### `ReadOnlyTopology<TTypes>`
+
+```csharp
+public sealed class ReadOnlyTopology<TTypes> where TTypes : ITypeMap, new()
+```
+
+Read-only projection of a `Topology<TTypes>`. Exposes the same query methods but disallows mutation. Useful for passing topology to solvers that must not modify connectivity.
+
+#### `Symmetry`
+
+```csharp
+public sealed class Symmetry
+```
+
+Encodes a permutation symmetry group for an element type. Used with `Topology.WithSymmetry<TEntity>()` to canonicalize and deduplicate entries (e.g., undirected edges, symmetric faces).
+
+| Factory | Description |
+|---|---|
+| `Symmetry.Full(int n)` | Full symmetric group S_n (all n! permutations). |
+| `Symmetry.Cyclic(int n)` | Cyclic group C_n (rotations only). |
+| `Symmetry.FromPermutations(IEnumerable<int[]> perms)` | Custom permutation set. |
+
+#### `SubEntityDefinition`
+
+```csharp
+public readonly struct SubEntityDefinition
+```
+
+Describes which local node indices form each sub-entity (face, edge) of a parent element.
+
+| Factory | Description |
+|---|---|
+| `SubEntityDefinition.FromFaces(params (int, int, int)[] faces)` | Triangular faces. |
+| `SubEntityDefinition.FromEdges(params (int, int)[] edges)` | Edges. |
+
+#### `ResultOrder` enum
+
+Controls the ordering of results returned by graph algorithms: `Default`, `Ascending`, `Descending`.
+
+#### Type-mapping infrastructure
+
+`ITypeMap` is the compile-time interface that maps C# types to integer indices within a `Topology`. Users implement it by using one of the pre-built `TypeMap<T0, …, Tn>` generic classes (provided for 2 up to 22 type arguments):
+
+```csharp
+// Example: 3-type map
+TypeMap<Node, Edge, Tri3>  // Node→0, Edge→1, Tri3→2
+```
+
+#### Serialization DTOs
+
+Plain data objects used for JSON export/import of topology state:
+
+`TopologyDto`, `AdjacencyDto`, `DataListDto`, `SymmetryDto`, `CanonicalIndexDto`, `CanonicalEntryDto`.
+
+#### Utility types
+
+| Type | Kind | Description |
+|---|---|---|
+| `Topology` (non-generic) | `static class` | Factory and extension methods for building topologies from common patterns. |
+| `TopologyStats` | `sealed class` | Aggregate statistics snapshot. |
+| `Utils` | `static class` | Shared utility methods (sorting, span helpers, etc.). |
+| `ParallelConfig` | `static class` | Global parallelization thresholds (`ProcessorCount`, `DefaultParallelThreshold`). |
+| `ListComparer<T>` | `sealed class` | `IComparer<List<T>>` for lexicographic list ordering. |
+| `ListEqualityComparer<T>` | `sealed class` | `IEqualityComparer<List<T>>` for set operations on adjacency lists. |
+
+---
+
+### Matrices
+
+#### `Matrix` — dense matrix
+
+```csharp
+public sealed class Matrix : IEquatable<Matrix>, IFormattable, ICloneable
+```
+
+Column-major (`_data[col * RowCount + row]`) dense matrix with SIMD-accelerated arithmetic (AVX2/AVX-512) and a full decomposition suite.
+
+**Factory methods**
+
+| Method | Description |
+|---|---|
+| `Matrix.Identity(int n)` | n×n identity. |
+| `Matrix.Zeros(int rows, int cols)` | Zero matrix. |
+| `Matrix.Ones(int rows, int cols)` | All-ones matrix. |
+| `Matrix.Diagonal(params double[] values)` | Diagonal matrix from values. |
+| `Matrix.Random(int rows, int cols, int? seed)` | Uniform random entries. |
+| `Matrix.RandomNormal(int rows, int cols, double mean, double stdDev, int? seed)` | Gaussian random entries. |
+| `Matrix.MatrixSquareRoot(Matrix A)` | Principal square root via Schur decomposition. |
+| `Matrix.MatrixExponential(Matrix A, int order)` | Matrix exponential via Padé approximant. |
+
+**Decompositions**
+
+| Method | Returns | Algorithm |
+|---|---|---|
+| `ComputeLU()` | `LUDecomposition` | Rook pivoting (better stability than partial for near-singular). |
+| `ComputeQR()` | `QRDecomposition` | Householder reflections. |
+| `ComputeEigenvalues()` | `EigenDecomposition` | Symmetric QR + Householder tridiagonalization (symmetric matrices). |
+| `ComputeSVD(int? seed)` | `SVDDecomposition` | One-sided Jacobi (any real matrix). |
+
+**Key instance methods**
+
+| Method | Description |
+|---|---|
+| `Transpose()` / `TransposeInPlace()` | Matrix transpose. |
+| `Inverse()` | Full matrix inverse via LU. |
+| `Determinant()` | Scalar determinant. |
+| `Solve(Vector b)` | Solve Ax = b (LU). |
+| `SolveMultiple(Matrix B)` | Solve AX = B. |
+| `SolveLeastSquares(Vector b)` | Minimum-norm least-squares via QR. |
+| `Rank(double tol)` | Numerical rank. |
+| `ConditionNumber()` | 2-norm condition number. |
+| `FrobeniusNorm()` / `OneNorm()` / `InfinityNorm()` | Matrix norms. |
+| `IsSymmetric()` / `IsDiagonal()` / `IsUpperTriangular()` / `IsLowerTriangular()` | Structure predicates. |
+| `GetRow(int)` / `GetColumn(int)` / `GetSubMatrix(...)` | Slicing. |
+| `HorizontalConcat(Matrix)` / `VerticalConcat(Matrix)` | Augmentation. |
+| `KroneckerProduct(Matrix)` | Kronecker product. |
+| `PseudoInverse(double tol)` | Moore-Penrose pseudoinverse via SVD. |
+| `GetNullSpace()` / `GetRowSpace()` / `GetImageSpace()` | Fundamental subspaces. |
+| `ColumnMeans()` / `RowMeans()` / `Covariance()` / `Correlation()` | Statistics. |
+| `Hadamard(Matrix)` | Element-wise product. |
+| `Apply(Func<double,double>)` / `Map(Func<int,int,double,double>)` | Element-wise transforms. |
+| `static Multiply(A, B)` / `MultiplyAtB(A,B)` / `MultiplyABt(A,B)` / `MultiplyAtBt(A,B)` | Named multiply variants (SIMD-accelerated). |
+
+**Operators:** `+`, `-`, `*` (matrix-matrix and scalar), unary `-`, `==`, `!=`, implicit/explicit casts to/from `Vector`.
+
+#### `Vector`
+
+```csharp
+public sealed class Vector : IEquatable<Vector>, IFormattable, ICloneable
+```
+
+Dense vector companion to `Matrix`.
+
+| Method | Description |
+|---|---|
+| `Vector.Zeros(int n)` / `Vector.Ones(int n)` / `Vector.Random(int n, int? seed)` | Factory methods. |
+| `Dot(Vector)` | Inner product. |
+| `Norm()` / `Norm1()` / `NormInf()` | Vector norms. |
+| `Normalize()` | Unit vector. |
+| `Cross(Vector)` | 3D cross product. |
+| `OuterProduct(Vector)` | Returns `Matrix`. |
+| `ProjectOnto(Vector)` | Orthogonal projection. |
+| `AngleTo(Vector)` / `DistanceTo(Vector)` | Geometric helpers. |
+| `ElementwiseMultiply(Vector)` / `ElementwiseDivide(Vector)` | Component-wise ops. |
+| `Slice(int start, int length)` | Sub-vector. |
+| `Map(Func<double,double>)` | Element-wise transform. |
+| `Sum()` / `Mean()` / `Max()` / `Min()` / `ArgMax()` / `ArgMin()` | Reductions. |
+
+#### Decomposition result types
+
+| Type | Key members |
+|---|---|
+| `LUDecomposition` | `Solve(Vector b)`, `Determinant()`, `ConditionNumber()` |
+| `QRDecomposition` | `Solve(Vector b)`, `Rank(double tol)` |
+| `EigenDecomposition` | `Eigenvalues` (`double[]`), `Eigenvectors` (`Matrix`) |
+| `SVDDecomposition` | `U`, `S`, `Vt` (`Matrix`); `Rank(double tol)`, `ConditionNumber()` |
+
+#### `CSR` — compressed sparse row
+
+```csharp
+public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
+```
+
+Production-grade sparse matrix. Automatically selects the best available backend: NVIDIA cuSPARSE (GPU), Intel MKL PARDISO, AVX2 SpMV, parallel SpMV, or sequential fallback.
+
+Key methods: `Multiply(double[] x, double[] y)` (SpMV), `Solve(double[] rhs)`, `Clone()`, `ToArray()`, plus constants `MIN_ROWS_FOR_PARALLEL`, `MIN_ROWS_FOR_SIMD`, `MIN_ROWS_FOR_GPU`, `MIN_NNZ_FOR_GPU`, `DEFAULT_TOLERANCE`.
+
+#### `CSRIterativeSolvers`
+
+```csharp
+public static class CSRIterativeSolvers
+```
+
+| Method | Algorithm |
+|---|---|
+| `BiCGSTAB(CSR A, double[] b, ...)` | Bi-Conjugate Gradient Stabilized — general unsymmetric systems. |
+| `GMRES(CSR A, double[] b, ...)` | Generalized Minimum Residual with restarts. |
+
+Both return a `SolverResult` record.
+
+#### `SolverResult` / `MatrixStatistics`
+
+```csharp
+public record SolverResult(double[] Solution, int Iterations, double ResidualNorm, bool Converged);
+public record MatrixStatistics(int Rows, int Columns, long NonZeroCount, double SparsityRatio, ...);
+```
+
+#### `SolverException`
+
+```csharp
+public class SolverException : Exception
+```
+
+Thrown when a solver fails to converge or encounters a singular system.
+
+#### `CliqueSystem` — finite element assembly
+
+```csharp
+public sealed class CliqueSystem : IDisposable
+```
+
+High-performance parallel FE assembly using Gustavson's algorithm for symbolic factorization and lock-striped (4096 stripes) numerical assembly. Supports problems exceeding 10M DOFs via 256 MB chunked storage.
+
+**Lifecycle**
+
+| Step | Method | Description |
+|---|---|---|
+| 1 | `CliqueSystem(int numElements, bool enableGpu = false)` | Constructor. |
+| 2a | `SetElementSize(int e, int numDofs)` | Declare per-element DOF count before building structure. |
+| 2b | `SetElementConnectivity(int e, int[] globalDofs)` | Assign global DOF indices to element `e`. |
+| 2c | `BuildSparsityPattern()` | Symbolic phase — computes the CSR sparsity pattern. |
+| 3 | `AddElement(int e, double[] force, double[] stiffness)` | Accumulate element matrices (thread-safe, call from `Parallel.For`). |
+| 4 | `Assemble()` | Finalize global matrix and force vector. |
+| 5 | `Solve()` | Returns `double[]` displacement vector. |
+| 6 | `Reset()` | Clear values, preserve sparsity pattern for next load step. |
+
+**Other methods**
+
+| Method | Description |
+|---|---|
+| `static CliqueSystem FromTopology<TTypes,TElement,TNode>(...)` | Construct directly from a `Topology` instance. |
+| `GetMatrix()` | Returns assembled `CSR`. |
+| `GetForceVector()` | Returns assembled `double[]` RHS. |
+| `GetStatistics()` | Returns `AssemblyStatistics`. |
+| `GetSystemInfo()` | Human-readable summary string. |
+
+#### `AssemblyStatistics`
+
+```csharp
+public sealed class AssemblyStatistics
+```
+
+Carries `TotalDofs`, `NonZeroCount`, `SparsityRatio`, and timing fields populated after `Assemble()`.
+
+#### `DiscreteLinearSystem`
+
+```csharp
+public class DiscreteLinearSystem : IDisposable
+```
+
+Higher-level wrapper that holds an assembled `CSR` system and exposes `Solve(double[,] result)`, `BuildSystemValues()`, `Reset()`, and boundary-condition application. Useful when DOF numbering follows node-major layout rather than pure DOF indices.
+
+#### Native library helpers
+
+| Type | Kind | Description |
+|---|---|---|
+| `INativeLibraryConfig` | `interface` | Contract for specifying custom search paths for MKL/CUDA. |
+| `NativeLibraryConfig` | `sealed class` | Default implementation of `INativeLibraryConfig`. |
+| `LibraryStatus` | `class` | Reports load status, version, and path for one native library. |
+| `LibraryAvailability` | `static class` | `IsMklAvailable`, `IsCudaAvailable`, `GetMklStatus()`, etc. |
+| `NativeLibraryStatus` | `static class` | Runtime summary of all discovered accelerators. |
+| `NuGetLibraryChecker` | `static class` | Detects NuGet-distributed native packages (e.g., `MathNet.Numerics.MKL`). |
+| `RobustNativeLibraryLoader` | `static class` | Cross-platform `LoadLibrary`/`dlopen` wrapper with fallback search. |
+| `SparseBackendFactory` | `static class` | Selects the optimal sparse backend given problem size. |
+| `HybridScheduler` | `sealed class` | Runtime dispatcher between CPU and GPU backends. Exposes `BackendType` and `OperationType` enums. |
+
+---
+
+### Meshing
+
+#### Element-type marker structs
+
+Zero-size `readonly struct` types used exclusively as generic type arguments in `Topology<TTypes>` and `SimplexMesh`:
+
+| Type | Dimension | Nodes |
+|---|---|---|
+| `Node` | 0D | 1 — mesh vertex |
+| `Edge` | 1D | 2 — topological edge (discovered automatically) |
+| `Point` | 0D | 1 — single-node element |
+| `Bar2` | 1D | 2 — line segment |
+| `Tri3` | 2D | 3 — linear triangle |
+| `Quad4` | 2D | 4 — bilinear quadrilateral |
+| `Tet4` | 3D | 4 — linear tetrahedron |
+
+#### `ParentNodes` / `OriginalElement`
+
+```csharp
+public readonly record struct ParentNodes(int Parent1, int Parent2);
+public readonly record struct OriginalElement(int Index);
+```
+
+Attribute types attached to nodes/elements during refinement. `ParentNodes` stores the two parent node indices of a midpoint node; `OriginalElement` stores the pre-refinement element index.
+
+#### `SimplexMesh`
+
+```csharp
+public sealed class SimplexMesh : Topology<TypeMap<Node, Edge, Point, Bar2, Tri3, Quad4, Tet4>>
+```
+
+The main mesh container. Inherits all `Topology<TTypes>` methods and adds mesh-specific helpers:
+
+| Method | Description |
+|---|---|
+| `AddNode(int parentIndex)` | Add a vertex node; sets `ParentNodes` to itself. |
+| `AddMidpointNode(int p1, int p2)` | Add a refinement midpoint; records both parents. |
+| `AddTriangle(int n0, int n1, int n2)` | Add a `Tri3` element. |
+| `AddQuad(int n0, int n1, int n2, int n3)` | Add a `Quad4` element. |
+| `AddTetrahedron(int n0, int n1, int n2, int n3)` | Add a `Tet4` element. |
+| `AddBar(int n0, int n1)` | Add a `Bar2` element. |
+
+#### `MeshConstants`
+
+```csharp
+public static class MeshConstants
+```
+
+Shared numerical tolerances: `Epsilon` (1e-10), `DegenerateAreaTolerance` (1e-14), `DegenerateVolumeTolerance` (1e-15), `NodeMergeTolerance` (1e-12), `GridPerturbationFactor` (0.15), `HexRowSpacing` (√3/2).
+
+#### `FiniteElementTopologies`
+
+```csharp
+public static class FiniteElementTopologies
+```
+
+Pre-built `SubEntityDefinition` instances for standard element types (e.g., `Tri3Edges`, `Tet4Faces`, `Tet4Edges`). Pass directly to `SimplexMesh.DiscoverSubEntities<...>()`.
+
+#### `SimplexRemesher`
+
+```csharp
+public static class SimplexRemesher
+```
+
+Structured mesh generators, conforming bisection refinement, and multi-format I/O.
+
+**Mesh generation**
+
+| Method | Description |
+|---|---|
+| `CreateRectangularMesh(nx, ny, xMin, xMax, yMin, yMax)` | `2·nx·ny` triangles over a rectangle; returns `(SimplexMesh mesh, double[,] coords)`. |
+| `CreateBoxMesh(nx, ny, nz, xMin, xMax, yMin, yMax, zMin, zMax)` | `6·nx·ny·nz` tetrahedra over a box; returns `(SimplexMesh mesh, double[,] coords)`. |
+
+**Refinement**
+
+| Method | Description |
+|---|---|
+| `InterpolateCoordinates(SimplexMesh refined, double[,] originalCoords)` | Transfer coordinate array to a refined mesh using `ParentNodes`. |
+| `DiscoverEdges(SimplexMesh mesh)` | Populate all `Edge` entities from existing elements. |
+
+**File I/O**
+
+| Method | Format |
+|---|---|
+| `SaveMSH(mesh, coords, path)` | Gmsh v2 `.msh` |
+| `SaveMSHWithCrackGroups(mesh, coords, path, ...)` | Gmsh v2 with named crack groups |
+| `SaveASCII(mesh, coords, path)` | Plain text |
+| `SaveGiD(mesh, coords, path)` | GiD/CIMNE `.msh` |
+| `FindBoundaryNodes(SimplexMesh)` | Returns `HashSet<int>` of boundary node indices (2D). |
+| `FindBoundaryNodes3D(SimplexMesh)` | Returns `HashSet<int>` of boundary node indices (3D). |
+| `PrintStats(SimplexMesh, string label)` | Print element/node counts to console. |
+
+**Smoothing**
+
+| Method | Description |
+|---|---|
+| `LaplacianSmoothing(mesh, coords, iterations)` | Classic Laplacian node relocation. |
+| `CVTSmoothing(mesh, coords, iterations)` | Centroidal Voronoi tessellation smoothing. |
+
+#### `MeshRefinement`
+
+```csharp
+public static class MeshRefinement
+```
+
+Adaptive refinement drivers that operate on an existing `SimplexMesh`:
+
+| Method | Description |
+|---|---|
+| `CheckJacobians(mesh, coords, label)` | Count and report negative-Jacobian elements; returns count. |
+| `CheckEdgeTopology(mesh, label)` | Validate edge-to-element connectivity. |
+| `FixNegativeJacobians(mesh, coords)` | Flip element connectivity to correct negative Jacobians. |
+| `InterpolateCoordinates(mesh, originalCoords)` | Coordinate transfer after refinement. |
+| `CorrectTetOrientations(mesh, coords)` | Re-orient all tetrahedra to positive Jacobian. |
+
+#### `MeshGeometry`
+
+```csharp
+public static class MeshGeometry
+```
+
+Geometric primitives for mesh construction and quality analysis.
+
+**Element geometry**
+
+| Method | Description |
+|---|---|
+| `ComputeTriangleJacobian(coords, n0, n1, n2)` | Signed 2× triangle area. |
+| `ComputeTriangleArea(coords, n0, n1, n2)` | Unsigned area. |
+| `ComputeTriangleAspectRatio(coords, n0, n1, n2)` | Circumradius / inradius ratio. |
+| `ComputeTriangleMinAngle(coords, n0, n1, n2)` | Minimum interior angle (radians). |
+| `IsTriangleCCW / IsTriangleDegenerate` | Orientation and degeneracy tests. |
+| `ComputeTetrahedronJacobian / Volume / AspectRatio` | 3D analogues. |
+| `IsTetrahedronCorrectOrientation / IsTetrahedronDegenerate` | 3D tests. |
+| `ComputeQuadArea / IsQuadCCW / IsQuadConvex` | Quadrilateral helpers. |
+| `EdgeLength2D / EdgeLength3D` | Edge length from coordinate array. |
+
+**Point/curve geometry**
+
+| Method | Description |
+|---|---|
+| `IsPointInPolygon(point, polygon)` | Ray-casting containment test (array or list overload). |
+| `IsPointOnPolygonBoundary(point, polygon, tol)` | Boundary proximity test. |
+| `DistancePointToLine / DistancePointToSegment` | Point-to-line/segment distances. |
+| `Distance2D / Distance3D` | Euclidean distances. |
+| `AngleBetweenVectors2D / SignedAngleBetweenVectors2D` | Vector angles. |
+| `CrossProduct2D / DotProduct2D` | 2D vector operations. |
+| `RefineBoundary(boundary, maxEdgeRatio, minEdgeCount)` | Refine a boundary polygon. |
+| `ResampleCurve / ResampleCurveArray` | Resample a curve to a target point count. |
+| `ComputeArcLength / ComputeAverageEdgeLength / ComputeSignedArea` | Curve metrics. |
+| `EnsureCCW / EnsureCW / ReverseBoundary / IsBoundaryCCW` | Boundary orientation. |
+
+**Mesh-level utilities**
+
+| Method | Description |
+|---|---|
+| `ValidateMeshOrientation(mesh, coords, ...)` | Count mis-oriented elements. |
+| `ComputeQualityStatistics(mesh, coords)` | Returns `MeshQualityStats`. |
+| `GenerateInteriorGrid(...)` | Generate a perturbed interior point cloud for mesh seeding. |
+| `PrintQualityReport / ExportToConsole` | Console diagnostics. |
+| `IdentifyBoundaryNodes(mesh)` | Alternative boundary-node finder. |
+
+**Delegate type**
+
+```csharp
+public delegate double SignedFieldFunction(double x, double y, double z);
+```
+
+Used throughout `MeshGeometry` and `SimplexRemesher` to define level-set functions for crack insertion.
+
+#### `MeshQualityStats`
+
+```csharp
+public class MeshQualityStats
+```
+
+Aggregated quality metrics returned by `MeshGeometry.ComputeQualityStatistics()`: min/max/mean aspect ratio, min/max/mean minimum angle, count of degenerate elements.
+
+---
+
+### Nonlinear
+
+#### `BatheTwoStageIntegrator`
+
+```csharp
+public sealed class BatheTwoStageIntegrator
+```
+
+Unconditionally stable implicit time integrator for second-order dynamical systems `M ü + C u̇ + f_int(u, t) = R_ext(t)`. Uses the Bathe two-stage Newmark method (Stage 1: β=¼, γ=½; Stage 2: β=4/9, γ=2/3).
+
+**Delegates (set before stepping)**
+
+```csharp
+public delegate void ResidualEvaluator(double t, double[] u, double[] v, double[] a, double[] residual);
+public delegate void EffectiveSystemSolver(double[] effectiveForce, double[] displacement);
+```
+
+**Configuration properties**
+
+| Property | Description |
+|---|---|
+| `int Dimension` | System size (number of DOFs). |
+| `double AbsTolerance` | Absolute residual convergence tolerance. |
+| `double RelTolerance` | Relative residual convergence tolerance. |
+| `int MaxNewtonIterations` | Maximum Newton-Raphson iterations per step. |
+| `double DivergenceThreshold` | Residual growth factor to flag divergence (default 1000). |
+| `double Time` | Current simulation time. |
+
+**Stepping**
+
+| Method | Description |
+|---|---|
+| `Step(double dt)` | Advance one time step of size `dt`. Solves initial static equilibrium on first call. |
+| `Step(double dt, int numSteps)` | Advance `numSteps` time steps. |
+
+**State access**
+
+| Method | Description |
+|---|---|
+| `GetDisplacement(Span<double> dest)` | Copy current displacement into `dest`. |
+| `GetVelocity(Span<double> dest)` | Copy current velocity. |
+| `GetAcceleration(Span<double> dest)` | Copy current acceleration. |
+| `GetState(Span<double> u, Span<double> v, Span<double> a)` | Copy all three in one call. |
+| `ResetPerformanceCounters()` | Zero cumulative counters. |
+
+**Nested types**
+
+| Type | Description |
+|---|---|
+| `ConvergenceInfo` | Per-step Newton data: `Iterations`, `InitialResidualNorm`, `FinalResidualNorm`, `MaxResidualNorm`, `Converged`. |
+| `PerformanceCounters` | Cumulative totals: total Newton iterations, total steps, average iterations/step. |
+
+#### `RootFinder`
+
+```csharp
+public static class RootFinder
+```
+
+Scalar root-finding with two overloads, both thread-safe (no static mutable state).
+
+| Overload | Algorithm | Signature |
+|---|---|---|
+| With derivative | Hybrid Newton-Raphson + IQI, bisection fallback | `FindRoot(xmin, xmax, Func<double, (double f, double df)>)` |
+| Without derivative | ITP (Interpolate-Truncate-Project) | `FindRoot(xmin, xmax, Func<double, double>)` |
+
+Both return `(double root, RootFinder.Status status)`.
+
+**`RootFinder.Status` enum**
+
+`OK`, `Tolerance`, `MaxIterations`, `NoBracket`, `BadInput`, `NonFinite`, `TooNarrow`.
+
+#### `TrustRegionNewtonDogleg`
+
+```csharp
+public static class TrustRegionNewtonDogleg
+```
+
+Trust-region Newton dogleg method for scalar or vector nonlinear systems. Configured via `TRNOptions` and returns `TRNResult`.
+
+#### `TRNOptions` / `TRNResult`
+
+```csharp
+public readonly record struct TRNOptions(double InitialRadius, double MaxRadius, double Tolerance, int MaxIterations, ...);
+public readonly record struct TRNResult(double Root, int Iterations, double Residual, RootFinder.Status Status);
+```
+
+---
+
+### Postprocess
+
+#### `EnsightWriter`
+
+```csharp
+public static class EnsightWriter
+```
+
+Exports mesh and field data to Ensight Gold format (ASCII), compatible with ParaView and GiD.
+
+| Method | Description |
+|---|---|
+| `AddMesh(string name, SimplexMesh mesh, double[,] coords, double[,]? displacement)` | Register a mesh in the internal collection. |
+| `WriteAllMeshes(string basename)` | Write all registered meshes as a multi-timestep Ensight case (`.case` + `_XXXX.geo` files). |
+| `SaveEnsight(SimplexMesh mesh, double[,] coords, string basename)` | Write a single mesh directly to Ensight format. |
+| `SaveEnsightWithScalar(SimplexMesh mesh, double[,] coords, string basename, ...)` | Write mesh plus a nodal scalar field. |
+
+Output consists of a `.case` descriptor and per-timestep `.geo` geometry files. Displacement fields are written as `.CrackOpening` vector files and can be scaled inside ParaView/GiD.
+
+---
+
 ## License
 
 GPLv3
