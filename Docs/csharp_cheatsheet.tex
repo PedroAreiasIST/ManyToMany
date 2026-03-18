@@ -1,0 +1,1184 @@
+\documentclass[9pt,a4paper]{extarticle}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{mathpazo}
+\usepackage{courier}
+\linespread{1.03}
+\usepackage[a4paper,top=6mm,bottom=6mm,left=6mm,right=6mm]{geometry}
+\setlength{\parindent}{0pt}\setlength{\parskip}{0pt}
+\pagestyle{empty}
+
+\usepackage[dvipsnames,svgnames,x11names]{xcolor}
+\definecolor{clKw}  {HTML}{7a0000}
+\definecolor{clTy}  {HTML}{0a3d6b}
+\definecolor{clFn}  {HTML}{4a1a6b}
+\definecolor{clSt}  {HTML}{1e4d2b}
+\definecolor{clCm}  {HTML}{5a4e3a}
+\definecolor{clOp}  {HTML}{1a0d00}
+\definecolor{acBlue}  {HTML}{0a3d6b}
+\definecolor{acTeal}  {HTML}{0a4e45}
+\definecolor{acGreen} {HTML}{1e4d2b}
+\definecolor{acPurple}{HTML}{4a1a6b}
+\definecolor{acRed}   {HTML}{7a0000}
+\definecolor{acAmber} {HTML}{7a3800}
+\definecolor{acNavy}  {HTML}{0e1f4a}
+\definecolor{acOrange}{HTML}{8a3200}
+\definecolor{bgBlue}  {HTML}{f4f9fd}
+\definecolor{bgTeal}  {HTML}{f0faf8}
+\definecolor{bgGreen} {HTML}{f1f8f3}
+\definecolor{bgPurple}{HTML}{f8f4fc}
+\definecolor{bgRed}   {HTML}{fdf4f4}
+\definecolor{bgAmber} {HTML}{fdf8ee}
+\definecolor{bgNavy}  {HTML}{f3f5fb}
+\definecolor{bgOrange}{HTML}{fdf4ee}
+\definecolor{bgCode}  {HTML}{fefcfa}
+\definecolor{bgHdr}   {HTML}{f7f3ee}
+\definecolor{bdCard}  {HTML}{9a9080}
+\definecolor{secBg}   {HTML}{1a0d00}
+
+\usepackage{listings}
+\lstdefinelanguage{CSharp}{
+  sensitive=true,
+  morekeywords=[1]{abstract,as,base,bool,break,byte,case,catch,char,checked,class,const,continue,decimal,default,delegate,do,double,else,enum,event,explicit,extension,extern,false,field,finally,fixed,float,for,foreach,goto,if,implicit,in,init,int,interface,internal,is,lock,long,namespace,new,not,null,object,operator,out,override,params,partial,private,protected,public,readonly,record,ref,return,sbyte,sealed,short,sizeof,stackalloc,static,string,struct,switch,this,throw,true,try,typeof,uint,ulong,unchecked,unsafe,ushort,using,virtual,void,volatile,when,where,while,with,nint,nuint,global,async,await,var,and,or,scoped,required,file,get,set,value,yield,allows},
+  morekeywords=[2]{Action,Array,ArgumentException,ArrayPool,BinaryReader,BinaryWriter,BitConverter,BitOperations,CancellationToken,CollectionsMarshal,ConcurrentDictionary,Console,CultureInfo,Dictionary,Environment,Exception,File,FileStream,Func,GC,HashCode,HashSet,IComparable,IComparer,IDisposable,IEnumerable,IEnumerator,IEquatable,INumber,InvalidOperationException,IOException,IReadOnlyList,ISpanFormattable,ISpanParsable,Interlocked,KeyValuePair,List,Lock,Math,MathF,Memory,MemoryMarshal,NotImplementedException,Object,Parallel,ParallelOptions,Path,Queue,Random,ReadOnlyMemory,ReadOnlySpan,SearchValues,SortedDictionary,Span,Stack,Stopwatch,StreamReader,StreamWriter,String,StringBuilder,StringComparer,Task,Thread,ThreadLocal,Tuple,Type,Unsafe,ValueTask,ValueTuple,Vector,Vector128,Vector256},
+  morekeywords=[3]{Abs,Add,AddRange,AllocateUninitializedArray,Any,AsSpan,AsMemory,AsRef,AsBytes,AsPointer,AsTask,Atan2,Cancel,Cast,Ceiling,Clear,Close,CompareExchange,Combine,Contains,CopyBlockUnaligned,CopyTo,Cos,CreateSpan,DangerousGetReference,Dispose,EnterScope,EnsureCapacity,Exists,Exp,Fill,Floor,For,ForEach,Format,GetHashCode,GetReference,GetValueRefOrAddDefault,Increment,IndexOf,IndexOfAny,IsBetween,Length,Log,Max,Min,Next,Open,OpenRead,OpenWrite,Parse,Peek,Pop,Pow,Push,ReadAllLines,ReadAllText,ReadLine,Rent,Remove,RemoveAt,Return,Reverse,Round,SequenceEqual,Sin,Slice,Sort,Sqrt,Sum,Tan,ThrowIfNull,ToArray,ToString,TryAdd,TryFormat,TryGetValue,TryParse,WaitAll,WhenAll,Write,WriteAllText,WriteAllLines,WriteLine,WriteUnaligned},
+  morecomment=[l]{//},
+  morecomment=[s]{/*}{*/},
+  morestring=[b]",
+  morestring=[b]',
+}
+\lstdefinestyle{cs}{
+  language=CSharp,
+  basicstyle=\ttfamily\bfseries\fontsize{6.25pt}{8.25pt}\selectfont,
+  keywordstyle=[1]{\bfseries\color{clKw}},
+  keywordstyle=[2]{\color{clTy}},
+  keywordstyle=[3]{\color{clFn}},
+  stringstyle=\color{clSt},
+  commentstyle=\itshape\color{clCm},
+  backgroundcolor=\color{bgCode},
+  frame=none,
+  xleftmargin=3pt, xrightmargin=2pt,
+  aboveskip=1.5pt, belowskip=0.5pt,
+  breaklines=true, keepspaces=true,
+  showstringspaces=false, tabsize=2,
+  literate=
+    {=>}{{\textbf{\color{clOp}=>}}}{2}
+    {->}{{\textbf{\color{clOp}->}}}{2}
+    {??}{{\textbf{\color{clOp}??}}}{2}
+    {?.}{{\textbf{\color{clOp}?.}}}{2}
+    {>=}{{\textbf{\color{clOp}>=}}}{2}
+    {<=}{{\textbf{\color{clOp}<=}}}{2}
+    {==}{{\textbf{\color{clOp}==}}}{2}
+    {!=}{{\textbf{\color{clOp}!=}}}{2}
+    {=>}{{\textbf{\color{clOp}=>}}}{2},
+}
+
+\usepackage{tcolorbox}
+\tcbuselibrary{skins,breakable}
+\newenvironment{card}[3][acBlue]{%
+  \begin{tcolorbox}[
+    enhanced, colback=#2, colframe=bdCard,
+    coltitle=black, colbacktitle=#2!70!bgHdr,
+    fonttitle=\bfseries\fontsize{6.0pt}{7.2pt}\selectfont\MakeUppercase,
+    title={#3},
+    left=3pt, right=2pt, top=1.2pt, bottom=1.6pt,
+    toptitle=1.0pt, bottomtitle=1.0pt,
+    boxrule=0.4pt,
+    borderline west={3pt}{0pt}{#1},
+    arc=2pt, before skip=0pt, after skip=1.6mm,
+    breakable,
+  ]}{\end{tcolorbox}}
+
+\usepackage{multicol}
+\setlength{\columnsep}{2.8mm}
+\newcommand{\sectionbanner}[1]{%
+  \vspace{0.5mm}%
+  {\setlength{\fboxsep}{1.5pt}%
+   \colorbox{secBg}{\color{white}\bfseries\fontsize{6.5pt}{7.7pt}\selectfont
+   \MakeUppercase{\hspace{0.5mm}#1\hspace{0.5mm}}}%
+  }\vspace{1.3mm}\par\nobreak}
+\newcommand{\sub}[1]{{\fontsize{5.5pt}{6.8pt}\selectfont\color{gray}\MakeUppercase{#1}}\par\vspace{1pt}}
+\usepackage{booktabs,array,colortbl,enumitem}
+\setlist[itemize]{leftmargin=3.8mm,itemsep=0.7pt,topsep=1pt,parsep=0pt,partopsep=0pt}
+\newcommand{\code}[1]{{\ttfamily\bfseries #1}}
+
+\begin{document}
+
+{\centering
+{\fontsize{13.0pt}{15.4pt}\selectfont\bfseries
+  C\# for High-Performance Numerical and Scientific Code}\par\vspace{0.9mm}
+{\fontsize{6.2pt}{7.3pt}\selectfont\color{gray}
+  \MakeUppercase{types \textperiodcentered{} classes \textperiodcentered{} arrays \textperiodcentered{} spans \textperiodcentered{} refs \textperiodcentered{} memory layout \textperiodcentered{} hot loops \textperiodcentered{} deterministic APIs \textperiodcentered{} C\#~14 / .NET~10}}\par\vspace{1mm}
+{\color{secBg}\rule{\linewidth}{1pt}}\par\vspace{1.8mm}}
+
+%% ====================================================================
+\sectionbanner{A Typical C\# Program}
+\begin{multicols}{2}
+
+\begin{card}[acNavy]{bgNavy}{Single-File Console Application}
+\begin{lstlisting}[style=cs]
+// File: Program.cs -- this is the entire program
+using System.Globalization;
+
+int n = 100;
+double[] x = new double[n];
+double[] y = new double[n];
+
+for (int i = 0; i < n; i++)
+  x[i] = Math.Sin(i * 0.1);
+
+Scale(x, 2.0);
+double d = Dot(x, x, n);
+Console.WriteLine($"n = {n}, dot = {d:G10}");
+
+// Static local functions:
+static void Scale(Span<double> v, double a)
+{
+  for (int i = 0; i < v.Length; i++) v[i] *= a;
+}
+
+static double Dot(ReadOnlySpan<double> a,
+    ReadOnlySpan<double> b, int n)
+{
+  double s = 0;
+  for (int i = 0; i < n; i++) s += a[i] * b[i];
+  return s;
+}
+\end{lstlisting}
+\end{card}
+
+\begin{card}[acTeal]{bgTeal}{What This Illustrates}
+\begin{itemize}
+\item \textbf{Top-level statements}: no \code{class}, no \code{Main}. The file \emph{is} the entry point.
+\item \textbf{Static local functions}: defined after calling code, in the same file.
+\item \textbf{Span parameters}: \code{Scale} takes a \code{Span<double>}---an array is implicitly convertible.
+\item \textbf{String interpolation}: \code{\$"...\{d:G10\}"} for formatted output.
+\end{itemize}
+\sub{To compile and run}
+\begin{lstlisting}[style=cs]
+// $ dotnet new console -n MyApp
+// $ cd MyApp && dotnet run -c Release
+\end{lstlisting}
+No headers, no makefiles, no linking step.
+\end{card}
+
+\end{multicols}
+
+%% ====================================================================
+\sectionbanner{Primitive Types, Math, and Syntax Essentials}
+\begin{multicols}{3}
+
+\begin{card}[acNavy]{bgNavy}{Numeric and Primitive Types}
+\fontsize{6.0pt}{7.6pt}\selectfont
+\begin{tabular}{@{}p{20mm}p{28mm}@{}}
+\rowcolor{bgHdr}\textbf{Type} & \textbf{Description}\\
+\code{int} / \code{long} & signed 32 / 64-bit integer\\
+\code{float} / \code{double} & 32 / 64-bit IEEE~754\\
+\code{decimal} & 128-bit exact decimal\\
+\code{bool} & \code{true}/\code{false}\\
+\code{byte}, \code{short} & unsigned 8 / signed 16-bit\\
+\code{uint}, \code{ulong} & unsigned 32/64-bit\\
+\code{nint}, \code{nuint} & platform-native size\\
+\code{char} & UTF-16 character\\
+\code{string} & immutable character sequence\\
+\end{tabular}
+\vspace{1pt}
+
+All numeric types are fixed-size. Complex numbers via \code{System.Numerics.Complex}.
+\end{card}
+
+\begin{card}[acTeal]{bgTeal}{Control Flow Essentials}
+\begin{lstlisting}[style=cs]
+for (int i = 0; i < n; i++) { /* ... */ }
+while (residual > tol) { /* ... */ }
+do { /* ... */ } while (residual > tol);
+
+if (x > 0) { /* ... */ }
+else if (x == 0) { /* ... */ }
+else { /* ... */ }
+
+double y = (x > 0) ? x : -x; // ternary
+\end{lstlisting}
+\begin{itemize}
+\item Statements end with \code{;}. Blocks use \code{\{~\}}. Case-sensitive.
+\item \code{break} exits a loop; \code{continue} skips to next iteration.
+\item \code{for (;;)} is an infinite loop; exit with \code{break} or \code{return}.
+\end{itemize}
+\end{card}
+
+\begin{card}[acOrange]{bgOrange}{Math via \code{System.Math}}
+\fontsize{6.0pt}{7.6pt}\selectfont
+\begin{tabular}{@{}p{26mm}p{22mm}@{}}
+\rowcolor{bgHdr}\textbf{Method} & \textbf{Description}\\
+\code{Math.Sin}, \code{Cos}, \code{Tan} & trigonometric\\
+\code{Math.Asin}, \code{Acos}, \code{Atan} & inverse trig\\
+\code{Math.Atan2(y, x)} & two-argument arctangent\\
+\code{Math.Sqrt(x)} & square root\\
+\code{Math.Pow(a, b)} & $a^b$\\
+\code{Math.Exp(x)}, \code{Log(x)} & $e^x$, $\ln x$\\
+\code{Math.Abs(x)} & absolute value\\
+\code{Math.Max(a,b)}, \code{Min} & extrema\\
+\code{Math.Ceiling}, \code{Floor}, \code{Round} & rounding\\
+\end{tabular}
+\vspace{1pt}
+
+\code{Math} operates on \code{double}; use \code{MathF} for \code{float}. No power operator; use \code{Math.Pow} or explicit multiplication.
+
+Special: \code{double.NaN}, \code{double.PositiveInfinity}, \code{double.Epsilon}. Test with \code{double.IsNaN(x)}.
+\end{card}
+
+\end{multicols}
+
+%% ====================================================================
+\sectionbanner{C\# Language Foundations}
+\begin{multicols}{3}
+
+\begin{card}[acBlue]{bgBlue}{Namespaces, \code{using}, and Program Entry}
+\begin{lstlisting}[style=cs]
+// File: Program.cs  (top-level statements)
+Console.WriteLine("Hello, World!");
+\end{lstlisting}
+Other files use file-scoped namespaces:
+\begin{lstlisting}[style=cs]
+namespace MyFEM;    // file-scoped (no braces)
+
+using System.Numerics;          // import namespace
+using static Math;              // import static members
+using Vec = System.Numerics.Vector<double>; // alias
+global using System.Globalization; // project-wide
+
+public class Solver { /* ... */ }
+\end{lstlisting}
+\begin{itemize}
+\item \code{using}: import a namespace into the current file.
+\item \code{using static}: import static members directly (e.g.\ call \code{Sin(x)} instead of \code{Math.Sin(x)}).
+\item \code{using Alias = Type}: create a short name for a long type.
+\item \code{global using}: applies to every file in the project; place in one file.
+\item Only one file may have top-level statements.
+\end{itemize}
+\end{card}
+
+\begin{card}[acRed]{bgRed}{Access Modifiers}
+\fontsize{6.0pt}{7.6pt}\selectfont
+\begin{tabular}{@{}p{18mm}p{31mm}@{}}
+\rowcolor{bgHdr}\textbf{Modifier} & \textbf{Visible to}\\
+\code{public} & Everyone\\
+\code{private} & Same class only (default for members)\\
+\code{protected} & Same class + derived classes\\
+\code{internal} & Same assembly (default for types)\\
+\code{protected internal} & Assembly + derived classes\\
+\code{private protected} & Same assembly + derived classes\\
+\end{tabular}
+\end{card}
+
+\begin{card}[acGreen]{bgGreen}{Variables, Constants, \code{var}}
+\begin{lstlisting}[style=cs]
+int n = 100;
+double tol = 1.0e-10;
+float f = 3.14f;        // note f suffix
+var x = 2.5;            // inferred as double
+const double PI = 3.141592653589793;
+const int MAX_ITER = 1000;
+var list = new List<int>(); // type is List<int>
+\end{lstlisting}
+\begin{itemize}
+\item \code{const}: compile-time. \code{readonly}: set once at construction.
+\item \code{var} infers the type at compile time; it is not dynamic.
+\end{itemize}
+\end{card}
+
+\begin{card}[acPurple]{bgPurple}{Classes: \code{field} Keyword and Properties}
+\begin{lstlisting}[style=cs]
+public class Material(double e, double nu)
+{
+  // Semi-auto property with 'field' (C# 14):
+  public double E
+  {
+    get => field;
+    set => field = value > 0
+      ? value : throw new ArgumentException();
+  } = e;
+
+  public double Nu
+  {
+    get => field;
+    set => field = value is > -1.0 and < 0.5
+      ? value : throw new ArgumentException();
+  } = nu;
+
+  public double Density { get; set; } // auto
+  public double Lambda { get; }       // read-only
+    = e * nu / ((1 + nu) * (1 - 2 * nu));
+
+  public double BulkModulus()
+    => E / (3.0 * (1.0 - 2.0 * Nu));
+}
+\end{lstlisting}
+\begin{itemize}
+\item \code{field} (C\#~14) accesses the backing field in \code{get}/\code{set}, eliminating manual \code{\_field} declarations.
+\item Expression-body \code{=>} for single-expression methods.
+\end{itemize}
+\end{card}
+
+\begin{card}[acAmber]{bgAmber}{Primary Constructors and Initialization}
+\begin{lstlisting}[style=cs]
+public class Node(int id, double x, double y, double z)
+{
+  public int Id { get; } = id;
+  public double X { get; set; } = x;
+  public double Y { get; set; } = y;
+  public double Z { get; set; } = z;
+}
+var n = new Node(5, 0, 0, 0) { X = 1.0, Y = 2.0 };
+\end{lstlisting}
+\begin{itemize}
+\item Primary constructor parameters are in scope for initializers and method bodies.
+\item Object initializers set properties after construction.
+\end{itemize}
+\end{card}
+
+\begin{card}[acNavy]{bgNavy}{Inheritance and Virtual Methods}
+\begin{lstlisting}[style=cs]
+public abstract class Element(int id, int[] nodeIds)
+{
+  public int Id { get; } = id;
+  public int[] NodeIds { get; } = nodeIds;
+  public abstract double[,] Stiffness();
+  public virtual int Order => 1;
+}
+
+public class Tri3(int id, int[] n) : Element(id, n)
+{
+  public override double[,] Stiffness()
+    => throw new NotImplementedException();
+  public override int Order => 1;
+}
+\end{lstlisting}
+\begin{itemize}
+\item \code{abstract}: must override; class cannot be instantiated.
+\item \code{virtual}: can override. \code{base} calls the parent.
+\item Single class inheritance; use interfaces for multiple contracts.
+\end{itemize}
+\end{card}
+
+\end{multicols}
+
+%% ====================================================================
+\sectionbanner{Interfaces, Generics, Enums, and Pattern Matching}
+\begin{multicols}{3}
+
+\begin{card}[acTeal]{bgTeal}{Interfaces and Extension Members}
+\begin{lstlisting}[style=cs]
+public interface ISolver
+{
+  void Solve(ReadOnlySpan<double> rhs, Span<double> x);
+  int Iterations { get; }
+}
+
+// A class can implement multiple interfaces:
+public class PCG : ISolver, IDisposable
+{
+  public void Solve(ReadOnlySpan<double> rhs,
+      Span<double> x) { /* ... */ }
+  public int Iterations { get; private set; }
+  public void Dispose() { /* cleanup */ }
+}
+
+// Extension members (C# 14):
+extension(ReadOnlySpan<double> span)
+{
+  public double Norm2()
+  {
+    double s = 0;
+    for (int i = 0; i < span.Length; i++)
+      s += span[i] * span[i];
+    return Math.Sqrt(s);
+  }
+}
+\end{lstlisting}
+\begin{itemize}
+\item C\#~14 \code{extension} blocks replace the old \code{static class} pattern.
+\item Interfaces can have default implementations since C\#~8.
+\end{itemize}
+\end{card}
+
+\begin{card}[acOrange]{bgOrange}{Generics and \code{allows ref struct}}
+\begin{lstlisting}[style=cs]
+public class DenseVector<T>(int n)
+    where T : INumber<T>
+{
+  private readonly T[] _data = new T[n];
+  public int Length => _data.Length;
+  public ref T this[int i] => ref _data[i];
+
+  public T Norm()
+  {
+    T s = T.Zero;
+    for (int i = 0; i < _data.Length; i++)
+      s += _data[i] * _data[i];
+    return T.CreateChecked(
+      Math.Sqrt(double.CreateChecked(s)));
+  }
+}
+
+// allows ref struct (C# 13):
+static T Sum<T>(ReadOnlySpan<T> x)
+    where T : INumber<T>, allows ref struct
+{
+  T s = T.Zero;
+  for (int i = 0; i < x.Length; i++) s += x[i];
+  return s;
+}
+
+static void Swap<T>(ref T a, ref T b)
+  => (a, b) = (b, a);
+\end{lstlisting}
+\begin{itemize}
+\item \code{allows ref struct} (C\#~13) lets generics accept \code{Span<T>} and other ref-like types.
+\item JIT compiles specialized versions for each value type.
+\end{itemize}
+\end{card}
+
+\begin{card}[acRed]{bgRed}{Enums}
+\begin{lstlisting}[style=cs]
+public enum ElementType
+{ Tri3 = 3, Quad4 = 4, Tet4 = 5, Hex8 = 6 }
+
+public enum BoundaryCondition
+{ Free, Fixed, Prescribed }
+
+[Flags]
+public enum DOF
+{
+  None = 0, Ux = 1, Uy = 2, Uz = 4,
+  Rx = 8, Ry = 16, Rz = 32,
+  All = Ux | Uy | Uz | Rx | Ry | Rz,
+}
+DOF free = DOF.Ux | DOF.Uy;
+bool hasUx = (free & DOF.Ux) != 0;
+\end{lstlisting}
+Enums are integers underneath. \code{[Flags]} enables bitwise combination.
+\end{card}
+
+\begin{card}[acBlue]{bgBlue}{Nullable Types and Null Safety}
+\begin{lstlisting}[style=cs]
+// Value types are non-nullable by default:
+int n = 5;               // cannot be null
+int? m = null;           // nullable value type
+
+if (m.HasValue) Console.WriteLine(m.Value);
+int k = m ?? 0;          // null-coalescing
+string? name = null;
+int len = name?.Length ?? 0; // null-conditional
+x ??= new();             // assign only if null
+\end{lstlisting}
+\begin{itemize}
+\item \code{T?} for value types wraps in \code{Nullable<T>}.
+\item \code{??} / \code{?.} / \code{??=} for concise null handling.
+\item Reference types are nullable by default; enable nullable context for warnings.
+\end{itemize}
+\end{card}
+
+\begin{card}[acPurple]{bgPurple}{Pattern Matching and Switch Expressions}
+\begin{lstlisting}[style=cs]
+if (element is Tri3 tri)
+  Console.WriteLine(tri.Order);
+
+string name = elemType switch
+{
+  ElementType.Tri3  => "Triangle",
+  ElementType.Quad4 => "Quadrilateral",
+  ElementType.Tet4  => "Tetrahedron",
+  _ => "Unknown",
+};
+
+string Classify(double x) => x switch
+{
+  < 0  => "negative",
+  0    => "zero",
+  < 1  => "small",
+  >= 1 => "large",
+};
+\end{lstlisting}
+The discard \code{\_} is the catch-all arm. Property patterns: \code{\{ E: > 200e9 \}}.
+\end{card}
+
+\begin{card}[acGreen]{bgGreen}{Tuples, Deconstruction, Records}
+\begin{lstlisting}[style=cs]
+var (det, singular) = ComputeDet(K);
+
+static (double det, bool singular) ComputeDet(
+    double[,] K)
+{
+  double d = /* ... */ 1.0;
+  return (d, Math.Abs(d) < 1e-15);
+}
+
+// Record: value equality + ToString for free:
+public record MaterialProps(double E, double Nu, double Rho);
+
+// Record struct: stack-allocated:
+public readonly record struct Vec2(double X, double Y);
+\end{lstlisting}
+\begin{itemize}
+\item Tuples: lightweight multi-return without a dedicated type.
+\item \code{record struct}: value semantics + equality + \code{ToString}.
+\end{itemize}
+\end{card}
+
+\end{multicols}
+
+%% ====================================================================
+\sectionbanner{Arrays, Indexing, and Multidimensional Data}
+\begin{multicols}{3}
+
+\begin{card}[acAmber]{bgAmber}{One-Dimensional Arrays}
+\begin{lstlisting}[style=cs]
+double[] x = new double[100]; // zeroed
+int[] ids = [0, 1, 2, 3];    // collection expression
+x[0] = 1.0;
+int n = x.Length;
+Array.Resize(ref x, 200);    // new array
+x.AsSpan(0, 100).CopyTo(y);
+Array.Fill(x, 0.0);
+Array.Sort(x);
+\end{lstlisting}
+\begin{itemize}
+\item Arrays are heap-allocated reference types. 0-based indexing.
+\item Bounds checked at runtime (\code{IndexOutOfRangeException}).
+\item Collection expressions \code{[a, b]} work for arrays, lists, spans.
+\end{itemize}
+\end{card}
+
+\begin{card}[acBlue]{bgBlue}{Multidimensional vs Jagged Arrays}
+\begin{lstlisting}[style=cs]
+double[,] K = new double[3, 3]; // row-major
+K[0, 0] = 1.0;
+int rows = K.GetLength(0);
+
+double[][] J = new double[3][]; // jagged
+J[0] = new double[3];
+
+// Best for performance: flat 1D + manual index
+double[] Kf = new double[n * n];
+Kf[i * n + j] = value; // row-major
+\end{lstlisting}
+\begin{itemize}
+\item \code{double[,]}: contiguous block. Jagged \code{[][]}: scattered rows.
+\item Flat \code{double[]} with index arithmetic gives best cache locality.
+\end{itemize}
+\end{card}
+
+\begin{card}[acTeal]{bgTeal}{Array Slicing and Ranges}
+\begin{lstlisting}[style=cs]
+double[] a = [1, 2, 3, 4, 5, 6, 7, 8];
+double[] sub = a[2..5];  // ALLOCATES copy!
+double last  = a[^1];    // 8 (index from end)
+
+// Span slicing: no copy, no allocation
+Span<double> view = a.AsSpan(2, 3);
+ReadOnlySpan<double> ro = a.AsSpan()[2..5];
+\end{lstlisting}
+\begin{itemize}
+\item \code{a[i..j]} on arrays allocates a new array. \code{AsSpan()[i..j]} does not.
+\item \code{\^{}n} means ``n from the end''.
+\item Always prefer \code{Span} slicing in hot paths.
+\end{itemize}
+\end{card}
+
+\begin{card}[acRed]{bgRed}{\code{foreach}, LINQ, and When Not to Use Them}
+\begin{lstlisting}[style=cs]
+foreach (double xi in x) Console.WriteLine(xi);
+
+// With index, use classic for:
+for (int i = 0; i < x.Length; i++) x[i] *= 2.0;
+
+// LINQ: declarative queries (ALLOCATES!)
+double sum = x.Sum();
+double max = x.Max();
+double[] pos = x.Where(v => v > 0).ToArray();
+int[] sorted = ids.OrderBy(i => coords[i]).ToArray();
+\end{lstlisting}
+\begin{itemize}
+\item \code{foreach} cannot modify the collection.
+\item LINQ allocates iterators, closures, and intermediate arrays.
+\item \textbf{Never} use LINQ inside hot numerical loops.
+\item LINQ is perfect for setup: mesh preprocessing, filtering, postprocessing.
+\end{itemize}
+\end{card}
+
+\begin{card}[acNavy]{bgNavy}{Operator Overloading}
+\begin{lstlisting}[style=cs]
+public readonly struct Vec3(double x, double y, double z)
+{
+  public double X { get; } = x;
+  public double Y { get; } = y;
+  public double Z { get; } = z;
+
+  public static Vec3 operator +(Vec3 a, Vec3 b)
+    => new(a.X + b.X, a.Y + b.Y, a.Z + b.Z);
+  public static Vec3 operator -(Vec3 a, Vec3 b)
+    => new(a.X - b.X, a.Y - b.Y, a.Z - b.Z);
+  public static Vec3 operator *(double s, Vec3 v)
+    => new(s * v.X, s * v.Y, s * v.Z);
+  public static Vec3 operator *(Vec3 v, double s)
+    => s * v;
+  public static double operator *(Vec3 a, Vec3 b)
+    => a.X * b.X + a.Y * b.Y + a.Z * b.Z;
+
+  public double Norm() => Math.Sqrt(this * this);
+  public override string ToString()
+    => $"({X:G6}, {Y:G6}, {Z:G6})";
+}
+
+// Usage reads like math:
+Vec3 a = new(1, 0, 0);
+Vec3 b = new(0, 1, 0);
+Vec3 c = a + 2.0 * b;
+double d = a * b; // dot product
+\end{lstlisting}
+Operators must be \code{static}. Both mixed-type orderings must be defined.
+\end{card}
+
+\begin{card}[acGreen]{bgGreen}{Indexers}
+\begin{lstlisting}[style=cs]
+public class DenseMatrix(int rows, int cols)
+{
+  private readonly double[] _d = new double[rows*cols];
+  public int Rows => rows;
+  public int Cols => cols;
+  public ref double this[int i, int j]
+    => ref _d[i * cols + j];
+  public ReadOnlySpan<double> Row(int i)
+    => _d.AsSpan(i * cols, cols);
+}
+var K = new DenseMatrix(3, 3);
+K[0, 0] = 1.0;
+\end{lstlisting}
+Returning \code{ref double} allows in-place mutation without copying. This is the natural way to wrap flat storage as a 2D matrix. Use \code{Row()} to get zero-allocation views of individual rows.
+\end{card}
+
+\end{multicols}
+
+%% ====================================================================
+\sectionbanner{Exception Handling, Resources, and File I/O}
+\begin{multicols}{3}
+
+\begin{card}[acPurple]{bgPurple}{Exception Handling}
+\begin{lstlisting}[style=cs]
+try
+{
+  double[] K = LoadStiffness("mesh.dat");
+  Solve(K, rhs, x);
+}
+catch (FileNotFoundException ex)
+{
+  Console.Error.WriteLine($"Not found: {ex.FileName}");
+}
+catch (ArithmeticException ex)
+{
+  Console.Error.WriteLine($"Math error: {ex.Message}");
+}
+catch (Exception ex)
+{
+  Console.Error.WriteLine($"Error: {ex.Message}");
+  throw; // re-throw preserving stack trace
+}
+finally { /* always runs: cleanup code */ }
+\end{lstlisting}
+\begin{itemize}
+\item Catch specific types first, general last.
+\item \code{throw;} re-throws; \code{finally} always executes.
+\item Exceptions in inner loops are expensive; validate beforehand.
+\end{itemize}
+\end{card}
+
+\begin{card}[acAmber]{bgAmber}{\code{IDisposable} and \code{using}}
+\begin{lstlisting}[style=cs]
+using var reader = new StreamReader("mesh.dat");
+while (reader.ReadLine() is { } line)
+  ProcessLine(line);
+// reader.Dispose() called at scope exit
+
+// Custom disposable:
+public class ScratchBuffer(int n) : IDisposable
+{
+  private double[]? _buf =
+    ArrayPool<double>.Shared.Rent(n);
+  public Span<double> Span => _buf.AsSpan();
+  public void Dispose()
+  {
+    if (_buf is not null)
+    { ArrayPool<double>.Shared.Return(_buf); _buf = null; }
+  }
+}
+\end{lstlisting}
+\begin{itemize}
+\item \code{using var}: deterministic cleanup at scope exit.
+\item Ideal for file handles, pooled buffers, unmanaged resources.
+\end{itemize}
+\end{card}
+
+\begin{card}[acBlue]{bgBlue}{File I/O for Scientific Data}
+\begin{lstlisting}[style=cs]
+string[] lines = File.ReadAllLines("mesh.dat");
+List<(int id, double x, double y, double z)> nodes = [];
+foreach (string line in lines)
+{
+  ReadOnlySpan<char> s = line.AsSpan().Trim();
+  if (s.IsEmpty || s[0] == '#') continue;
+  var p = line.Split(' ',
+    StringSplitOptions.RemoveEmptyEntries);
+  nodes.Add((int.Parse(p[0]),
+    double.Parse(p[1], CultureInfo.InvariantCulture),
+    double.Parse(p[2], CultureInfo.InvariantCulture),
+    double.Parse(p[3], CultureInfo.InvariantCulture)));
+}
+
+using var sw = new StreamWriter("results.dat");
+sw.WriteLine("# Node  Ux  Uy");
+for (int i = 0; i < n; i++)
+  sw.WriteLine($"{i} {ux[i]:E14.7} {uy[i]:E14.7}");
+\end{lstlisting}
+\begin{itemize}
+\item \code{StreamReader}/\code{StreamWriter} for large-file streaming.
+\item Always use \code{CultureInfo.InvariantCulture} for numeric I/O.
+\item Prefer \code{TryParse(ReadOnlySpan<char>)} to avoid string allocations.
+\end{itemize}
+\end{card}
+
+\end{multicols}
+
+%% ====================================================================
+\sectionbanner{String Formatting, Delegates, and Console Output}
+\begin{multicols}{3}
+
+\begin{card}[acTeal]{bgTeal}{String Interpolation and Formatting}
+\begin{lstlisting}[style=cs]
+string s1 = $"x = {x:F6}";      // 3.141593
+string s2 = $"x = {x:E4}";      // 3.1416E+000
+string s3 = $"x = {x:G6}";      // 3.14159
+string s4 = $"iter = {iter,6}";  // right-aligned
+Console.WriteLine($"Step {iter}: res = {res:E4}");
+\end{lstlisting}
+\sub{Format specifiers}
+\fontsize{6.0pt}{7.6pt}\selectfont
+\begin{tabular}{@{}p{10mm}p{16mm}p{18mm}@{}}
+\rowcolor{bgHdr}\textbf{Spec} & \textbf{Meaning} & \textbf{Example}\\
+\code{F6} & fixed, 6 decimals & 3.141593\\
+\code{E4} & scientific, 4 dec. & 3.1416E+000\\
+\code{G6} & general, 6 digits & 3.14159\\
+\code{N2} & thousands sep. & 1,234.56\\
+\code{D5} & integer, padded & 00042\\
+\end{tabular}
+\end{card}
+
+\begin{card}[acOrange]{bgOrange}{\code{StringBuilder} for Bulk Output}
+\begin{lstlisting}[style=cs]
+var sb = new StringBuilder(capacity: 1024);
+sb.AppendLine("# Results");
+for (int i = 0; i < n; i++)
+{
+  sb.Append(i).Append(' ');
+  sb.Append(x[i].ToString("E10",
+    CultureInfo.InvariantCulture));
+  sb.AppendLine();
+}
+File.WriteAllText("output.dat", sb.ToString());
+\end{lstlisting}
+\begin{itemize}
+\item \code{string} is immutable; loop concatenation is $O(n^2)$.
+\item \code{StringBuilder} amortizes into a growable buffer.
+\item For peak throughput, use \code{TryFormat} into span buffers.
+\end{itemize}
+\end{card}
+
+\begin{card}[acNavy]{bgNavy}{Delegates, Lambdas, and \code{Func<>}}
+\begin{lstlisting}[style=cs]
+Func<double, double> f = Math.Sin;
+Func<double, double> g = x => x * x - 2.0;
+double root = Bisect(g, 0.0, 2.0, 1e-12);
+
+static double Bisect(Func<double, double> f,
+    double a, double b, double tol)
+{
+  while (b - a > tol)
+  {
+    double c = 0.5 * (a + b);
+    if (f(a) * f(c) < 0) b = c; else a = c;
+  }
+  return 0.5 * (a + b);
+}
+
+Action<string> log = Console.WriteLine;
+\end{lstlisting}
+\begin{itemize}
+\item \code{Func<..., TResult>}: returns a value. \code{Action<...>}: void.
+\item Lambdas capture variables (not values); closures allocate.
+\end{itemize}
+\end{card}
+
+\end{multicols}
+
+%% ====================================================================
+\sectionbanner{Mental Model and API Surface}
+\begin{multicols}{3}
+
+\begin{card}[acBlue]{bgBlue}{Performance Hierarchy}
+\begin{itemize}
+\item Fast code = fewer allocations, fewer cache misses, fewer indirect calls.
+\item \code{for} in hot loops; LINQ for orchestration only.
+\item Copies kill throughput with large structs or frequent slices.
+\item Measure first: \code{Stopwatch} for coarse, BenchmarkDotNet for micro.
+\end{itemize}
+\sub{Rule of thumb}
+Public API can be rich; internal kernels should be brutally explicit.
+\end{card}
+
+\begin{card}[acNavy]{bgNavy}{Choose Parameter and Return Types}
+\fontsize{6.0pt}{7.6pt}\selectfont
+\begin{tabular}{@{}p{19mm}p{31mm}@{}}
+\rowcolor{bgHdr}\textbf{Type} & \textbf{Use when}\\
+\code{T[]} & caller owns concrete array\\
+\code{Span<T>} & mutable window, sync only\\
+\code{ReadOnlySpan<T>} & read-only window, kernels\\
+\code{Memory<T>} & buffer survives async boundary\\
+\code{IReadOnlyList<T>} & indexed public API\\
+\code{IEnumerable<T>} & lazy enumeration, not hot paths\\
+\code{ref T} / \code{in T} & alias: mutable / read-only\\
+\code{ref readonly T} & return alias without copy\\
+\end{tabular}
+\vspace{1pt}
+
+Never expose \code{List<T>} unless caller mutation is intended. \code{params ReadOnlySpan<T>} (C\#~13) avoids implicit array allocation.
+\end{card}
+
+\begin{card}[acRed]{bgRed}{Struct vs Class}
+\begin{itemize}
+\item \code{struct}: value type. Assignment copies data. Stack or inline.
+\item \code{class}: reference type. Assignment copies the pointer. Heap.
+\item Good struct: tiny, copy-cheap, no identity, no inheritance.
+\item Bad struct: large matrix, mutable graph node, owns arrays.
+\item \code{readonly struct} for tiny immutable values. Pass large structs with \code{in}.
+\end{itemize}
+\begin{lstlisting}[style=cs]
+public readonly struct Vec3(double x, double y, double z)
+{
+  public double X { get; } = x;
+  public double Y { get; } = y;
+  public double Z { get; } = z;
+}
+
+public readonly struct Mat6 // likely too big to copy
+{
+  private readonly double M00, M01, M02, ...;
+}
+\end{lstlisting}
+\end{card}
+
+\end{multicols}
+
+%% ====================================================================
+\sectionbanner{Spans, Memory Layout, and Pools}
+\begin{multicols}{2}
+
+\begin{card}[acGreen]{bgGreen}{Span, ReadOnlySpan, stackalloc, scoped}
+\begin{lstlisting}[style=cs]
+Span<double> tmp = stackalloc double[16];
+tmp.Clear();
+
+ReadOnlySpan<char> token = line.AsSpan(start, len);
+double.TryParse(token, System.Globalization.NumberStyles.Float,
+    CultureInfo.InvariantCulture, out double x);
+
+static int CountPositives(scoped ReadOnlySpan<double> x)
+{
+  int c = 0;
+  for (int i = 0; i < x.Length; ++i)
+    if (x[i] > 0.0) ++c;
+  return c;
+}
+
+// params span (C# 13): no hidden array allocation
+static double Max(params ReadOnlySpan<double> values)
+{
+  double m = double.NegativeInfinity;
+  foreach (double v in values) if (v > m) m = v;
+  return m;
+}
+\end{lstlisting}
+\begin{itemize}
+\item \code{Span<T>}: stack-only, cannot be boxed or cross \code{await}. Think pointer~+ length.
+\item \code{stackalloc}: tiny scratch buffers. \code{scoped}: prevents accidental escape.
+\item Prefer \code{a.AsSpan(2, 6)} over \code{a[2..8]} in hot paths (no copy).
+\end{itemize}
+\end{card}
+
+\begin{card}[acPurple]{bgPurple}{MemoryMarshal and Unsafe}
+\begin{lstlisting}[style=cs]
+Span<byte> bytes = stackalloc byte[64];
+Span<double> x = MemoryMarshal.Cast<byte, double>(bytes);
+ref double r0 = ref MemoryMarshal.GetReference(x);
+
+unsafe
+{
+  fixed (double* p = x)
+    for (int i = 0; i < x.Length; ++i) p[i] = 0.0;
+}
+\end{lstlisting}
+\begin{itemize}
+\item \code{MemoryMarshal.Cast<A,B>}: only when layout is guaranteed.
+\item \code{CollectionsMarshal.AsSpan(list)}: valid only while list is not resized.
+\item \code{Unsafe.Add(ref r0, i)} can remove bounds checks, but only when invariants are airtight.
+\item Prefer explicit layout reasoning over ``clever'' reinterpretation.
+\item \code{unsafe} requires \code{<AllowUnsafeBlocks>true</AllowUnsafeBlocks>}.
+\end{itemize}
+\end{card}
+
+\begin{card}[acOrange]{bgOrange}{Pools and Scratch Space}
+\begin{lstlisting}[style=cs]
+var pool = ArrayPool<double>.Shared;
+double[] tmp = pool.Rent(n);
+try
+{
+  var span = tmp.AsSpan(0, n);
+  span.Clear();
+  Work(span);
+}
+finally
+{
+  pool.Return(tmp, clearArray: false);
+}
+\end{lstlisting}
+\begin{itemize}
+\item Rent when buffers are too large for \code{stackalloc}.
+\item Never assume rented arrays are zeroed. Return exactly once.
+\item For long-lived ownership, allocate your own array instead.
+\item Think of pooled arrays as pre-allocated work space that avoids GC pressure.
+\end{itemize}
+\end{card}
+
+\begin{card}[acTeal]{bgTeal}{Low-Level Memory}
+\begin{itemize}
+\item Flat arrays beat \code{T[,]} and jagged \code{T[][]} in kernels.
+\item Zero-initialization is not free; skip it when all values will be overwritten.
+\item Pinning blocks GC movement; keep pin scopes short.
+\item Arrays $> 85$\,kB land on the Large Object Heap; prefer \code{ArrayPool}.
+\item Locality dominates: contiguous traversal beats random access.
+\item The GC is generational; short-lived small objects are cheap.
+\end{itemize}
+\begin{lstlisting}[style=cs]
+static int Idx(int i, int j, int ncols) => i * ncols + j;
+
+// Uninitialized (all values will be overwritten):
+double[] buf = GC.AllocateUninitializedArray<double>(n);
+
+// Pinned (won't move during GC):
+double[] pin = GC.AllocateArray<double>(n, pinned: true);
+\end{lstlisting}
+\end{card}
+
+\end{multicols}
+
+%% ====================================================================
+\sectionbanner{Collections, APIs, and Hot-Loop Discipline}
+\begin{multicols}{3}
+
+\begin{card}[acAmber]{bgAmber}{Collections in Kernels}
+\begin{lstlisting}[style=cs]
+var list = new List<int>(capacity: n);
+list.Add(1);
+list.EnsureCapacity(2 * n);
+
+Span<int> s = CollectionsMarshal.AsSpan(list);
+for (int i = 0; i < s.Length; ++i) s[i] *= 2;
+\end{lstlisting}
+\begin{itemize}
+\item Pre-size \code{List<T>} and \code{Dictionary<K,V>} when cardinality is known.
+\item \code{TryGetValue} beats contains-then-index. \code{HashSet<T>} for membership.
+\item Do not mutate a list after taking its marshal span.
+\end{itemize}
+\sub{Essential collections}
+\fontsize{6.0pt}{7.6pt}\selectfont
+\begin{tabular}{@{}p{17mm}p{32mm}@{}}
+\rowcolor{bgHdr}\textbf{Type} & \textbf{Use case}\\
+\code{List<T>} & Growable array\\
+\code{Dictionary<K,V>} & Hash map (sparse lookups)\\
+\code{HashSet<T>} & Unique membership\\
+\code{Queue<T>} & FIFO buffer (BFS, front advance)\\
+\code{Stack<T>} & LIFO buffer (DFS, undo)\\
+\code{SortedDictionary} & Ordered keys\\
+\end{tabular}
+\end{card}
+
+\begin{card}[acBlue]{bgBlue}{Dictionary by Reference}
+\begin{lstlisting}[style=cs]
+ref double value = ref CollectionsMarshal
+  .GetValueRefOrAddDefault(map, key, out bool exists);
+if (!exists) value = 0.0;
+value += increment;
+\end{lstlisting}
+\begin{itemize}
+\item Avoids repeated hashing and extra lookups.
+\item The returned ref is invalid if the dictionary resizes.
+\item Excellent for sparse assembly-like accumulation.
+\end{itemize}
+\end{card}
+
+\begin{card}[acNavy]{bgNavy}{Span-Based Parsing}
+\begin{lstlisting}[style=cs]
+ReadOnlySpan<char> line = source.AsSpan();
+int k = line.IndexOf(';');
+ReadOnlySpan<char> left  = line[..k];
+ReadOnlySpan<char> right = line[(k + 1)..];
+int id = int.Parse(left, CultureInfo.InvariantCulture);
+double x = double.Parse(right, CultureInfo.InvariantCulture);
+\end{lstlisting}
+\begin{itemize}
+\item Always \code{InvariantCulture} for persisted numeric data.
+\item \code{SearchValues<char>} and \code{IndexOfAny} for high-volume tokenization.
+\end{itemize}
+\end{card}
+
+\begin{card}[acGreen]{bgGreen}{Equality, Hashing, and Stable Keys}
+\begin{itemize}
+\item If a value is used as a key, its equality and hash code must be stable for its entire dictionary residency.
+\item Override \code{Equals} and \code{GetHashCode} together.
+\item Use ordinal string comparison for identifiers: \code{StringComparer.Ordinal}.
+\item For floating-point keys, think hard before using raw doubles.
+\end{itemize}
+\begin{lstlisting}[style=cs]
+public readonly struct Edge(int a, int b)
+    : IEquatable<Edge>
+{
+  public int A { get; } = a;
+  public int B { get; } = b;
+  public bool Equals(Edge o) => A == o.A && B == o.B;
+  public override bool Equals(object? obj)
+    => obj is Edge e && Equals(e);
+  public override int GetHashCode()
+    => HashCode.Combine(A, B);
+  public static bool operator ==(Edge l, Edge r)
+    => l.Equals(r);
+  public static bool operator !=(Edge l, Edge r)
+    => !l.Equals(r);
+}
+\end{lstlisting}
+Full contract: \code{IEquatable<T>}, \code{Equals(object?)}, \code{GetHashCode()}, \code{==}/\code{!=}. Or just use \code{record struct} to get all for free.
+\end{card}
+
+\begin{card}[acPurple]{bgPurple}{Public API Layering}
+\fontsize{6.0pt}{7.4pt}\selectfont
+\begin{tabular}{@{}p{18mm}p{31mm}@{}}
+\rowcolor{bgHdr}\textbf{Layer} & \textbf{Typical signature}\\
+Convenience & \code{double[] Solve(double[] rhs)}\\
+Core sync & \code{void Solve(ReadOnlySpan<double> rhs, Span<double> x)}\\
+Batched & \code{void SolveBatch(ReadOnlySpan<double> A, ...)}\\
+Async I/O & \code{ValueTask<int> ReadAsync(Memory<byte> dst)}\\
+\end{tabular}
+\vspace{2pt}
+Expose friendly wrappers, but keep one explicit zero-allocation kernel underneath.
+\end{card}
+
+\begin{card}[acRed]{bgRed}{Closure Trap}
+\begin{lstlisting}[style=cs]
+// BUG: all tasks capture the *same* variable i
+for (int i = 0; i < n; ++i)
+  tasks[i] = Task.Run(() => Work(i));
+
+// FIX: copy to a local before capturing
+for (int i = 0; i < n; ++i)
+{
+  int j = i;
+  tasks[i] = Task.Run(() => Work(j));
+}
+\end{lstlisting}
+\begin{itemize}
+\item Lambdas capture \emph{variables}, not values.
+\item Closures also cause hidden heap allocations for captured state.
+\end{itemize}
+\end{card}
+
+\end{multicols}
+
+%% ====================================================================
+\sectionbanner{SIMD, Parallelism, and Diagnostics}
+\begin{multicols}{2}
+
+\begin{card}[acOrange]{bgOrange}{SIMD and Intrinsics}
+\begin{lstlisting}[style=cs]
+if (Vector.IsHardwareAccelerated)
+{
+  int w = Vector<double>.Count;
+  int i = 0;
+  Vector<double> acc = Vector<double>.Zero;
+  for (; i <= n - w; i += w)
+    acc += new Vector<double>(a, i) * new Vector<double>(b, i);
+  double s = 0.0;
+  for (int j = 0; j < w; ++j) s += acc[j];
+  for (; i < n; ++i) s += a[i] * b[i];
+}
+\end{lstlisting}
+\begin{itemize}
+\item Start with \code{Vector<T>} before AVX intrinsics.
+\item \code{Vector128<T>} / \code{Vector256<T>} for explicit width control.
+\item Data layout often matters more than instruction cleverness.
+\end{itemize}
+\end{card}
+
+\begin{card}[acNavy]{bgNavy}{Parallel Loops}
+\begin{lstlisting}[style=cs]
+Parallel.For(0, n, i => y[i] = F(x[i]));
+
+Lock sync = new(); // System.Threading.Lock (C# 13)
+double total = 0.0;
+Parallel.For<double>(0, n,
+  () => 0.0,
+  (i, _, local) => local + a[i],
+  local => { lock (sync) total += local; });
+
+var opts = new ParallelOptions
+{ MaxDegreeOfParallelism = Environment.ProcessorCount };
+Parallel.For(0, nElem, opts, e =>
+{
+  Span<double> Ke = stackalloc double[ndof * ndof];
+  ComputeElement(e, Ke);
+  lock (sync) AssembleGlobal(e, Ke, K);
+});
+\end{lstlisting}
+\begin{itemize}
+\item \code{Lock} (C\#~13) replaces \code{object}-as-lock with a purpose-built, more efficient type.
+\item Parallelize only when per-iteration work is large enough.
+\item Avoid shared writes; partition by output slices.
+\item Beware false sharing when adjacent elements are written by different threads.
+\item Deterministic scientific code usually wants explicit partitioning.
+\end{itemize}
+\end{card}
+
+\begin{card}[acBlue]{bgBlue}{Diagnostics and Measurement}
+\begin{lstlisting}[style=cs]
+Span<char> dst = stackalloc char[64];
+if (value.TryFormat(dst, out int written,
+    provider: CultureInfo.InvariantCulture))
+  Console.WriteLine(dst[..written].ToString());
+
+var sw = Stopwatch.StartNew();
+for (int i = 0; i < nReps; i++) Solve(K, rhs, x);
+sw.Stop();
+Console.WriteLine(
+  $"Avg: {sw.Elapsed.TotalMilliseconds / nReps:F2} ms");
+\end{lstlisting}
+\begin{itemize}
+\item Warm up before timing. Release build only. No debugger.
+\item Track allocations as a first-class metric, not only elapsed time.
+\item Tools: \code{dotnet-counters}, \code{dotnet-trace}, BenchmarkDotNet.
+\end{itemize}
+\sub{Benchmark checklist}
+\begin{itemize}
+\item Stable input, pinned CPU frequency if possible, multiple iterations, verify outputs.
+\end{itemize}
+\end{card}
+
+\end{multicols}
+
+\end{document}
