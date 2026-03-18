@@ -15,7 +15,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyDescriptionAttribute(("High-performance topology library for finite element analysis and computational m" +
     "echanics"))]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("4.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("4.0.0+314d18375ceab67db2bc9505cfbd528e16cfdbfb")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("4.0.0+981c67f9d53ef3bd07ea010c16c431a7dd5c5412")]
 [assembly: System.Reflection.AssemblyProductAttribute("Relations")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Relations")]
 [assembly: System.Reflection.AssemblyVersionAttribute("4.0.0.0")]

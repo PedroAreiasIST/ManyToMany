@@ -4291,7 +4291,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         EnterSynchronizedReadLock();
         try
         {
-            return O2M.GetCliquesStrict(_o2m, _elementsFromNode!);
+            return O2M.GetCliquesStrict(_nodesFromElement, _elementsFromNode!);
         }
         finally
         {
@@ -4306,7 +4306,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     /// <summary>
     ///     The wrapped O2M structure containing the element-to-node adjacency.
     /// </summary>
-    private readonly O2M _o2m;
+    private readonly O2M _nodesFromElement;
 
     /// <summary>
     ///     Reader-writer lock for thread-safe access.
@@ -4488,7 +4488,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
             _rwLock.EnterReadLock();
             try
             {
-                return (O2M)_o2m.Clone();
+                return (O2M)_nodesFromElement.Clone();
             }
             finally
             {
@@ -4572,7 +4572,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
             _rwLock.EnterReadLock();
             try
             {
-                return _o2m.ParallelizationThreshold;
+                return _nodesFromElement.ParallelizationThreshold;
             }
             finally
             {
@@ -4585,7 +4585,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
             _rwLock.EnterWriteLock();
             try
             {
-                _o2m.ParallelizationThreshold = value;
+                _nodesFromElement.ParallelizationThreshold = value;
             }
             finally
             {
@@ -4681,7 +4681,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
             _rwLock.EnterReadLock();
             try
             {
-                return _o2m.Count;
+                return _nodesFromElement.Count;
             }
             finally
             {
@@ -4709,7 +4709,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
             _rwLock.EnterReadLock();
             try
             {
-                return _o2m[rowIndex].ToArray();
+                return _nodesFromElement[rowIndex].ToArray();
             }
             finally
             {
@@ -4738,7 +4738,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
             _rwLock.EnterReadLock();
             try
             {
-                return _o2m[rowIndex, columnIndex];
+                return _nodesFromElement[rowIndex, columnIndex];
             }
             finally
             {
@@ -4759,7 +4759,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     /// </remarks>
     public M2M()
     {
-        _o2m = new O2M();
+        _nodesFromElement = new O2M();
         _isInSync = false;
         _positionCachesComputed = false;
     }
@@ -4777,7 +4777,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     public M2M(int reservedCapacity)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(reservedCapacity);
-        _o2m = new O2M(reservedCapacity);
+        _nodesFromElement = new O2M(reservedCapacity);
         _isInSync = false;
         _positionCachesComputed = false;
     }
@@ -4794,7 +4794,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     public M2M(List<List<int>> adjacencies)
     {
         ArgumentNullException.ThrowIfNull(adjacencies);
-        _o2m = new O2M(adjacencies);
+        _nodesFromElement = new O2M(adjacencies);
         _isInSync = false;
         _positionCachesComputed = false;
     }
@@ -4802,16 +4802,16 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     /// <summary>
     ///     Initializes an M2M instance by wrapping an existing O2M.
     /// </summary>
-    /// <param name="o2m">The O2M instance to wrap.</param>
-    /// <exception cref="ArgumentNullException">Thrown when o2m is null.</exception>
+    /// <param name="nodesFromElement">The O2M instance to wrap.</param>
+    /// <exception cref="ArgumentNullException">Thrown when nodesFromElement is null.</exception>
     /// <remarks>
     ///     Time Complexity: O(n × m) for deep copy
     ///     The O2M is cloned to ensure the M2M has exclusive ownership.
     /// </remarks>
-    public M2M(O2M o2m)
+    public M2M(O2M nodesFromElement)
     {
-        ArgumentNullException.ThrowIfNull(o2m);
-        _o2m = (O2M)o2m.Clone();
+        ArgumentNullException.ThrowIfNull(nodesFromElement);
+        _nodesFromElement = (O2M)nodesFromElement.Clone();
         _isInSync = false;
         _positionCachesComputed = false;
     }
@@ -4824,10 +4824,10 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     ///     and <see cref="GetNodeToNodeGraph"/> to avoid double-cloning. The caller guarantees
     ///     the O2M is freshly created and not shared with any other owner.
     /// </remarks>
-    private M2M(O2M o2m, bool takeOwnership)
+    private M2M(O2M nodesFromElement, bool takeOwnership)
     {
         Debug.Assert(takeOwnership, "This constructor takes ownership — pass true");
-        _o2m = o2m;
+        _nodesFromElement = nodesFromElement;
         _isInSync = false;
         _positionCachesComputed = false;
     }
@@ -4863,7 +4863,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         try
         {
             InvalidateCache();
-            return _o2m.AppendElement(nodes);
+            return _nodesFromElement.AppendElement(nodes);
         }
         finally
         {
@@ -4890,7 +4890,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         try
         {
             InvalidateCache();
-            _o2m.AppendElements(nodes);
+            _nodesFromElement.AppendElements(nodes);
         }
         finally
         {
@@ -4916,7 +4916,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         try
         {
             InvalidateCache();
-            _o2m.AppendNodeToElement(elementIndex, nodeValue);
+            _nodesFromElement.AppendNodeToElement(elementIndex, nodeValue);
         }
         finally
         {
@@ -4942,7 +4942,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         _rwLock.EnterWriteLock();
         try
         {
-            var removed = _o2m.RemoveNodeFromElement(elementIndex, nodeValue);
+            var removed = _nodesFromElement.RemoveNodeFromElement(elementIndex, nodeValue);
             if (removed) InvalidateCache();
             return removed;
         }
@@ -4969,7 +4969,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         _rwLock.EnterWriteLock();
         try
         {
-            _o2m.ClearElement(elementIndex);
+            _nodesFromElement.ClearElement(elementIndex);
             InvalidateCache();
         }
         finally
@@ -4996,7 +4996,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         _rwLock.EnterWriteLock();
         try
         {
-            _o2m.ReplaceElement(elementIndex, newNodes);
+            _nodesFromElement.ReplaceElement(elementIndex, newNodes);
             InvalidateCache();
         }
         finally
@@ -5024,7 +5024,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         try
         {
             InvalidateCache();
-            _o2m.CompressElements(newToOldElementMap);
+            _nodesFromElement.CompressElements(newToOldElementMap);
         }
         finally
         {
@@ -5052,7 +5052,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         try
         {
             InvalidateCache();
-            _o2m.PermuteElements(oldToNewElementMap);
+            _nodesFromElement.PermuteElements(oldToNewElementMap);
         }
         finally
         {
@@ -5079,7 +5079,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         try
         {
             InvalidateCache();
-            _o2m.PermuteNodes(oldToNewNodeMap);
+            _nodesFromElement.PermuteNodes(oldToNewNodeMap);
         }
         finally
         {
@@ -5105,7 +5105,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         try
         {
             InvalidateCache();
-            _o2m.RearrangeAfterRenumbering(newToOldElementMap, oldToNewNodeMap);
+            _nodesFromElement.RearrangeAfterRenumbering(newToOldElementMap, oldToNewNodeMap);
         }
         finally
         {
@@ -5127,7 +5127,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         _rwLock.EnterWriteLock();
         try
         {
-            _o2m.ClearAll();
+            _nodesFromElement.ClearAll();
             _elementsFromNode = null;
             _elemeloc = null;
             _nodeloc = null;
@@ -5161,7 +5161,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         _rwLock.EnterReadLock();
         try
         {
-            return _o2m[elementIndex].ToArray();
+            return _nodesFromElement[elementIndex].ToArray();
         }
         finally
         {
@@ -5196,7 +5196,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         _rwLock.EnterReadLock();
         try
         {
-            var nodes = _o2m[elementIndex];
+            var nodes = _nodesFromElement[elementIndex];
             // O2M now returns ReadOnlySpan<int> directly - just use it
             action(nodes);
         }
@@ -5233,7 +5233,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         _rwLock.EnterReadLock();
         try
         {
-            var nodes = _o2m[elementIndex];
+            var nodes = _nodesFromElement[elementIndex];
             // O2M now returns ReadOnlySpan<int> directly - just use it
             return func(nodes);
         }
@@ -5568,7 +5568,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
             var result = new List<int>(candidates.Count);
 
             foreach (var e in candidates)
-                if (e < _o2m.Count && _o2m[e].Length == nodeCount)
+                if (e < _nodesFromElement.Count && _nodesFromElement[e].Length == nodeCount)
                     result.Add(e);
 
             return result;
@@ -5604,14 +5604,14 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         EnterSynchronizedReadLock();
         try
         {
-            if (element >= _o2m.Count)
+            if (element >= _nodesFromElement.Count)
                 throw new ArgumentOutOfRangeException(
                     nameof(element),
-                    $"Element {element} is out of range. Structure has {_o2m.Count} elements.");
+                    $"Element {element} is out of range. Structure has {_nodesFromElement.Count} elements.");
 
             var neighbours = new HashSet<int>();
 
-            foreach (var node in _o2m[element])
+            foreach (var node in _nodesFromElement[element])
             {
                 // P0 FIX: Skip out-of-range nodes (consistent with other methods at lines 1099, 1135, etc.)
                 if ((uint)node >= (uint)_elementsFromNode!.Count) continue;
@@ -5664,7 +5664,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
             var neighbours = new HashSet<int>();
 
             foreach (var elem in _elementsFromNode[node])
-            foreach (var n in _o2m[elem])
+            foreach (var n in _nodesFromElement[elem])
                 if (n != node)
                     neighbours.Add(n);
 
@@ -5693,7 +5693,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         _rwLock.EnterReadLock();
         try
         {
-            return _o2m.GetMaxNode();
+            return _nodesFromElement.GetMaxNode();
         }
         finally
         {
@@ -5717,7 +5717,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         _rwLock.EnterReadLock();
         try
         {
-            return elementIndex >= 0 && elementIndex < _o2m.Count;
+            return elementIndex >= 0 && elementIndex < _nodesFromElement.Count;
         }
         finally
         {
@@ -5769,8 +5769,8 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         _rwLock.EnterReadLock();
         try
         {
-            if (elementIndex < 0 || elementIndex >= _o2m.Count) return false;
-            return _o2m[elementIndex].Contains(nodeIndex);
+            if (elementIndex < 0 || elementIndex >= _nodesFromElement.Count) return false;
+            return _nodesFromElement[elementIndex].Contains(nodeIndex);
         }
         finally
         {
@@ -5793,7 +5793,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         _rwLock.EnterReadLock();
         try
         {
-            return _o2m.IsValid();
+            return _nodesFromElement.IsValid();
         }
         finally
         {
@@ -5821,7 +5821,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         EnterSynchronizedReadLock();
         try
         {
-            return _o2m * _elementsFromNode!;
+            return _nodesFromElement * _elementsFromNode!;
         }
         finally
         {
@@ -5865,7 +5865,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         EnterSynchronizedReadLock();
         try
         {
-            return _elementsFromNode! * _o2m;
+            return _elementsFromNode! * _nodesFromElement;
         }
         finally
         {
@@ -5910,7 +5910,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         _rwLock.EnterReadLock();
         try
         {
-            return _o2m.GetTopOrder();
+            return _nodesFromElement.GetTopOrder();
         }
         finally
         {
@@ -5935,7 +5935,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         _rwLock.EnterReadLock();
         try
         {
-            return _o2m.IsAcyclic();
+            return _nodesFromElement.IsAcyclic();
         }
         finally
         {
@@ -5960,7 +5960,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         _rwLock.EnterReadLock();
         try
         {
-            return _o2m.GetSortOrder();
+            return _nodesFromElement.GetSortOrder();
         }
         finally
         {
@@ -5995,7 +5995,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         _rwLock.EnterReadLock();
         try
         {
-            return _o2m.GetDuplicates();
+            return _nodesFromElement.GetDuplicates();
         }
         finally
         {
@@ -6032,7 +6032,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
             second._rwLock.EnterReadLock();
             try
             {
-                return _o2m.IsPermutationOf(other._o2m);
+                return _nodesFromElement.IsPermutationOf(other._nodesFromElement);
             }
             finally
             {
@@ -6063,7 +6063,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         _rwLock.EnterWriteLock();
         try
         {
-            _o2m.Reserve(capacity);
+            _nodesFromElement.Reserve(capacity);
         }
         finally
         {
@@ -6086,7 +6086,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         _rwLock.EnterWriteLock();
         try
         {
-            _o2m.ShrinkToFit();
+            _nodesFromElement.ShrinkToFit();
         }
         finally
         {
@@ -6375,7 +6375,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         Debug.Assert(_rwLock.IsWriteLockHeld, "SynchronizeTranspose must be called under write lock");
 
         // Compute transpose (output is sorted, required by position calculations if needed later)
-        _elementsFromNode = _o2m.Transpose();
+        _elementsFromNode = _nodesFromElement.Transpose();
 
         // _isInSync is declared volatile, which provides the necessary release semantics:
         // the _elementsFromNode assignment above is guaranteed visible to other threads
@@ -6397,8 +6397,8 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         Debug.Assert(_isInSync, "Transpose must be synchronized before computing position caches");
 
         // Compute position caches
-        var elemPositions = O2M.GetElementPositions(_o2m, _elementsFromNode!);
-        var nodePositions = O2M.GetNodePositions(_o2m, _elementsFromNode!);
+        var elemPositions = O2M.GetElementPositions(_nodesFromElement, _elementsFromNode!);
+        var nodePositions = O2M.GetNodePositions(_nodesFromElement, _elementsFromNode!);
 
         // Convert to read-only for public properties
         var elemLocList = new List<IReadOnlyList<int>>(elemPositions.Count);
@@ -6500,7 +6500,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         {
             // P0.3 FIX: Use ownership constructor to avoid double-clone.
             // M2M(O2M) would clone again; the O2M is already a fresh deep copy.
-            var clonedO2m = (O2M)_o2m.Clone();
+            var clonedO2m = (O2M)_nodesFromElement.Clone();
             var cloned = new M2M(clonedO2m, takeOwnership: true);
 
             // Copy transpose cache if synchronized
@@ -6572,7 +6572,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
             second._rwLock.EnterReadLock();
             try
             {
-                return _o2m.CompareTo(other._o2m);
+                return _nodesFromElement.CompareTo(other._nodesFromElement);
             }
             finally
             {
@@ -6613,7 +6613,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
             second._rwLock.EnterReadLock();
             try
             {
-                return _o2m.Equals(other._o2m);
+                return _nodesFromElement.Equals(other._nodesFromElement);
             }
             finally
             {
@@ -6638,7 +6638,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         _rwLock.EnterReadLock();
         try
         {
-            return _o2m.GetHashCode();
+            return _nodesFromElement.GetHashCode();
         }
         finally
         {
@@ -6660,8 +6660,8 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
 
         // Extremely rare: same identity hash for different objects
         // Use internal O2M hash as tiebreaker
-        var aO2mId = RuntimeHelpers.GetHashCode(a._o2m);
-        var bO2mId = RuntimeHelpers.GetHashCode(b._o2m);
+        var aO2mId = RuntimeHelpers.GetHashCode(a._nodesFromElement);
+        var bO2mId = RuntimeHelpers.GetHashCode(b._nodesFromElement);
 
         if (aO2mId != bO2mId)
             return aO2mId < bO2mId ? (a, b) : (b, a);
@@ -6774,7 +6774,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         _rwLock.EnterReadLock();
         try
         {
-            return _o2m.ToCsr();
+            return _nodesFromElement.ToCsr();
         }
         finally
         {
@@ -6798,7 +6798,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         _rwLock.EnterReadLock();
         try
         {
-            return _o2m.ToBooleanMatrix();
+            return _nodesFromElement.ToBooleanMatrix();
         }
         finally
         {
@@ -6823,7 +6823,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         _rwLock.EnterReadLock();
         try
         {
-            return _o2m.ToString();
+            return _nodesFromElement.ToString();
         }
         finally
         {
@@ -6949,10 +6949,10 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     {
         VerifyLockHeld();
 
-        if ((uint)element >= (uint)_o2m.Count)
+        if ((uint)element >= (uint)_nodesFromElement.Count)
             return Array.Empty<int>();
 
-        return _o2m[element].ToArray();
+        return _nodesFromElement[element].ToArray();
     }
 
     /// <summary>
@@ -6978,14 +6978,14 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     {
         VerifyLockHeld();
 
-        if ((uint)element >= (uint)_o2m.Count)
+        if ((uint)element >= (uint)_nodesFromElement.Count)
         {
             action(ReadOnlySpan<int>.Empty);
             return;
         }
 
         // O2M indexer already returns ReadOnlySpan<int> - true zero-copy
-        action(_o2m[element]);
+        action(_nodesFromElement[element]);
     }
 
     #endregion
@@ -7139,7 +7139,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         EnterSynchronizedReadLock();
         try
         {
-            return _o2m.BreadthFirstSearch(startElement, _elementsFromNode!, visitor);
+            return _nodesFromElement.BreadthFirstSearch(startElement, _elementsFromNode!, visitor);
         }
         finally
         {
@@ -7166,7 +7166,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         EnterSynchronizedReadLock();
         try
         {
-            return _o2m.BreadthFirstDistances(startElement, _elementsFromNode!);
+            return _nodesFromElement.BreadthFirstDistances(startElement, _elementsFromNode!);
         }
         finally
         {
@@ -7212,7 +7212,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         EnterSynchronizedReadLock();
         try
         {
-            return _o2m.DijkstraShortestPaths(startElement, _elementsFromNode!, edgeWeight);
+            return _nodesFromElement.DijkstraShortestPaths(startElement, _elementsFromNode!, edgeWeight);
         }
         finally
         {
