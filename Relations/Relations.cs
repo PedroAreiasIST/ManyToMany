@@ -100,6 +100,12 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
     ///     Generates a random O2M for testing and benchmarking.
     ///     Parallel generation for large structures.
     /// </summary>
+    /// <remarks>
+    ///     <b>DETERMINISM:</b> The <paramref name="seed"/> parameter guarantees deterministic output
+    ///     only for a given parallelization configuration. When <paramref name="elementCount"/> crosses
+    ///     <see cref="DefaultParallelizationThreshold"/>, per-row seeding (<c>baseSeed + i</c>) replaces
+    ///     the single-RNG sequential path, producing different results for the same seed.
+    /// </remarks>
     [MethodImpl(AggressiveOptimization)]
     public static O2M GetRandomO2M(
         int elementCount,
@@ -610,6 +616,14 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
         }
     }
 
+    /// <summary>
+    ///     Returns the raw mutable adjacency list. Internal use only.
+    /// </summary>
+    /// <remarks>
+    ///     <b>WARNING:</b> Mutations through this reference do NOT invalidate
+    ///     <c>_maxNodeIndexCache</c>. Callers MUST set <c>_maxNodeIndexCache = null</c>
+    ///     after modifying any inner list or the outer list itself.
+    /// </remarks>
     internal List<List<int>> AdjacenciesMutable => _adjacencies;
 
     #endregion
@@ -1678,6 +1692,11 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
     ///     Renumbers all nodes according to a mapping.
     ///     Parallel with SIMD where applicable.
     /// </summary>
+    /// <remarks>
+    ///     <b>ORDERING:</b> This method does NOT preserve sorted order of adjacency lists.
+    ///     If sorted order is required (e.g., for <c>BinarySearch</c>-based lookups),
+    ///     callers must re-sort adjacency lists after calling this method.
+    /// </remarks>
     [MethodImpl(AggressiveOptimization)]
     public unsafe void PermuteNodes(List<int> oldToNewNodeMap)
     {
@@ -3165,6 +3184,11 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
     ///     Creates an O2M from Compressed Sparse Row (CSR) format.
     ///     Parallel row construction.
     /// </summary>
+    /// <remarks>
+    ///     <b>PRECONDITIONS:</b> <paramref name="rowPointers"/> must be monotonically non-decreasing
+    ///     and <c>rowPointers[^1] &lt;= columnIndices.Length</c>. Malformed input causes
+    ///     <see cref="ArgumentOutOfRangeException"/> or <see cref="IndexOutOfRangeException"/>.
+    /// </remarks>
     [MethodImpl(AggressiveOptimization)]
     public static O2M FromCsr(int[] rowPointers, int[] columnIndices)
     {
@@ -4412,6 +4436,8 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     /// <summary>
     ///     Nesting level for batch operations.
     ///     When > 0, synchronization is deferred until batch completes.
+    ///     Thread safety: protected by the outer <c>_rwLock</c> write lock —
+    ///     only modified inside <c>EnterWriteLock</c>/<c>ExitWriteLock</c> blocks.
     /// </summary>
     private int _batchNesting;
 
