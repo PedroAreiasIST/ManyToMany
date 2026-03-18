@@ -1675,9 +1675,12 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
             {
                 var row = _adjacencies[i];
                 var rowSpan = CollectionsMarshal.AsSpan(row);
+                // NOTE: mapSpan is a ref struct and cannot be directly captured by lambda.
+                // Rehydrate a local span inside the parallel body for fixed-pointer access.
+                var localMapSpan = CollectionsMarshal.AsSpan(oldToNewNodeMap);
 
                 fixed (int* rowPtr = rowSpan)
-                fixed (int* mapPtr = mapSpan)
+                fixed (int* mapPtr = localMapSpan)
                 {
                     var len = rowSpan.Length;
                     var j = 0;
