@@ -3080,42 +3080,6 @@ public static class Utils
 
 #endregion
 
-#region Comparers
-
-public sealed class ListComparer<T> : IComparer<List<T>> where T : IComparable<T>
-{
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public int Compare(List<T>? x, List<T>? y)
-    {
-        if (ReferenceEquals(x, y)) return 0;
-        if (x is null) return -1;
-        if (y is null) return 1;
-        return Utils.Compare(x, y);
-    }
-}
-
-public sealed class ListEqualityComparer<T> : IEqualityComparer<List<T>> where T : IComparable<T>
-{
-    public bool Equals(List<T>? x, List<T>? y)
-    {
-        if (ReferenceEquals(x, y)) return true;
-        if (x is null || y is null) return false;
-        return Utils.AreEqual(x, y);
-    }
-
-    public int GetHashCode(List<T> obj)
-    {
-        ArgumentNullException.ThrowIfNull(obj);
-        var hash = new HashCode();
-        var span = CollectionsMarshal.AsSpan(obj);
-        for (var i = 0; i < span.Length; i++)
-            hash.Add(span[i]);
-        return hash.ToHashCode();
-    }
-}
-
-#endregion
-
 #region ParallelConfig
 
 /// <summary>

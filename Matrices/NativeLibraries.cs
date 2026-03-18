@@ -67,7 +67,7 @@ public interface INativeLibraryConfig
 ///     Detailed status of all native libraries.
 ///     Provides a unified view of library availability and configuration.
 /// </summary>
-public class LibraryStatus
+internal class LibraryStatus
 {
     public bool CudaAvailable { get; set; }
     public int CudaVersion { get; set; }
@@ -109,7 +109,7 @@ public class LibraryStatus
 ///     This provides a simple API for checking library availability without caching complexity.
 ///     For detailed diagnostics, use <see cref="NativeLibraryStatus" />.
 /// </summary>
-public static class LibraryAvailability
+internal static class LibraryAvailability
 {
     #region Public API
 
@@ -1936,7 +1936,7 @@ public sealed class NativeLibraryConfig : INativeLibraryConfig
 ///     Provides detailed information about native library availability and performance.
 ///     Use this for comprehensive diagnostics; use <see cref="LibraryAvailability" /> for quick checks.
 /// </summary>
-public static class NativeLibraryStatus
+internal static class NativeLibraryStatus
 {
     private static volatile bool _initialized;
     private static readonly object _initLock = new();
@@ -2164,209 +2164,13 @@ public static class NativeLibraryStatus
 }
 
 // ============================================================================
-// NUGET LIBRARY CHECKER - Automatic Package Restoration
-// ============================================================================
-
-/// <summary>
-///     Checks for NuGet-provided native libraries and provides guidance for automatic restoration.
-/// </summary>
-public static class NuGetLibraryChecker
-{
-    /// <summary>Checks if NuGet-provided MKL libraries are present.</summary>
-    public static bool EnsureMklNuGetPackage()
-    {
-        if (IsMklNuGetPackagePresent())
-        {
-            Debug.WriteLine("[NuGet] Intel MKL NuGet package detected");
-            return true;
-        }
-
-        Debug.WriteLine("[NuGet] Intel MKL NuGet package not found");
-
-        if (IsInDevelopmentEnvironment())
-        {
-            ShowNuGetRestoreGuidance();
-            return false;
-        }
-
-        Debug.WriteLine("[NuGet] Running in production mode - NuGet packages should be pre-installed");
-        return false;
-    }
-
-    /// <summary>Checks if MKL NuGet package libraries are present in the expected location.</summary>
-    public static bool IsMklNuGetPackagePresent()
-    {
-        try
-        {
-            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            var rid = GetRuntimeIdentifier();
-            var nugetPath = Path.Combine(baseDir, "runtimes", rid, "native");
-
-            if (!Directory.Exists(nugetPath))
-                return false;
-
-            var mklFiles = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-                ? new[] { "mkl_rt.2.dll", "mkl_rt.1.dll", "mkl_rt.dll" }
-                : new[] { "libmkl_rt.so.2", "libmkl_rt.so.1", "libmkl_rt.so" };
-
-            foreach (var file in mklFiles)
-            {
-                var fullPath = Path.Combine(nugetPath, file);
-                if (File.Exists(fullPath))
-                    return true;
-            }
-
-            return false;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static string GetRuntimeIdentifier()
-    {
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            return RuntimeInformation.ProcessArchitecture == Architecture.X64 ? "win-x64" : "win-arm64";
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-            return RuntimeInformation.ProcessArchitecture == Architecture.X64 ? "linux-x64" : "linux-arm64";
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-            return RuntimeInformation.ProcessArchitecture == Architecture.X64 ? "osx-x64" : "osx-arm64";
-        return "unknown";
-    }
-
-    /// <summary>Checks if running in a development environment.</summary>
-    public static bool IsInDevelopmentEnvironment()
-    {
-        try
-        {
-            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-
-            var currentDir = new DirectoryInfo(baseDir);
-            while (currentDir != null)
-            {
-                if (currentDir.GetFiles("*.csproj").Any())
-                    return true;
-                currentDir = currentDir.Parent;
-            }
-
-            if (baseDir.Contains("bin\\Debug") || baseDir.Contains("bin/Debug") ||
-                baseDir.Contains("bin\\Release") || baseDir.Contains("bin/Release"))
-                return true;
-
-            return false;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static void ShowNuGetRestoreGuidance()
-    {
-        Console.WriteLine();
-        Console.WriteLine("╔════════════════════════════════════════════════════════════════╗");
-        Console.WriteLine("║  Intel MKL NuGet Package Not Found                             ║");
-        Console.WriteLine("╚════════════════════════════════════════════════════════════════╝");
-        Console.WriteLine();
-        Console.WriteLine("AUTOMATIC FIX:");
-        Console.WriteLine("  Run: dotnet restore");
-        Console.WriteLine();
-    }
-
-    /// <summary>Attempts to automatically restore NuGet packages.</summary>
-    public static bool TryAutoRestoreNuGetPackages()
-    {
-        try
-        {
-            if (!IsInDevelopmentEnvironment())
-                return false;
-
-            var projectFile = FindProjectFile();
-            if (projectFile == null)
-                return false;
-
-            Console.WriteLine("Attempting automatic NuGet package restore...");
-
-            var process = new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = "dotnet",
-                    Arguments = $"restore \"{projectFile}\"",
-                    WorkingDirectory = Path.GetDirectoryName(projectFile),
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = false
-                }
-            };
-
-            process.Start();
-
-            const int timeoutMs = 5 * 60 * 1000;
-            if (!process.WaitForExit(timeoutMs))
-            {
-                Console.WriteLine("✗ NuGet restore timed out after 5 minutes");
-                try
-                {
-                    process.Kill();
-                }
-                catch
-                {
-                }
-
-                return false;
-            }
-
-            if (process.ExitCode == 0)
-            {
-                Console.WriteLine("✓ NuGet packages restored successfully!");
-                return true;
-            }
-
-            return false;
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[NuGet] Auto-restore error: {ex.Message}");
-            return false;
-        }
-    }
-
-    private static string? FindProjectFile()
-    {
-        try
-        {
-            var baseDir = new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory);
-            var currentDir = baseDir;
-
-            for (var i = 0; i < 5 && currentDir != null; i++)
-            {
-                var projectFiles = currentDir.GetFiles("*.csproj");
-                if (projectFiles.Length > 0)
-                    return projectFiles[0].FullName;
-
-                currentDir = currentDir.Parent;
-            }
-
-            return null;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-}
-
-// ============================================================================
 // ROBUST NATIVE LIBRARY LOADER - Safe Library Loading with Fallback
 // ============================================================================
 
 /// <summary>
 ///     Robust native library loading with multiple path attempts and detailed diagnostics.
 /// </summary>
-public static class RobustNativeLibraryLoader
+internal static class RobustNativeLibraryLoader
 {
     /// <summary>
     ///     Tries to load a native library from multiple names and search paths.
