@@ -1,3 +1,4 @@
+namespace Numerical;
 using System.Buffers;
 using System.Collections;
 using System.Diagnostics;
@@ -12,8 +13,7 @@ namespace Numerical;
 // throughout, because it controls the lifecycle and holds _rwLock to prevent stale references.
 #pragma warning disable CS0618 // MM2M indexer marked obsolete for external callers
 
-using System.Text.Json;
-using System.Text.Json.Serialization;
+
 
 /// <summary>
 ///     Specifies the ordering of query results.
