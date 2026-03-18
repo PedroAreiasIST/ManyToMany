@@ -701,12 +701,42 @@ public sealed class NativeLibraryConfig : INativeLibraryConfig
                 }
             }
 
-            // If MKL not found OR all found libraries failed verification, try auto-install
+            // If MKL not found OR all found libraries failed verification:
+            // 1) Check NuGet runtime folder first (cheap, non-destructive)
+            // 2) Then try system-level auto-install as last resort
             if ((_cachedMKL == null || _cachedMKL.Length == 0 || shouldTryAutoInstall) &&
                 EnableAutoInstall &&
                 !_mklInstallAttempted)
             {
                 _mklInstallAttempted = true;
+
+                // Try NuGet package first — fast check, no side effects
+                if (NuGetLibraryChecker.IsMklNuGetPackagePresent())
+                {
+                    Debug.WriteLine("[NativeLibrary] ✓ MKL NuGet package detected, adding NuGet runtime path...");
+                    var rid = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                        ? (RuntimeInformation.ProcessArchitecture == Architecture.X64 ? "win-x64" : "win-arm64")
+                        : RuntimeInformation.IsOSPlatform(OSPlatform.Linux)
+                            ? (RuntimeInformation.ProcessArchitecture == Architecture.X64 ? "linux-x64" : "linux-arm64")
+                            : (RuntimeInformation.ProcessArchitecture == Architecture.X64 ? "osx-x64" : "osx-arm64");
+                    var nugetNativePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "runtimes", rid, "native");
+                    _cachedSearchPaths = (_cachedSearchPaths ?? Array.Empty<string>())
+                        .Prepend(nugetNativePath).Distinct().ToArray();
+
+                    // Re-scan with NuGet path included
+                    if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                        _cachedMKL = DiscoverLibrariesInSystem(LibraryPatterns.MKLWindows, "Intel MKL");
+                    else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                        _cachedMKL = DiscoverLibrariesInSystem(LibraryPatterns.MKLLinux, "Intel MKL");
+                    else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                        _cachedMKL = DiscoverLibrariesInSystem(LibraryPatterns.MKLMacOS, "Intel MKL");
+
+                    if (_cachedMKL != null && _cachedMKL.Length > 0)
+                    {
+                        Debug.WriteLine("[NativeLibrary] ✓ MKL found via NuGet package!");
+                        return _cachedMKL;
+                    }
+                }
 
                 if (shouldTryAutoInstall)
                     Debug.WriteLine(
