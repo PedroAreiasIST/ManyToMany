@@ -1,0 +1,29 @@
+{
+  "runtimeOptions": {
+    "tfm": "net9.0",
+    "framework": {
+      "name": "Microsoft.NETCore.App",
+      "version": "9.0.0"
+    },
+    "configProperties": {
+      "System.Runtime.TieredCompilation": true,
+      "System.Runtime.TieredCompilation.QuickJit": false,
+      "System.Runtime.TieredPGO": true,
+      "System.Runtime.TieredCompilation.QuickJitForLoops": false,
+      "System.GC.Server": true,
+      "System.GC.Concurrent": true,
+      "System.GC.RetainVM": true,
+      "System.GC.HeapCount": 0,
+      "System.GC.NoAffinitize": false,
+      "System.GC.AllowVeryLargeObjects": true,
+      "System.Numerics.Tensors.EnableTensorOperations": true,
+      "System.Threading.ThreadPool.MinThreads": 16,
+      "System.Threading.ThreadPool.MaxThreads": 1024,
+      "System.Threading.Thread.MaxStackSize": 2097152,
+      "System.Runtime.Loader.UseRidGraph": true,
+      "System.Diagnostics.Debugger.IsSupported": false,
+      "System.Reflection.Metadata.MetadataUpdater.IsSupported": false,
+      "System.Runtime.Serialization.EnableUnsafeBinaryFormatterSerialization": false
+    }
+  }
+}
