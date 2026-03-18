@@ -920,28 +920,26 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
 
         if (count >= ParallelizationThreshold)
         {
-            // FIXED: Use proper partitioning instead of thread-ID bucketing
-            // The old code used thread-ID % numThreads which causes collisions
-            var partitioner = Partitioner.Create(0, count);
-            var localMaxes = new ConcurrentBag<int>();
+            var sharedMax = int.MinValue;
 
-            Parallel.ForEach(partitioner, ParallelConfig.Options, (range, state) =>
-            {
-                var localMax = int.MinValue;
-                for (var i = range.Item1; i < range.Item2; i++)
+            Parallel.For(0, count, ParallelConfig.Options,
+                () => int.MinValue,
+                (i, _, localMax) =>
                 {
                     var span = CollectionsMarshal.AsSpan(_adjacencies[i]);
-                    localMax = FindMaxInSpan(span, localMax);
-                }
+                    return FindMaxInSpan(span, localMax);
+                },
+                localMax =>
+                {
+                    int current;
+                    do
+                    {
+                        current = Volatile.Read(ref sharedMax);
+                    } while (localMax > current &&
+                             Interlocked.CompareExchange(ref sharedMax, localMax, current) != current);
+                });
 
-                localMaxes.Add(localMax);
-            });
-
-            // Merge partition results
-            max = int.MinValue;
-            foreach (var localMax in localMaxes)
-                if (localMax > max)
-                    max = localMax;
+            max = sharedMax;
         }
         else
         {
@@ -1264,17 +1262,23 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
     ///     Computes a topological ordering of the graph nodes.
     ///     Parallel in-degree calculation.
     /// </summary>
+    /// <remarks>
+    ///     Node universe matches <see cref="IsAcyclic"/>: [0, max(Count - 1, GetMaxNode())].
+    ///     This keeps cycle checks and topological ordering consistent on out-of-range node references.
+    /// </remarks>
     public List<int> GetTopOrder()
     {
         var order = new List<int>();
-        var inDegree = new int[Count];
+        var maxNodeValue = GetMaxNode();
+        var nodeCount = Math.Max(Count, maxNodeValue + 1);
+        var inDegree = new int[nodeCount];
 
         if (Count >= ParallelizationThreshold)
             Parallel.For(0, Count, ParallelConfig.Options, i =>
             {
                 var nodes = _adjacencies[i];
                 foreach (var node in nodes)
-                    if ((uint)node < (uint)Count)
+                    if ((uint)node < (uint)nodeCount)
                         Interlocked.Increment(ref inDegree[node]);
             });
         else
@@ -1282,7 +1286,7 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
             {
                 var nodes = _adjacencies[i];
                 foreach (var node in nodes)
-                    if ((uint)node < (uint)Count)
+                    if ((uint)node < (uint)nodeCount)
                         inDegree[node]++;
             }
 
@@ -1296,14 +1300,17 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
             var cur = queue.Dequeue();
             order.Add(cur);
 
-            var nodes = _adjacencies[cur];
-            foreach (var nbr in nodes)
-                if ((uint)nbr < (uint)Count)
-                    if (--inDegree[nbr] == 0)
-                        queue.Enqueue(nbr);
+            if (cur < Count)
+            {
+                var nodes = _adjacencies[cur];
+                foreach (var nbr in nodes)
+                    if ((uint)nbr < (uint)nodeCount)
+                        if (--inDegree[nbr] == 0)
+                            queue.Enqueue(nbr);
+            }
         }
 
-        if (order.Count != Count)
+        if (order.Count != nodeCount)
             throw new InvalidOperationException("The relation contains cycles, topological sort not possible.");
 
         return order;
@@ -1668,6 +1675,8 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
             {
                 var row = _adjacencies[i];
                 var rowSpan = CollectionsMarshal.AsSpan(row);
+                // NOTE: mapSpan is a ref struct and cannot be directly captured by lambda.
+                // Rehydrate a local span inside the parallel body for fixed-pointer access.
                 var localMapSpan = CollectionsMarshal.AsSpan(oldToNewNodeMap);
 
                 fixed (int* rowPtr = rowSpan)
@@ -1835,6 +1844,10 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
     ///     Union operator: combines adjacency lists element-wise.
     ///     Parallel with thread-local markers.
     /// </summary>
+    /// <remarks>
+    ///     Output row order follows discovery order from touched-node buffers and is not guaranteed
+    ///     to be sorted. Callers that require sorted rows should normalize after union.
+    /// </remarks>
     [MethodImpl(AggressiveOptimization)]
     public static O2M operator |(O2M left, O2M right)
     {
