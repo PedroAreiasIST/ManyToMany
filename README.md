@@ -92,14 +92,15 @@ Generalizes `M2M` to heterogeneous entity types. Stores a 2D array of `M2M` bloc
 The primary user-facing API. Combines `MM2M` adjacency storage with arbitrary per-entity attribute dictionaries under a single `ReaderWriterLockSlim`.
 
 ```csharp
-// Define entity types
-struct MyTypes : ITypeMap { ... }
+// Define entity types via TypeMap
+using Types = TypeMap<Node, Edge, Tri3>;
 
 // Build topology
-var topo = new Topology<MyTypes>();
+var topo = new Topology<Types>();
 int n0 = topo.Add<Node>();
 int n1 = topo.Add<Node>();
-int e0 = topo.Add<Bar2, Node>(n0, n1);
+int n2 = topo.Add<Node>();
+int e0 = topo.Add<Tri3, Node>(n0, n1, n2);
 
 // Attribute storage
 topo.Set<Node, Position>(n0, new Position(x, y, z));
@@ -110,14 +111,18 @@ topo.DiscoverSubEntities<Tet4, Face, Node>(
     SubEntityDefinition.FromFaces((0,1,2), (0,1,3), (0,2,3), (1,2,3)));
 
 // Graph algorithms
-var order = topo.TopologicalOrder<Node, Bar2>();
-var coloring = topo.ColorEntities<Node>();
+var order = topo.GetTopologicalOrder<Node, Tri3>();
+var coloring = topo.ComputeElementColoring<Tri3, Node>();
 ```
 
 **Supported graph algorithms:**
-- Depth-First Search (DFS) and Breadth-First Search (BFS) on entity adjacency
+- Breadth-First Search (BFS) on entity adjacency, including multi-type BFS
+- Multi-type Depth-First Search (DFS) across heterogeneous entity types
 - Topological ordering (Kahn's algorithm) for DAG-structured connectivity
-- Entity coloring (greedy graph coloring) for parallel assembly scheduling
+- Element coloring (greedy graph coloring) for parallel assembly scheduling
+- Connected component detection
+- Cuthill-McKee bandwidth reduction ordering
+- Transitive connectivity computation and dual structure extraction
 
 #### `Symmetry` — Canonical Symmetry Groups
 
@@ -130,9 +135,10 @@ Encodes permutation symmetry groups for element types, enabling automatic canoni
 ### Serialization & Comparison
 
 All relation types support:
-- Binary serialization/deserialization for mesh checkpointing
-- `==`, `<`, `>` operators via lexicographic comparison of adjacency lists
-- Set operations: intersection, union, symmetric difference
+- JSON serialization/deserialization via `ToJson()` / `FromJson()` and `SaveToFile()` / `LoadFromFile()`
+- `==`, `<`, `>` operators via lexicographic comparison of adjacency lists (on `O2M` and `M2M`)
+- Set operations: intersection, union, difference (on `M2M`)
+- Structural validation and integrity checks
 
 ---
 
@@ -702,73 +708,147 @@ The main container combining `MM2M` adjacency with per-entity attribute dictiona
 
 | Method | Description |
 |---|---|
-| `int Add<TEntity>()` | Add an entity of the given type; returns its index. |
+| `int Add<TNode>()` | Add a node entity; returns its index. |
+| `int Add<TNode, TData>(TData data)` | Add a node with associated attribute data. |
 | `int Add<TElement, TNode>(params int[] nodes)` | Add an element connected to node indices; returns element index. |
-| `void Remove<TEntity>(int index)` | Remove an entity and all its adjacency entries. |
-| `int Count<TEntity>()` | Number of entities of the given type. |
+| `int Add<TElement, TNode, TData>(TData data, params int[] nodes)` | Add an element with connectivity and attribute data. |
+| `(int Index, bool WasNew) AddUnique<TElement, TNode>(params int[] nodes)` | Add an element only if canonically unique (requires symmetry). |
+| `int[] AddRange<TNode, TData>(IEnumerable<TData> dataItems)` | Batch-add nodes with data. |
+| `int[] AddRange<TElement, TNode>(IEnumerable<int[]> connectivityList)` | Batch-add elements. |
+| `int[] AddRangeParallel<TElement, TNode>(int[][] connectivityList, ...)` | Parallel batch-add for large element sets. |
+| `void Remove<TEntity>(int index)` | Mark an entity for removal. |
+| `void RemoveRange<TEntity>(IEnumerable<int> indices)` | Mark multiple entities for removal. |
+| `int Count<TEntity>()` | Total number of entities of the given type (including marked). |
+| `int CountActive<TEntity>()` | Number of non-deleted entities. |
+| `List<int> GetActive<TEntity>()` | Indices of all non-deleted entities. |
+| `bool Exists<TElement>(params int[] nodes)` | Check whether an element with the given nodes exists. |
+| `int Find<TElement>(params int[] nodes)` | Find an element by its nodes; returns index or -1. |
 
 **Attribute storage**
 
 | Method | Description |
 |---|---|
 | `void Set<TEntity, TData>(int index, TData value)` | Attach attribute data to an entity. |
+| `void SetRange<TEntity, TData>(int startIndex, ReadOnlySpan<TData> values)` | Batch-set attributes for a contiguous range. |
 | `TData Get<TEntity, TData>(int index)` | Retrieve attribute data from an entity. |
 | `bool TryGet<TEntity, TData>(int index, out TData value)` | Non-throwing attribute retrieval. |
-| `void RemoveData<TEntity, TData>(int index)` | Remove a specific attribute from an entity. |
+| `IEnumerable<(int Index, TData Data)> Each<TEntity, TData>()` | Iterate over all entities with their data. |
+| `IEnumerable<int> Each<TEntity>()` | Iterate over all entity indices of a type. |
+| `void ForEach<TEntity, TData>(Action<int, TData> action)` | Execute an action on each entity with data. |
+| `void ParallelForEach<TEntity, TData>(Action<int, TData> action, ...)` | Parallel iteration over entities with data. |
 
 **Adjacency queries**
 
 | Method | Description |
 |---|---|
-| `IReadOnlyList<int> GetConnected<TFrom, TTo>(int index)` | Get all entities of type `TTo` connected to entity `index` of type `TFrom`. |
-| `bool AreConnected<TA, TB>(int a, int b)` | Test whether two entities are directly connected. |
-| `int GetPosition<TFrom, TTo>(int from, int to)` | Index of `to` in the adjacency list of `from`. |
+| `void WithNodesOf<TElement, TNode>(int element, Action<ReadOnlySpan<int>> action)` | Access an element's nodes via a zero-allocation span callback. |
+| `IEnumerable<int> EnumerateNeighbors<TElement, TNode>(int element)` | Enumerate nodes connected to an element. |
+| `List<int> GetElementsWithNodes<TElement, TNode>(List<int> nodes)` | Get elements connected to all specified nodes (intersection). |
+| `List<int> GetElementsContainingAnyNode<TElement, TNode>(List<int> nodes)` | Get elements connected to any specified node (union). |
+| `List<int> GetElementsFromNodes<TElement, TNode>(List<int> nodes)` | Get elements whose node sets are subsets of the given nodes. |
+| `List<int> ElementsContainingAllNodes<TElement, TNode>(params int[] nodes)` | Find elements containing all specified nodes. |
+| `int CountRelated<TEntity, TRelated>(int entityIndex)` | Count of related entities. |
+| `int CountIncident<TElement, TNode>(int nodeIndex)` | Count of elements incident to a node. |
+| `List<int> GetDirectNeighbors<TEntity, TRelated>(int entityIndex, ...)` | Direct neighbors via shared related entities. |
+| `List<(int EntityIndex, int SharedCount)> GetWeightedNeighbors<TEntity, TRelated>(int entityIndex, ...)` | Neighbors with shared-entity counts. |
+| `List<int> GetElementNeighbors<TElement, TNode>(int element, ...)` | Element-to-element neighbors via shared nodes. |
+| `List<int> GetNodeNeighbors<TElement, TNode>(int node, ...)` | Node-to-node neighbors via shared elements. |
+| `Dictionary<int, int> GetKHopNeighborhood<TEntity, TRelated>(int entityIndex, int maxHops)` | K-hop neighborhood with distances. |
 
-**Sub-entity discovery**
+**Sub-entity discovery & boundary**
 
 | Method | Description |
 |---|---|
 | `void DiscoverSubEntities<TElement, TSubEntity, TNode>(SubEntityDefinition def)` | Enumerate and register all sub-entities (faces, edges) implied by element connectivity. |
-| `void WithSymmetry<TEntity>(Symmetry symmetry)` | Register a symmetry group so that canonically equivalent entities are deduplicated. |
+| `Topology<TTypes> WithSymmetry<TElement>(Symmetry symmetry)` | Register a symmetry group for canonical deduplication; returns `this` for chaining. |
+| `List<int> ElementsSharingSubEntity<TParent, TSubEntity, TNode>(int subEntityIndex)` | Find parent elements sharing a sub-entity. |
+| `int CountElementsSharingSubEntity<TParent, TSubEntity, TNode>(int subEntityIndex)` | Count parent elements sharing a sub-entity. |
+| `int GetLocalNodeIndex<TElement, TNode>(int element, int node)` | Get the local position of a node within an element. |
+| `List<int[]> ExtractBoundaryFacets<TElement, TNode>(int nodesPerBoundaryFacet)` | Extract boundary faces/facets. |
+| `List<(int[] Nodes, int, int)> FindInternalFacets<TElement, TNode>(int nodesPerFacet)` | Find interior faces shared by two elements. |
+| `List<int> GetBoundarySubEntities<TParent, TSubEntity, TNode>()` | Get boundary sub-entity indices. |
+| `List<int> GetInteriorSubEntities<TParent, TSubEntity, TNode>()` | Get interior sub-entity indices. |
+| `bool IsSubEntityOnBoundary<TParent, TSubEntity, TNode>(int subEntityIndex)` | Check if a sub-entity is on the boundary. |
+| `List<int> DetectNonManifoldSubEntities<TParent, TSubEntity, TNode>()` | Find non-manifold sub-entities. |
+| `SubEntityBoundaryResult DetectSubEntityBoundary<TParent, TSubEntity, TNode>()` | Full boundary detection returning classified sub-entities. |
 
 **Graph algorithms**
 
 | Method | Description |
 |---|---|
-| `List<int> TopologicalOrder<TNode, TElement>()` | Kahn's algorithm topological sort over the entity adjacency DAG. |
-| `int[] ColorEntities<TEntity>()` | Greedy graph coloring; returns color index per entity (useful for parallel assembly scheduling). |
-| `List<int> BFS<TEntity>(int start)` | Breadth-first search from a starting entity. |
-| `List<int> DFS<TEntity>(int start)` | Depth-first search from a starting entity. |
+| `List<int> GetTopologicalOrder<TEntity>()` | Topological sort within a single entity type. |
+| `List<int> GetTopologicalOrder<TEntity, TRelated>()` | Topological sort over a bipartite entity–related DAG. |
+| `List<int> GetSortOrder<TEntity>()` | Lexicographic sort order of entity adjacency. |
+| `int[] ComputeElementColoring<TElement, TNode>()` | Greedy graph coloring; returns color index per element. |
+| `List<List<int>> GetColorGroups<TElement, TNode>()` | Group elements by assigned color. |
+| `List<int> BreadthFirstSearch<TEntity>(int startEntity, ...)` | BFS from a starting entity with optional visitor callback. |
+| `Dictionary<int, int> BreadthFirstDistances<TEntity>(int startEntity)` | BFS distances from a starting entity. |
+| `List<(int, int)> BreadthFirstSearchMultiType<TStartEntity>(int startEntity)` | BFS across heterogeneous entity types. |
+| `List<(int, int)> MultiTypeDFS<TNode>(int nodeIndex)` | DFS across all types starting from a node. |
+| `bool IsAcyclic<TEntity, TRelated>()` | Check if the entity–related graph is acyclic. |
+| `IReadOnlyList<IReadOnlyList<int>> FindComponents<TElement, TNode>()` | Find connected components. |
+| `List<List<int>> FindConnectedComponents<TEntity, TRelated>(int minShared)` | Connected components with minimum shared count. |
+| `int[] ComputeCuthillMcKeeOrdering<TElement, TNode>(bool reverse = true)` | Cuthill-McKee bandwidth reduction ordering. |
+| `int ComputeBandwidth<TElement, TNode>()` | Compute the bandwidth of the adjacency. |
+| `O2M ComputeTransitiveConnectivity<TEntity, TRelated>()` | Transitive closure of the entity graph. |
+| `O2M GetDualStructure<TEntity, TRelated>()` | Dual graph as O2M. |
+| `O2M GetElementToElementGraph<TElement, TNode>()` | Element-to-element adjacency graph. |
+| `O2M GetNodeToNodeGraph<TElement, TNode>()` | Node-to-node adjacency graph. |
 
-**Serialization**
+**Serialization & validation**
 
 | Method | Description |
 |---|---|
-| `void Serialize(BinaryWriter writer)` | Binary serialization for checkpointing. |
-| `static Topology<TTypes> Deserialize(BinaryReader reader)` | Reconstruct from binary data. |
-| `TopologyDto ToDto()` | Serialize to a JSON-friendly DTO. |
-| `static Topology<TTypes> FromDto(TopologyDto dto)` | Reconstruct from a DTO. |
-| `ConnectivityStatistics GetStatistics()` | Summary of entity counts and adjacency density. |
-| `ValidationResult Validate()` | Consistency checks on the adjacency structure. |
+| `string ToJson(JsonSerializerOptions? options)` | Serialize topology to JSON string. |
+| `static Topology<TTypes> FromJson(string json, ...)` | Reconstruct from a JSON string. |
+| `void SaveToFile(string path, ...)` | Save topology to a JSON file. |
+| `static Topology<TTypes> LoadFromFile(string path, ...)` | Load topology from a JSON file. |
+| `TopologyStats GetStatistics()` | Summary of entity counts and adjacency density. |
+| `bool ValidateStructure()` | Structural consistency check. |
+| `ValidationResult ValidateIntegrity<TElement, TNode>()` | Detailed integrity validation for a relationship. |
+| `List<int> GetDuplicates<TEntity>()` | Find duplicate entities of a type. |
+| `bool IsPermutationOf<TElement, TNode>(Topology<TTypes> other)` | Check if two topologies are permutations of each other. |
 
-**Iterators / circulators**
+**Memory & lifecycle**
+
+| Method | Description |
+|---|---|
+| `void Compress(bool removeDuplicates, bool shrinkMemory, bool validate)` | Remove deleted entities and optionally shrink memory. |
+| `void Clear()` | Remove all entities and data. |
+| `Topology<TTypes> Clone()` | Deep copy. |
+| `void Reserve<TElement, TNode>(int capacity)` | Pre-allocate capacity for a relationship. |
+| `void ShrinkToFit()` | Release excess memory. |
+| `void ConfigureType<TEntity>(int parallelizationThreshold, int? reserveCapacity)` | Configure parallelization threshold for a type. |
+| `void WithBatch(Action action)` | Execute multiple operations atomically under a single write lock. |
+| `int Merge<TElement, TNode>(Topology<TTypes> other)` | Merge another topology's entities into this one. |
+
+**Transpose & internal structure**
+
+| Method | Description |
+|---|---|
+| `O2M GetTranspose<TElement, TNode>()` | Get the transposed adjacency (node-to-elements). |
+| `O2M GetTranspose<TElement, TNode>(int maxNodeCap)` | Transposed adjacency with a maximum node capacity. |
+| `O2M GetTransposeStrict<TElement, TNode>()` | Strict transpose that throws on invalid node indices. |
+| `void WithTranspose<TElement, TNode>(Action<O2M> action)` | Access transpose via callback with automatic locking. |
+| `void WithElementsForNodeSpan<TElement, TNode>(int nodeIndex, ReadOnlySpanAction<int> action)` | Zero-allocation access to elements incident to a node. |
+| `void EnsureSynchronized<TElement, TNode>()` | Force transpose cache synchronization. |
+| `void EnsurePositionCaches<TElement, TNode>()` | Force position cache rebuild. |
+
+**Smart entity wrapper**
 
 | Type | Description |
 |---|---|
-| `SmartEntity<TEntity>` | `readonly record struct` pairing a `Topology` reference with an entity index; supports dot-access to methods. |
-| `EntityCirculator<TEntity>` | `IEnumerable<int>` over all entities of one type. |
-| `IncidentCirculator<TEntity, TIncident>` | `IEnumerable<int>` over entities incident to a given entity. |
-| `BoundaryCirculator<TElement, TNode>` | `IEnumerable<int>` over boundary nodes of an element. |
+| `SmartEntity<TEntity>` | `readonly record struct` pairing a `Topology` reference with an entity index. Provides `IsValid`, `IsMarked`, `Count`, `Data<T>()`, `SetData<T>()`, `BreadthFirstSearch()`, and `BreadthFirstDistances()`. |
 
 **Nested result types**
 
 | Type | Kind | Description |
 |---|---|---|
-| `ConnectivityStatistics` | `sealed class` | Entity counts, average/max adjacency degree. |
-| `ValidationResult` | `readonly struct` | Pass/fail + error description from `Validate()`. |
-| `SubEntityBoundaryResult` | `readonly struct` | Output of boundary sub-entity queries. |
+| `ConnectivityStatistics` | `sealed class` | Entity counts, average/max/min adjacency degree. |
+| `ValidationResult` | `readonly struct` | Pass/fail + error description from `ValidateIntegrity()`. |
+| `SubEntityBoundaryResult` | `readonly struct` | Output of boundary sub-entity detection. |
 | `ColoringStatistics` | `readonly struct` | Number of colors used, distribution per color. |
-| `DualGraph` | `sealed class` | Element-to-element adjacency graph derived from shared nodes. |
+| `DualGraph` | `sealed class` | Element-to-element adjacency graph derived from shared nodes, with BFS. |
 | `ElementStatistics` | `readonly struct` | Per-element quality and connectivity metrics. |
 
 #### `ReadOnlyTopology<TTypes>`
@@ -789,9 +869,11 @@ Encodes a permutation symmetry group for an element type. Used with `Topology.Wi
 
 | Factory | Description |
 |---|---|
-| `Symmetry.Full(int n)` | Full symmetric group S_n (all n! permutations). |
-| `Symmetry.Cyclic(int n)` | Cyclic group C_n (rotations only). |
-| `Symmetry.FromPermutations(IEnumerable<int[]> perms)` | Custom permutation set. |
+| `Symmetry.Identity(int nodeCount)` | Identity symmetry (no permutations beyond identity). |
+| `Symmetry.Cyclic(int n)` | Cyclic group C_n (n rotations). |
+| `Symmetry.Dihedral(int n)` | Dihedral group D_n (n rotations + n reflections = 2n elements). |
+| `Symmetry.Full(int n)` | Full symmetric group S_n (all n! permutations, max n=8). |
+| `Symmetry.FromGenerators(List<List<int>> generators)` | Build group from generating permutations. |
 
 #### `SubEntityDefinition`
 
@@ -803,16 +885,17 @@ Describes which local node indices form each sub-entity (face, edge) of a parent
 
 | Factory | Description |
 |---|---|
-| `SubEntityDefinition.FromFaces(params (int, int, int)[] faces)` | Triangular faces. |
-| `SubEntityDefinition.FromEdges(params (int, int)[] edges)` | Edges. |
+| `SubEntityDefinition.FromEdges(params (int, int)[] edges)` | Edges (2-node sub-entities). |
+| `SubEntityDefinition.FromFaces(params (int, int, int)[] faces)` | Triangular faces (3-node sub-entities). |
+| `SubEntityDefinition.FromQuadFaces(params (int, int, int, int)[] faces)` | Quadrilateral faces (4-node sub-entities). |
 
 #### `ResultOrder` enum
 
-Controls the ordering of results returned by graph algorithms: `Default`, `Ascending`, `Descending`.
+Controls the ordering of results returned by graph algorithms: `Unordered` (insertion order, fastest) and `Sorted` (deterministic ordering by type and entity index).
 
 #### Type-mapping infrastructure
 
-`ITypeMap` is the compile-time interface that maps C# types to integer indices within a `Topology`. Users implement it by using one of the pre-built `TypeMap<T0, …, Tn>` generic classes (provided for 2 up to 22 type arguments):
+`ITypeMap` is the compile-time interface that maps C# types to integer indices within a `Topology`. Users implement it by using one of the pre-built `TypeMap<T0, …, Tn>` generic classes (provided for 2 up to 25 type arguments):
 
 ```csharp
 // Example: 3-type map
