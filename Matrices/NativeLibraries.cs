@@ -67,7 +67,7 @@ public interface INativeLibraryConfig
 ///     Detailed status of all native libraries.
 ///     Provides a unified view of library availability and configuration.
 /// </summary>
-public class LibraryStatus
+internal class LibraryStatus
 {
     public bool CudaAvailable { get; set; }
     public int CudaVersion { get; set; }
@@ -109,7 +109,7 @@ public class LibraryStatus
 ///     This provides a simple API for checking library availability without caching complexity.
 ///     For detailed diagnostics, use <see cref="NativeLibraryStatus" />.
 /// </summary>
-public static class LibraryAvailability
+internal static class LibraryAvailability
 {
     #region Public API
 
@@ -701,12 +701,42 @@ public sealed class NativeLibraryConfig : INativeLibraryConfig
                 }
             }
 
-            // If MKL not found OR all found libraries failed verification, try auto-install
+            // If MKL not found OR all found libraries failed verification:
+            // 1) Check NuGet runtime folder first (cheap, non-destructive)
+            // 2) Then try system-level auto-install as last resort
             if ((_cachedMKL == null || _cachedMKL.Length == 0 || shouldTryAutoInstall) &&
                 EnableAutoInstall &&
                 !_mklInstallAttempted)
             {
                 _mklInstallAttempted = true;
+
+                // Try NuGet package first — fast check, no side effects
+                if (NuGetLibraryChecker.IsMklNuGetPackagePresent())
+                {
+                    Debug.WriteLine("[NativeLibrary] ✓ MKL NuGet package detected, adding NuGet runtime path...");
+                    var rid = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                        ? (RuntimeInformation.ProcessArchitecture == Architecture.X64 ? "win-x64" : "win-arm64")
+                        : RuntimeInformation.IsOSPlatform(OSPlatform.Linux)
+                            ? (RuntimeInformation.ProcessArchitecture == Architecture.X64 ? "linux-x64" : "linux-arm64")
+                            : (RuntimeInformation.ProcessArchitecture == Architecture.X64 ? "osx-x64" : "osx-arm64");
+                    var nugetNativePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "runtimes", rid, "native");
+                    _cachedSearchPaths = (_cachedSearchPaths ?? Array.Empty<string>())
+                        .Prepend(nugetNativePath).Distinct().ToArray();
+
+                    // Re-scan with NuGet path included
+                    if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                        _cachedMKL = DiscoverLibrariesInSystem(LibraryPatterns.MKLWindows, "Intel MKL");
+                    else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                        _cachedMKL = DiscoverLibrariesInSystem(LibraryPatterns.MKLLinux, "Intel MKL");
+                    else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                        _cachedMKL = DiscoverLibrariesInSystem(LibraryPatterns.MKLMacOS, "Intel MKL");
+
+                    if (_cachedMKL != null && _cachedMKL.Length > 0)
+                    {
+                        Debug.WriteLine("[NativeLibrary] ✓ MKL found via NuGet package!");
+                        return _cachedMKL;
+                    }
+                }
 
                 if (shouldTryAutoInstall)
                     Debug.WriteLine(
@@ -1936,7 +1966,7 @@ public sealed class NativeLibraryConfig : INativeLibraryConfig
 ///     Provides detailed information about native library availability and performance.
 ///     Use this for comprehensive diagnostics; use <see cref="LibraryAvailability" /> for quick checks.
 /// </summary>
-public static class NativeLibraryStatus
+internal static class NativeLibraryStatus
 {
     private static volatile bool _initialized;
     private static readonly object _initLock = new();
@@ -2170,7 +2200,7 @@ public static class NativeLibraryStatus
 /// <summary>
 ///     Checks for NuGet-provided native libraries and provides guidance for automatic restoration.
 /// </summary>
-public static class NuGetLibraryChecker
+internal static class NuGetLibraryChecker
 {
     /// <summary>Checks if NuGet-provided MKL libraries are present.</summary>
     public static bool EnsureMklNuGetPackage()
@@ -2366,7 +2396,7 @@ public static class NuGetLibraryChecker
 /// <summary>
 ///     Robust native library loading with multiple path attempts and detailed diagnostics.
 /// </summary>
-public static class RobustNativeLibraryLoader
+internal static class RobustNativeLibraryLoader
 {
     /// <summary>
     ///     Tries to load a native library from multiple names and search paths.

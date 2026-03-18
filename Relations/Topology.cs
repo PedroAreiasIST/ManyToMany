@@ -9146,7 +9146,7 @@ public sealed class TopologyStats
     }
 }
 
-public sealed class TopologyDto
+internal sealed class TopologyDto
 {
     public int TypeCount { get; set; }
     public List<AdjacencyDto> Adjacency { get; set; } = new();
@@ -9157,21 +9157,21 @@ public sealed class TopologyDto
     public List<CanonicalIndexDto> CanonicalIndices { get; set; } = new();
 }
 
-public sealed class AdjacencyDto
+internal sealed class AdjacencyDto
 {
     public int EntityTypeIndex { get; set; }
     public int NodeTypeIndex { get; set; }
     public List<List<int>> Elements { get; set; } = new();
 }
 
-public sealed class DataListDto
+internal sealed class DataListDto
 {
     public string EntityTypeName { get; set; } = "";
     public string DataTypeName { get; set; } = "";
     public List<JsonElement> Items { get; set; } = new();
 }
 
-public sealed class SymmetryDto
+internal sealed class SymmetryDto
 {
     public int NodeCount { get; set; }
     public List<List<int>> Permutations { get; set; } = new();
@@ -9180,7 +9180,7 @@ public sealed class SymmetryDto
 /// <summary>
 ///     Represents a canonical index hash bucket with its collision chain.
 /// </summary>
-public sealed class CanonicalIndexDto
+internal sealed class CanonicalIndexDto
 {
     /// <summary>Entity type full name.</summary>
     public string TypeKey { get; set; } = "";
@@ -9195,7 +9195,7 @@ public sealed class CanonicalIndexDto
 /// <summary>
 ///     Represents a single entry in a canonical index collision chain.
 /// </summary>
-public sealed class CanonicalEntryDto
+internal sealed class CanonicalEntryDto
 {
     /// <summary>Entity index.</summary>
     public int Index { get; set; }

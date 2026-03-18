@@ -4786,7 +4786,7 @@ internal sealed class CuSparseBackend : IDisposable
 // GPU DECISION LOGIC
 // ============================================================================
 
-public static class SparseBackendFactory
+internal static class SparseBackendFactory
 {
     private const int MIN_ROWS_FOR_GPU = 50_000;
     private const int MIN_NNZ_FOR_GPU = 1_000_000;
@@ -4802,7 +4802,7 @@ public static class SparseBackendFactory
 // HYBRID CPU/GPU SCHEDULER
 // ============================================================================
 
-public sealed class HybridScheduler : IDisposable
+internal sealed class HybridScheduler : IDisposable
 {
     public enum BackendType
     {
