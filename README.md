@@ -46,9 +46,9 @@ ManyToMany is organized as a layered dependency stack: each module builds cleanl
 
 | Module | Primary Types | Role |
 |---|---|---|
-| `Relations` | `O2M`, `M2M`, `MM2M`, `Topology<TTypes>`, `Symmetry` | Mesh topology, graph algorithms |
+| `Relations` | `O2M`, `Topology<TTypes>`, `Symmetry` | Mesh topology, graph algorithms |
 | `Matrices` | `Matrix`, `CSR`, `CliqueSystem` | Dense/sparse algebra, FE assembly |
-| `Meshing` | `SimplexMesh`, `SimplexRemesher`, `CrackOperations` | Mesh generation, refinement, fracture |
+| `Meshing` | `SimplexMesh`, `SimplexRemesher`, `MeshGeometry` | Mesh generation, refinement, fracture |
 | `Nonlinear` | `BatheTwoStageIntegrator`, `RootFinder` | Time integration, root finding |
 | `Postprocess` | `EnsightWriter` | Visualization export |
 
@@ -62,7 +62,7 @@ The `Relations` library is the foundation of ManyToMany. It provides type-safe, 
 
 #### `O2M` — One-to-Many
 
-A sparse adjacency list mapping one entity to an ordered list of entities. Single-threaded, not thread-safe by design (thread safety is added at the `M2M` level).
+A sparse adjacency list mapping one entity to an ordered list of entities. Single-threaded by design; thread safety is provided at the `Topology<TTypes>` level.
 
 - Internal storage: `List<List<int>>` with pre-allocated capacity
 - Parallel cloning via `GC.AllocateUninitializedArray` + `Parallel.For` above a configurable parallelization threshold
@@ -70,26 +70,9 @@ A sparse adjacency list mapping one entity to an ordered list of entities. Singl
 - `[SkipLocalsInit]` attribute eliminates redundant zero-fills in hot paths
 - Implements `IComparable<O2M>`, `IEquatable<O2M>`, `ICloneable`
 
-#### `M2M` — Many-to-Many
-
-Thread-safe sparse adjacency structure wrapping `O2M` with `ReaderWriterLockSlim` synchronization. Provides a cached transpose and O(1) position lookups.
-
-- **Transpose caching**: transposed adjacency is computed once and cached; invalidated on mutation
-- **Position lookup**: given `(entity_i, entity_j)`, returns the index of `entity_j` in the adjacency list of `entity_i` in O(n_neighbors) time
-- **Set operations**: intersection, union, and difference on adjacency sets
-- **Lexicographical ordering** of all adjacency relations for deterministic processing
-
-#### `MM2M` — Multi-Many-to-Many
-
-Generalizes `M2M` to heterogeneous entity types. Stores a 2D array of `M2M` blocks indexed by `(type_i, type_j)`, enabling traversal across entity kinds (e.g., element-to-node, node-to-edge, face-to-element).
-
-- Block-structured layout: `_blocks[typeCount, typeCount]`
-- Type indices are resolved at compile time via the generic `ITypeMap` constraint
-- `[Obsolete]` indexer for internal use (only `Topology<TTypes>` holds the lifecycle lock to prevent stale references)
-
 #### `Topology<TTypes>` — Type-Safe Topology Container
 
-The primary user-facing API. Combines `MM2M` adjacency storage with arbitrary per-entity attribute dictionaries under a single `ReaderWriterLockSlim`.
+The primary user-facing API. Combines multi-type adjacency storage with arbitrary per-entity attribute dictionaries under a single `ReaderWriterLockSlim`.
 
 ```csharp
 // Define entity types via TypeMap
@@ -136,8 +119,8 @@ Encodes permutation symmetry groups for element types, enabling automatic canoni
 
 All relation types support:
 - JSON serialization/deserialization via `ToJson()` / `FromJson()` and `SaveToFile()` / `LoadFromFile()`
-- `==`, `<`, `>` operators via lexicographic comparison of adjacency lists (on `O2M` and `M2M`)
-- Set operations: intersection, union, difference (on `M2M`)
+- `==`, `<`, `>` operators via lexicographic comparison of adjacency lists (on `O2M`)
+- Set operations: intersection, union, difference (via `Topology<TTypes>`)
 - Structural validation and integrity checks
 
 ---
@@ -197,17 +180,17 @@ values[k]            →  value of the k-th non-zero
 
 | Backend | Condition | API |
 |---|---|---|
-| NVIDIA cuSPARSE (GPU) | `rows >= 50,000` and `nnz >= 1,000,000` | `CuSparseBackend` |
-| Intel MKL PARDISO | MKL available | `PardisoSolver` |
-| SIMD SpMV (CPU) | `rows >= 5,000` | `OptimizedSpMV` |
+| NVIDIA cuSPARSE (GPU) | `rows >= 50,000` and `nnz >= 1,000,000` | GPU sparse backend |
+| Intel MKL PARDISO | MKL available | Direct sparse solver |
+| SIMD SpMV (CPU) | `rows >= 5,000` | AVX2 vectorized SpMV |
 | Parallel SpMV (CPU) | `rows >= 1,000` | `Parallel.For` over rows |
 | Sequential SpMV | fallback | standard row loop |
 
-**`OptimizedSpMV`:** Hand-written AVX2 kernel processes 4 doubles per cycle. Handles row-aligned and tail remainder cases. Falls back to `System.Numerics.Vector<double>` when AVX2 is unavailable.
+**SIMD SpMV:** Hand-written AVX2 kernel processes 4 doubles per cycle. Handles row-aligned and tail remainder cases. Falls back to `System.Numerics.Vector<double>` when AVX2 is unavailable.
 
-**`PardisoSolver`:** Wraps Intel MKL PARDISO via P/Invoke. Supports symmetric positive definite (type 2), symmetric indefinite (type -2), and general unsymmetric (type 11) matrices. Reuse factorization across multiple RHS vectors.
+**PARDISO backend:** Wraps Intel MKL PARDISO via P/Invoke. Supports symmetric positive definite (type 2), symmetric indefinite (type -2), and general unsymmetric (type 11) matrices. Reuse factorization across multiple RHS vectors.
 
-**`CuSparseBackend`:** Wraps `cusparseSpMV` and `cusolverSpDcsrlsvqr`. Automatically migrates matrix to device memory, runs the kernel, and retrieves results. GPU path activated only when problem size justifies transfer overhead.
+**GPU backend:** Wraps `cusparseSpMV` and `cusolverSpDcsrlsvqr`. Automatically migrates matrix to device memory, runs the kernel, and retrieves results. GPU path activated only when problem size justifies transfer overhead.
 
 **Iterative solvers (`CSRIterativeSolvers`):**
 - **BiCGSTAB** — Bi-Conjugate Gradient Stabilized for general unsymmetric systems
@@ -346,7 +329,7 @@ Longest-edge bisection refinement, ensuring no element quality degradation:
 
 **Canonical edge representation:** All edges stored as `(min(a,b), max(a,b))` tuples for unique identification in hash sets.
 
-### `CrackOperations` — Level-Set Crack Insertion
+### Crack Insertion (via `SimplexRemesher`)
 
 Level-set based crack insertion for arbitrary 2D and 3D crack geometries:
 
@@ -481,7 +464,7 @@ Exports mesh and field data to Ensight Gold format, compatible with GiD/CIMNE an
 ManyToMany/
 ├── Numerical.sln                # Visual Studio solution
 ├── Relations/                   # Core topology library
-│   ├── Relations.cs             #   O2M, M2M, MM2M implementations
+│   ├── Relations.cs             #   O2M and supporting adjacency structures
 │   ├── Topology.cs              #   Topology<TTypes>, SubEntityDefinition, Symmetry
 │   └── Utils.cs                 #   Shared utilities, ParallelConfig
 ├── Matrices/                    # Linear algebra
@@ -493,8 +476,7 @@ ManyToMany/
 │   ├── SimplexMesh.cs           #   Core mesh container
 │   ├── SimplexRemesher.cs       #   Structured generation, bisection refinement, I/O
 │   ├── MeshRefinement.cs        #   Adaptive refinement drivers
-│   ├── MeshGeometry.cs          #   Geometric primitives (level sets, distances)
-│   └── CrackOperations.cs       #   Level-set crack insertion
+│   └── MeshGeometry.cs          #   Geometric primitives (level sets, distances)
 ├── Nonlinear/                   # Time integration & root finding
 │   ├── Integrator.cs            #   BatheTwoStageIntegrator
 │   └── RootFinder.cs            #   ITP + hybrid Newton-IQI algorithms
@@ -693,8 +675,6 @@ This section lists every public type in each module. With autocomplete, these ar
 | Type | Kind | Description |
 |---|---|---|
 | `O2M` | `sealed class` | One-to-many sparse adjacency list. Implements `IComparable<O2M>`, `IEquatable<O2M>`, `ICloneable`. Internal storage is `List<List<int>>`; parallel cloning via `GC.AllocateUninitializedArray` above a configurable threshold. |
-| `M2M` | `sealed class` | Thread-safe many-to-many wrapping `O2M` with `ReaderWriterLockSlim`. Adds transpose caching, O(1)-per-row position lookup, and set operations (intersection, union, difference). Implements `IComparable<M2M>`, `IEquatable<M2M>`, `IDisposable`. |
-| `MM2M` | `sealed class` | Block-structured multi-type many-to-many. Stores a `[typeCount × typeCount]` array of `M2M` blocks indexed by `(type_i, type_j)`. Implements `IDisposable`. |
 
 #### `Topology<TTypes>` — primary user-facing API
 
@@ -702,7 +682,7 @@ This section lists every public type in each module. With autocomplete, these ar
 public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
 ```
 
-The main container combining `MM2M` adjacency with per-entity attribute dictionaries under a single `ReaderWriterLockSlim`.
+The main container combining multi-type adjacency with per-entity attribute dictionaries under a single `ReaderWriterLockSlim`.
 
 **Entity management**
 
