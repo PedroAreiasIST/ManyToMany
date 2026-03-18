@@ -64,7 +64,7 @@
         <!-- Compiler Warnings -->
         <WarningLevel>4</WarningLevel>
         <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-        <NoWarn>CS8600;CS8602;CS8603;CS8604</NoWarn>
+        <NoWarn></NoWarn>
 
         <!-- Build Output -->
         <EmitCompilerGeneratedFiles>false</EmitCompilerGeneratedFiles>

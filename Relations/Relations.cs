@@ -4261,7 +4261,7 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
 /// </remarks>
 public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
 {
-    #region Clique Computation (Add to M2M class)
+    #region Clique Computation
 
     /// <summary>
     ///     Computes clique indices for finite element matrix assembly.
@@ -4283,19 +4283,18 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     ///         // ... build mesh connectivity ...
     ///         var cliques = m2m.GetCliques();
     ///         // Use for matrix assembly:
-    ///         for (int e = 0; e < m2m.Count; e++)
-    ///                               {
-    ///                               var elemNodes= m2m.GetNodesForElement( e);
-    ///                               int ns= elemNodes.Count;
-    ///                               for ( int i= 0; i < ns; i++)
-    ///                                                     for ( int j= 0; j < ns; j++)
-    ///                                                                           {
-    ///                                                                           int cliqueIdx= cliques[ e][ j + i * ns];
-    ///                                                                           // Accumulate element matrix contribution at
-    ///                                                                           cliqueIdx
+    ///         for (int e = 0; e &lt; m2m.Count; e++)
+    ///         {
+    ///             var elemNodes = m2m.GetNodesForElement(e);
+    ///             int ns = elemNodes.Count;
+    ///             for (int i = 0; i &lt; ns; i++)
+    ///                 for (int j = 0; j &lt; ns; j++)
+    ///                 {
+    ///                     int cliqueIdx = cliques[e][j + i * ns];
+    ///                     // Accumulate element matrix contribution at cliqueIdx
     ///                 }
     ///         }
-    ///         </code>
+    ///     </code>
     /// </remarks>
     public List<List<int>> GetCliques()
     {
@@ -4367,13 +4366,13 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     ///     Element position cache for spatial queries.
     ///     Lazily computed only when accessed via ElementLocations property.
     /// </summary>
-    private IReadOnlyList<IReadOnlyList<int>>? _elemeloc;
+    private IReadOnlyList<IReadOnlyList<int>>? _elementLocations;
 
     /// <summary>
     ///     Node position cache for spatial queries.
     ///     Lazily computed only when accessed via NodeLocations property.
     /// </summary>
-    private IReadOnlyList<IReadOnlyList<int>>? _nodeloc;
+    private IReadOnlyList<IReadOnlyList<int>>? _nodeLocations;
 
     /// <summary>
     ///     Tracks whether transpose cache is synchronized with current structure.
@@ -4640,7 +4639,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
             EnterPositionCachedReadLock();
             try
             {
-                return _elemeloc!;
+                return _elementLocations!;
             }
             finally
             {
@@ -4669,7 +4668,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
             EnterPositionCachedReadLock();
             try
             {
-                return _nodeloc!;
+                return _nodeLocations!;
             }
             finally
             {
@@ -5142,8 +5141,8 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         {
             _nodesFromElement.ClearAll();
             _elementsFromNode = null;
-            _elemeloc = null;
-            _nodeloc = null;
+            _elementLocations = null;
+            _nodeLocations = null;
             _isInSync = false;
             _positionCachesComputed = false;
         }
@@ -6347,7 +6346,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     /// </summary>
     /// <remarks>
     ///     <b>P0.3 FIX:</b> Same TOCTOU fix as <see cref="EnterSynchronizedReadLock"/> but
-    ///     additionally ensures position caches (<c>_elemeloc</c>, <c>_nodeloc</c>) are computed.
+    ///     additionally ensures position caches (<c>_elementLocations</c>, <c>_nodeLocations</c>) are computed.
     /// </remarks>
     private void EnterPositionCachedReadLock()
     {
@@ -6397,8 +6396,8 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
 
         // Mark position caches as invalid since structure changed
         _positionCachesComputed = false;
-        _elemeloc = null;
-        _nodeloc = null;
+        _elementLocations = null;
+        _nodeLocations = null;
     }
 
     /// <summary>
@@ -6417,12 +6416,12 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         var elemLocList = new List<IReadOnlyList<int>>(elemPositions.Count);
         for (var i = 0; i < elemPositions.Count; i++)
             elemLocList.Add(elemPositions[i].AsReadOnly());
-        _elemeloc = elemLocList.AsReadOnly();
+        _elementLocations = elemLocList.AsReadOnly();
 
         var nodeLocList = new List<IReadOnlyList<int>>(nodePositions.Count);
         for (var i = 0; i < nodePositions.Count; i++)
             nodeLocList.Add(nodePositions[i].AsReadOnly());
-        _nodeloc = nodeLocList.AsReadOnly();
+        _nodeLocations = nodeLocList.AsReadOnly();
 
         _positionCachesComputed = true;
     }
@@ -6434,7 +6433,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     /// <remarks>
     ///     <b>FIX (Priority 1):</b> Now sets cached structures to null to release memory.
     ///     Previously, invalidation only set flags but retained references to large
-    ///     cached objects (_elementsFromNode, _elemeloc, _nodeloc), causing unnecessary
+    ///     cached objects (_elementsFromNode, _elementLocations, _nodeLocations), causing unnecessary
     ///     memory retention for large meshes. Setting these to null allows the GC to
     ///     reclaim the memory immediately when the cache is invalidated.
     /// </remarks>
@@ -6448,8 +6447,8 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         // FIX: Release references to potentially large cached structures
         // This allows GC to reclaim memory for large meshes
         _elementsFromNode = null;
-        _elemeloc = null;
-        _nodeloc = null;
+        _elementLocations = null;
+        _nodeLocations = null;
     }
 
     /// <summary>
@@ -6526,8 +6525,8 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
             // Copy position caches if computed
             if (_positionCachesComputed)
             {
-                cloned._elemeloc = _elemeloc; // ReadOnlyCollection, safe to share
-                cloned._nodeloc = _nodeloc; // ReadOnlyCollection, safe to share
+                cloned._elementLocations = _elementLocations; // ReadOnlyCollection, safe to share
+                cloned._nodeLocations = _nodeLocations; // ReadOnlyCollection, safe to share
                 cloned._positionCachesComputed = true;
             }
 
@@ -7079,7 +7078,8 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
                     Debug.WriteLine(
                         "WARNING: M2M.Dispose() could not acquire write lock within timeout. " +
                         "Object is marked disposed but cleanup is incomplete. " +
-                        "Check IsDisposalIncomplete property and retry Dispose() after ensuring all threads have finished.");
+                        "Check IsDisposalIncomplete property. Ensure all reader/writer threads have " +
+                        "finished before disposing.");
                     
                     return;
                 }
@@ -7093,15 +7093,8 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
             // Lock was acquired - cleanup succeeded, clear incomplete flag
             Volatile.Write(ref _disposalIncomplete, false);
 
-            try
-            {
-                _rwLock.ExitWriteLock();
-            }
-            catch
-            {
-                /* Suppress */
-            }
-
+            // Dispose the lock while still holding the write lock to prevent
+            // another thread from briefly acquiring it between exit and dispose.
             try
             {
                 _rwLock.Dispose();
