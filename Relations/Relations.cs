@@ -13,6 +13,11 @@ using static System.Runtime.CompilerServices.MethodImplOptions;
 namespace Numerical;
 
 /// <summary>
+///     Delegate for actions that receive a read-only span.
+/// </summary>
+public delegate void ReadOnlySpanAction<T>(ReadOnlySpan<T> span);
+
+/// <summary>
 ///     Represents a one-to-many relationship structure using sparse adjacency lists.
 ///     High-performance implementation with parallel processing support.
 /// </summary>
@@ -4306,7 +4311,7 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
 ///     - No need for transpose caching
 ///     - Maximum performance requirements (no locking overhead)
 /// </remarks>
-public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
+internal sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
 {
     #region Clique Computation
 
@@ -6969,11 +6974,6 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     #region Internal Non-Cloning Accessors (Performance Critical)
 
     /// <summary>
-    ///     Delegate for actions that receive a read-only span.
-    /// </summary>
-    public delegate void ReadOnlySpanAction<T>(ReadOnlySpan<T> span);
-
-    /// <summary>
     ///     Gets elements for a node as a snapshot copy. INTERNAL USE ONLY.
     /// </summary>
     /// <param name="node">The node index.</param>
@@ -7366,7 +7366,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
 ///         <see cref="Version" /> on structural changes for consumer reference validation.
 ///     </para>
 /// </remarks>
-public sealed class MM2M : IDisposable
+internal sealed class MM2M : IDisposable
 {
     #region Constructor
 
@@ -7488,43 +7488,16 @@ public sealed class MM2M : IDisposable
     /// <param name="elementType">The element (row) type index.</param>
     /// <param name="nodeType">The node (column) type index.</param>
     /// <returns>The M2M structure for the specified type pair.</returns>
-    /// <exception cref="ArgumentOutOfRangeException">Thrown when type indices are out of range.</exception>
-    /// <exception cref="ArgumentNullException">Thrown when setting a null value.</exception>
-    /// <exception cref="ObjectDisposedException">Thrown if the object has been disposed.</exception>
     /// <remarks>
+    ///     <b>STALE REFERENCES:</b> Cached M2M references become invalid after
+    ///     <see cref="Compress" /> is called. Prefer <see cref="WithBlock(int, int, Action{M2M})" />
+    ///     for guaranteed validity, or check <see cref="Version" /> before using cached references.
     ///     <para>
-    ///         <b>⚠️ P0.4 WARNING - STALE REFERENCES:</b>
-    ///     </para>
-    ///     <para>
-    ///         Cached M2M references obtained from this indexer become <b>INVALID</b> after
-    ///         <see cref="Compress" /> is called. The old M2M instances are disposed and
-    ///         replaced with new ones. Using a cached reference will throw ObjectDisposedException.
-    ///     </para>
-    ///     <para>
-    ///         <b>RECOMMENDED:</b> Use <see cref="WithBlock(int, int, Action{M2M})" /> or
-    ///         <see cref="WithBlock{TResult}(int, int, Func{M2M, TResult})" /> instead, which
-    ///         guarantee reference validity.
-    ///     </para>
-    ///     <para>
-    ///         <b>If you must cache:</b> Check <see cref="Version" /> before using cached references.
-    ///         Version increments on every Compress() call.
-    ///     </para>
-    ///     <para>
-    ///         <b>LOCKING DESIGN (Review Issue #4):</b>
-    ///         Each M2M block has independent locking. MM2M's lock protects access to
-    ///         which M2M block is retrieved, but does NOT synchronize operations across
-    ///         multiple blocks. If you need to maintain invariants spanning multiple blocks
-    ///         (e.g., transpose symmetry between _mat[i,j] and _mat[j,i]), you must
-    ///         coordinate externally.
-    ///     </para>
-    ///     <para>
-    ///         This design allows maximum concurrency for independent relationship types,
-    ///         but requires care if cross-block invariants are needed.
+    ///         <b>LOCKING:</b> Each M2M block has independent locking. MM2M's lock protects
+    ///         block retrieval but does NOT synchronize across blocks. Cross-block invariants
+    ///         require external coordination.
     ///     </para>
     /// </remarks>
-    [Obsolete("P0-4 FIX: Use WithBlock() to avoid stale references after Compress(). " +
-              "Cached M2M references become disposed after Compress() is called. " +
-              "This indexer may be removed in a future version.")]
     public M2M this[int elementType, int nodeType]
     {
         get

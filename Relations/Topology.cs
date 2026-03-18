@@ -7,11 +7,6 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
-// Topology is the primary consumer of MM2M and intentionally uses the [Obsolete] indexer
-// throughout, because it controls the lifecycle and holds _rwLock to prevent stale references.
-#pragma warning disable CS0618 // MM2M indexer marked obsolete for external callers
-
-
 
 /// <summary>
 ///     Specifies the ordering of query results.
@@ -7752,11 +7747,11 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
 
     #endregion
 
-    #region Low-Level Access Wrappers (O2M/M2M/MM2M)
+    #region Low-Level Access Wrappers
 
     // ============================================================================
-    // These thin wrappers expose O2M, M2M, and MM2M functionality through
-    // the type-safe Topology API without requiring escape hatches.
+    // Thin wrappers that expose O2M query functionality through the type-safe
+    // Topology API. M2M and MM2M are internal implementation details.
     // ============================================================================
 
     #region MM2M Wrappers
@@ -7887,7 +7882,7 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     ///         Do NOT store the span. Read lock is held during execution.
     ///     </para>
     /// </remarks>
-    public void WithElementsForNodeSpan<TElement, TNode>(int nodeIndex, M2M.ReadOnlySpanAction<int> action)
+    public void WithElementsForNodeSpan<TElement, TNode>(int nodeIndex, ReadOnlySpanAction<int> action)
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(action);
@@ -8168,10 +8163,10 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
 
     #endregion
 
-    #region M2M Direct Access Wrappers
+    #region M2M Direct Access (Internal)
 
     /// <summary>
-    ///     Executes an action with direct access to the M2M structure.
+    ///     Executes an action with direct access to the internal M2M structure.
     /// </summary>
     /// <typeparam name="TElement">The element type.</typeparam>
     /// <typeparam name="TNode">The node type.</typeparam>
@@ -8183,7 +8178,7 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     ///         Do NOT store references. Appropriate locks are held during execution.
     ///     </para>
     /// </remarks>
-    public void WithRelationship<TElement, TNode>(Action<M2M> action)
+    internal void WithRelationship<TElement, TNode>(Action<M2M> action)
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(action);
@@ -8198,7 +8193,7 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     /// <typeparam name="TResult">The result type.</typeparam>
     /// <param name="func">Function to execute with the M2M.</param>
     /// <returns>The function result.</returns>
-    public TResult WithRelationship<TElement, TNode, TResult>(Func<M2M, TResult> func)
+    internal TResult WithRelationship<TElement, TNode, TResult>(Func<M2M, TResult> func)
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(func);
