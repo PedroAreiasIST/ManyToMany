@@ -4311,7 +4311,7 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
 ///     - No need for transpose caching
 ///     - Maximum performance requirements (no locking overhead)
 /// </remarks>
-internal sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
+public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
 {
     #region Clique Computation
 
@@ -7366,7 +7366,7 @@ internal sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
 ///         <see cref="Version" /> on structural changes for consumer reference validation.
 ///     </para>
 /// </remarks>
-internal sealed class MM2M : IDisposable
+public sealed class MM2M : IDisposable
 {
     #region Constructor
 
