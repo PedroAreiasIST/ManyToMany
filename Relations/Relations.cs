@@ -87,6 +87,7 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
         // so the max node index is the same. If the source cache is null (not yet computed),
         // the clone will also compute on demand.
         clonedO2m._maxNodeIndexCache = _maxNodeIndexCache;
+        clonedO2m.TransposeSkipsInvalidNodes = TransposeSkipsInvalidNodes;
 
         return clonedO2m;
     }
@@ -99,6 +100,12 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
     ///     Generates a random O2M for testing and benchmarking.
     ///     Parallel generation for large structures.
     /// </summary>
+    /// <remarks>
+    ///     <b>DETERMINISM:</b> The <paramref name="seed"/> parameter guarantees deterministic output
+    ///     only for a given parallelization configuration. When <paramref name="elementCount"/> crosses
+    ///     <see cref="DefaultParallelizationThreshold"/>, per-row seeding (<c>baseSeed + i</c>) replaces
+    ///     the single-RNG sequential path, producing different results for the same seed.
+    /// </remarks>
     [MethodImpl(AggressiveOptimization)]
     public static O2M GetRandomO2M(
         int elementCount,
@@ -353,10 +360,17 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
         for (var i = 0; i < sourceCount; i++)
             elemDegrees[i] = _adjacencies[i].Count;
 
-        // Prefix sum for flat buffer offsets
+        // Prefix sum for flat buffer offsets (checked to detect overflow for very large graphs)
         elemOffsets[0] = 0;
         for (var i = 0; i < sourceCount; i++)
-            elemOffsets[i + 1] = elemOffsets[i] + elemDegrees[i];
+        {
+            var next = (long)elemOffsets[i] + elemDegrees[i];
+            if (next > int.MaxValue)
+                throw new OverflowException(
+                    $"Transpose total slot count exceeds int.MaxValue ({next:N0} slots). " +
+                    "The graph is too large for the current implementation.");
+            elemOffsets[i + 1] = (int)next;
+        }
 
         var totalSlots = elemOffsets[sourceCount];
 
@@ -551,6 +565,11 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
     public O2M(List<List<int>> adjacenciesList)
     {
         ArgumentNullException.ThrowIfNull(adjacenciesList);
+        for (var i = 0; i < adjacenciesList.Count; i++)
+            if (adjacenciesList[i] is null)
+                throw new ArgumentException(
+                    $"Inner list at index {i} is null. All adjacency lists must be non-null.",
+                    nameof(adjacenciesList));
         _adjacencies = adjacenciesList;
         _maxNodeIndexCache = null;
         ParallelizationThreshold = DefaultParallelizationThreshold;
@@ -597,6 +616,14 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
         }
     }
 
+    /// <summary>
+    ///     Returns the raw mutable adjacency list. Internal use only.
+    /// </summary>
+    /// <remarks>
+    ///     <b>WARNING:</b> Mutations through this reference do NOT invalidate
+    ///     <c>_maxNodeIndexCache</c>. Callers MUST set <c>_maxNodeIndexCache = null</c>
+    ///     after modifying any inner list or the outer list itself.
+    /// </remarks>
     internal List<List<int>> AdjacenciesMutable => _adjacencies;
 
     #endregion
@@ -1606,7 +1633,11 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
         ArgumentNullException.ThrowIfNull(oldToNewElementMap);
 
         var n = Count;
-        if (oldToNewElementMap.Count != n || n == 0) return;
+        if (n == 0) return;
+        if (oldToNewElementMap.Count != n)
+            throw new ArgumentException(
+                $"Permutation map count ({oldToNewElementMap.Count}) must equal element count ({n}).",
+                nameof(oldToNewElementMap));
 
         // Validate permutation (parallel for large n)
         var seen = new int[n]; // Use int for Interlocked
@@ -1661,6 +1692,11 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
     ///     Renumbers all nodes according to a mapping.
     ///     Parallel with SIMD where applicable.
     /// </summary>
+    /// <remarks>
+    ///     <b>ORDERING:</b> This method does NOT preserve sorted order of adjacency lists.
+    ///     If sorted order is required (e.g., for <c>BinarySearch</c>-based lookups),
+    ///     callers must re-sort adjacency lists after calling this method.
+    /// </remarks>
     [MethodImpl(AggressiveOptimization)]
     public unsafe void PermuteNodes(List<int> oldToNewNodeMap)
     {
@@ -2741,11 +2777,14 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
     [MethodImpl(AggressiveOptimization | AggressiveInlining)]
     private static List<int> GetIntersectionHashSet(List<int> leftRow, List<int> rightRow)
     {
-        // Build HashSet from rightRow; iterate leftRow to preserve its ordering in the output
-        var hashSet = new HashSet<int>(rightRow);
+        // Build HashSet from the smaller list for optimal performance; iterate the larger
+        var (hashSource, iterSource) = leftRow.Count <= rightRow.Count
+            ? (leftRow, rightRow)
+            : (rightRow, leftRow);
+        var hashSet = new HashSet<int>(hashSource);
         var result = new List<int>();
 
-        foreach (var node in leftRow)
+        foreach (var node in iterSource)
             if (hashSet.Contains(node))
                 result.Add(node);
 
@@ -3145,6 +3184,11 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
     ///     Creates an O2M from Compressed Sparse Row (CSR) format.
     ///     Parallel row construction.
     /// </summary>
+    /// <remarks>
+    ///     <b>PRECONDITIONS:</b> <paramref name="rowPointers"/> must be monotonically non-decreasing
+    ///     and <c>rowPointers[^1] &lt;= columnIndices.Length</c>. Malformed input causes
+    ///     <see cref="ArgumentOutOfRangeException"/> or <see cref="IndexOutOfRangeException"/>.
+    /// </remarks>
     [MethodImpl(AggressiveOptimization)]
     public static O2M FromCsr(int[] rowPointers, int[] columnIndices)
     {
@@ -3600,7 +3644,7 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
 
                 foreach (var node in span)
                 {
-                    if (node > maxNodeValue) continue;
+                    if (node < 0 || node > maxNodeValue) continue;
 
                     double nodeX = Margin + elementsAreaWidth + NodeSpacing + node * NodeSpacing;
                     double nodeY = Margin + NodeRadius;
@@ -3971,6 +4015,7 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
                     var connectedElements = transpose[node];
                     foreach (var neighbor in connectedElements)
                     {
+                        if ((uint)neighbor >= (uint)Count) continue;
                         if (visited[neighbor]) continue;
 
                         visited[neighbor] = true;
@@ -4051,6 +4096,7 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
                     var connectedElements = transpose[node];
                     foreach (var neighbor in connectedElements)
                     {
+                        if ((uint)neighbor >= (uint)Count) continue;
                         if (distances.ContainsKey(neighbor)) continue;
 
                         distances[neighbor] = currentDist + 1;
@@ -4146,6 +4192,7 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
                     var connectedElements = transpose[node];
                     foreach (var neighbor in connectedElements)
                     {
+                        if ((uint)neighbor >= (uint)Count) continue;
                         if (finalized.Contains(neighbor)) continue;
                         if (neighbor == current) continue;
 
@@ -4261,7 +4308,7 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
 /// </remarks>
 public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
 {
-    #region Clique Computation (Add to M2M class)
+    #region Clique Computation
 
     /// <summary>
     ///     Computes clique indices for finite element matrix assembly.
@@ -4283,19 +4330,18 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     ///         // ... build mesh connectivity ...
     ///         var cliques = m2m.GetCliques();
     ///         // Use for matrix assembly:
-    ///         for (int e = 0; e < m2m.Count; e++)
-    ///                               {
-    ///                               var elemNodes= m2m.GetNodesForElement( e);
-    ///                               int ns= elemNodes.Count;
-    ///                               for ( int i= 0; i < ns; i++)
-    ///                                                     for ( int j= 0; j < ns; j++)
-    ///                                                                           {
-    ///                                                                           int cliqueIdx= cliques[ e][ j + i * ns];
-    ///                                                                           // Accumulate element matrix contribution at
-    ///                                                                           cliqueIdx
+    ///         for (int e = 0; e &lt; m2m.Count; e++)
+    ///         {
+    ///             var elemNodes = m2m.GetNodesForElement(e);
+    ///             int ns = elemNodes.Count;
+    ///             for (int i = 0; i &lt; ns; i++)
+    ///                 for (int j = 0; j &lt; ns; j++)
+    ///                 {
+    ///                     int cliqueIdx = cliques[e][j + i * ns];
+    ///                     // Accumulate element matrix contribution at cliqueIdx
     ///                 }
     ///         }
-    ///         </code>
+    ///     </code>
     /// </remarks>
     public List<List<int>> GetCliques()
     {
@@ -4367,13 +4413,13 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     ///     Element position cache for spatial queries.
     ///     Lazily computed only when accessed via ElementLocations property.
     /// </summary>
-    private IReadOnlyList<IReadOnlyList<int>>? _elemeloc;
+    private IReadOnlyList<IReadOnlyList<int>>? _elementLocations;
 
     /// <summary>
     ///     Node position cache for spatial queries.
     ///     Lazily computed only when accessed via NodeLocations property.
     /// </summary>
-    private IReadOnlyList<IReadOnlyList<int>>? _nodeloc;
+    private IReadOnlyList<IReadOnlyList<int>>? _nodeLocations;
 
     /// <summary>
     ///     Tracks whether transpose cache is synchronized with current structure.
@@ -4383,12 +4429,15 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
 
     /// <summary>
     ///     Tracks whether position caches (element locations and node locations) have been computed.
+    ///     MUST be volatile for consistency with <c>_isInSync</c> in double-check locking patterns.
     /// </summary>
-    private bool _positionCachesComputed;
+    private volatile bool _positionCachesComputed;
 
     /// <summary>
     ///     Nesting level for batch operations.
     ///     When > 0, synchronization is deferred until batch completes.
+    ///     Thread safety: protected by the outer <c>_rwLock</c> write lock —
+    ///     only modified inside <c>EnterWriteLock</c>/<c>ExitWriteLock</c> blocks.
     /// </summary>
     private int _batchNesting;
 
@@ -4640,7 +4689,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
             EnterPositionCachedReadLock();
             try
             {
-                return _elemeloc!;
+                return _elementLocations!;
             }
             finally
             {
@@ -4669,7 +4718,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
             EnterPositionCachedReadLock();
             try
             {
-                return _nodeloc!;
+                return _nodeLocations!;
             }
             finally
             {
@@ -5142,8 +5191,8 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         {
             _nodesFromElement.ClearAll();
             _elementsFromNode = null;
-            _elemeloc = null;
-            _nodeloc = null;
+            _elementLocations = null;
+            _nodeLocations = null;
             _isInSync = false;
             _positionCachesComputed = false;
         }
@@ -6324,19 +6373,30 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
 
         // Slow path: synchronize under write lock, then downgrade to read lock
         _rwLock.EnterWriteLock();
+        var syncSucceeded = false;
         try
         {
             // Double-check: another thread may have synchronized while we waited
             if (!_isInSync && _batchNesting == 0)
                 SynchronizeTranspose();
+            syncSucceeded = true;
         }
         finally
         {
-            // Downgrade: acquire read lock while holding write lock, then release write lock.
-            // SupportsRecursion allows EnterReadLock while the write lock is held.
-            // After ExitWriteLock, only the read lock remains — no gap for a writer.
-            _rwLock.EnterReadLock();
-            _rwLock.ExitWriteLock();
+            if (syncSucceeded)
+            {
+                // Downgrade: acquire read lock while holding write lock, then release write lock.
+                // SupportsRecursion allows EnterReadLock while the write lock is held.
+                // After ExitWriteLock, only the read lock remains — no gap for a writer.
+                _rwLock.EnterReadLock();
+                _rwLock.ExitWriteLock();
+            }
+            else
+            {
+                // Sync failed — release write lock without acquiring read lock.
+                // The exception will propagate to the caller.
+                _rwLock.ExitWriteLock();
+            }
         }
         // Returns with read lock held
     }
@@ -6347,7 +6407,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     /// </summary>
     /// <remarks>
     ///     <b>P0.3 FIX:</b> Same TOCTOU fix as <see cref="EnterSynchronizedReadLock"/> but
-    ///     additionally ensures position caches (<c>_elemeloc</c>, <c>_nodeloc</c>) are computed.
+    ///     additionally ensures position caches (<c>_elementLocations</c>, <c>_nodeLocations</c>) are computed.
     /// </remarks>
     private void EnterPositionCachedReadLock()
     {
@@ -6397,8 +6457,8 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
 
         // Mark position caches as invalid since structure changed
         _positionCachesComputed = false;
-        _elemeloc = null;
-        _nodeloc = null;
+        _elementLocations = null;
+        _nodeLocations = null;
     }
 
     /// <summary>
@@ -6417,12 +6477,12 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         var elemLocList = new List<IReadOnlyList<int>>(elemPositions.Count);
         for (var i = 0; i < elemPositions.Count; i++)
             elemLocList.Add(elemPositions[i].AsReadOnly());
-        _elemeloc = elemLocList.AsReadOnly();
+        _elementLocations = elemLocList.AsReadOnly();
 
         var nodeLocList = new List<IReadOnlyList<int>>(nodePositions.Count);
         for (var i = 0; i < nodePositions.Count; i++)
             nodeLocList.Add(nodePositions[i].AsReadOnly());
-        _nodeloc = nodeLocList.AsReadOnly();
+        _nodeLocations = nodeLocList.AsReadOnly();
 
         _positionCachesComputed = true;
     }
@@ -6434,7 +6494,7 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
     /// <remarks>
     ///     <b>FIX (Priority 1):</b> Now sets cached structures to null to release memory.
     ///     Previously, invalidation only set flags but retained references to large
-    ///     cached objects (_elementsFromNode, _elemeloc, _nodeloc), causing unnecessary
+    ///     cached objects (_elementsFromNode, _elementLocations, _nodeLocations), causing unnecessary
     ///     memory retention for large meshes. Setting these to null allows the GC to
     ///     reclaim the memory immediately when the cache is invalidated.
     /// </remarks>
@@ -6448,8 +6508,8 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         // FIX: Release references to potentially large cached structures
         // This allows GC to reclaim memory for large meshes
         _elementsFromNode = null;
-        _elemeloc = null;
-        _nodeloc = null;
+        _elementLocations = null;
+        _nodeLocations = null;
     }
 
     /// <summary>
@@ -6526,8 +6586,8 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
             // Copy position caches if computed
             if (_positionCachesComputed)
             {
-                cloned._elemeloc = _elemeloc; // ReadOnlyCollection, safe to share
-                cloned._nodeloc = _nodeloc; // ReadOnlyCollection, safe to share
+                cloned._elementLocations = _elementLocations; // ReadOnlyCollection, safe to share
+                cloned._nodeLocations = _nodeLocations; // ReadOnlyCollection, safe to share
                 cloned._positionCachesComputed = true;
             }
 
@@ -6646,7 +6706,10 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
 
     public override int GetHashCode()
     {
-        ThrowIfDisposed();
+        // Match Equals behavior: don't throw on disposed, return 0 for safety.
+        // This ensures consistency when objects are stored in hash-based collections
+        // and later disposed.
+        if (Volatile.Read(ref _disposed) != 0) return 0;
 
         _rwLock.EnterReadLock();
         try
@@ -7079,7 +7142,8 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
                     Debug.WriteLine(
                         "WARNING: M2M.Dispose() could not acquire write lock within timeout. " +
                         "Object is marked disposed but cleanup is incomplete. " +
-                        "Check IsDisposalIncomplete property and retry Dispose() after ensuring all threads have finished.");
+                        "Check IsDisposalIncomplete property. Ensure all reader/writer threads have " +
+                        "finished before disposing.");
                     
                     return;
                 }
@@ -7093,6 +7157,9 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
             // Lock was acquired - cleanup succeeded, clear incomplete flag
             Volatile.Write(ref _disposalIncomplete, false);
 
+            // Exit write lock before disposing — disposing while holding is undefined
+            // behavior per MSDN. The tiny window between exit and dispose is safe because
+            // _disposed is already set, so ThrowIfDisposed() rejects new operations.
             try
             {
                 _rwLock.ExitWriteLock();
@@ -7484,7 +7551,10 @@ public sealed class MM2M : IDisposable
             _rwLock.EnterWriteLock();
             try
             {
+                var old = _mat[elementType, nodeType];
                 _mat[elementType, nodeType] = value;
+                Interlocked.Increment(ref _version);
+                old.Dispose();
             }
             finally
             {
@@ -7527,6 +7597,12 @@ public sealed class MM2M : IDisposable
     ///         block.Add(3, 4);
     ///     });
     ///     </code>
+    ///     <para>
+    ///         <b>WARNING:</b> Do NOT call any MM2M methods from the callback.
+    ///         The callback executes while holding MM2M's read lock. Re-entrant calls
+    ///         will throw <see cref="System.Threading.LockRecursionException" /> (for read operations)
+    ///         or deadlock (for write operations) because MM2M uses a non-recursive lock.
+    ///     </para>
     /// </remarks>
     public void WithBlock(int elementType, int nodeType, Action<M2M> action)
     {
@@ -8304,7 +8380,7 @@ public sealed class MM2M : IDisposable
 
             for (var i = 0; i < NumberOfTypes; i++)
             for (var j = 0; j < NumberOfTypes; j++)
-                oldMat[i, j].Dispose();
+                try { oldMat[i, j].Dispose(); } catch { /* Ensure all old matrices are disposed */ }
 
             // Increment version to signal stale reference invalidation
             // Any consumers with cached M2M references should check Version before use
