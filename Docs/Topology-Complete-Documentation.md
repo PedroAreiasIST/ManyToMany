@@ -945,7 +945,80 @@ var (idx2, isNew2) = mesh.AddUnique<Edge, Node>(n1, n0); // Returns same
 bool equiv = Symmetry.Dihedral(2).AreEquivalent([0, 1], [1, 0]); // true
 ```
 
-### 13.5 Worked Example: Forward, Canonical, and Reverse Adjacency
+### 13.5 The Two Ordering Invariants
+
+The topology maintains two distinct ordering properties — one on the forward
+direction and one on the reverse direction. Both arise from the storage
+algorithms, not from post-hoc sorting.
+
+#### Forward direction: canonical form as an ordering
+
+When a symmetry group is registered for an element type, every creation path
+computes the **canonical form** of the node tuple before storing it. The
+canonical form is the lexicographically smallest permutation of the nodes under
+the symmetry group's action (see §13.1). Since the lexicographic minimum is
+unique for each equivalence class, it imposes a **deterministic ordering** on
+each forward adjacency row.
+
+This is stronger than "the row is sorted": it is the unique representative of
+the equivalence class, chosen by a well-defined rule. For `Full(n)` (all n!
+permutations), the canonical form happens to coincide with ascending sort.
+For `Dihedral(n)` with n > 2, it generally does not — only cyclic rotations
+and reflections are allowed, so the lexicographic minimum under those
+operations preserves the cycle structure of the element.
+
+**Which operations preserve the canonical form:**
+
+| Operation | Preserves? | Mechanism |
+|-----------|------------|-----------|
+| `Add<TElement, TNode>` | Yes | Calls `GetCanonicalWithKey`, stores `canonical` |
+| `AddUnique<TElement, TNode>` | Yes | Calls `GetCanonicalWithKey`, stores `canonical` |
+| `DiscoverSubEntities` | Yes | Calls `GetCanonicalWithKey` (unique) or `GetCanonicalOrOriginal` (non-unique) |
+| `AddRange` / `AddRangeParallel` | Yes | Calls `GetCanonicalOrOriginal` per element |
+| `ReplaceElementNodes` | **No** | Stores raw replacement, invalidates canonical index |
+| `AddNodeToElement` | **No** | Appends raw node, invalidates canonical index |
+| `RemoveNodeFromElement` | **No** | Removes node in-place, invalidates canonical index |
+| `ClearElement` | **No** | Empties the row, invalidates canonical index |
+
+The pattern: **creation paths** always canonicalize; **mutation paths**
+invalidate the canonical index because they modify the connectivity without
+recomputing the canonical form. After mutation, `Find` and `Exists` require
+rebuilding the canonical index (which happens automatically on next query).
+
+**Without symmetry:** If no symmetry is registered for a type, `Add` stores
+the nodes in the exact order the caller provides them. The positions carry
+local-numbering meaning (local node 0, local node 1, ...) and there is no
+ordering guarantee.
+
+#### Reverse direction: ascending element-index order
+
+The reverse adjacency (node → elements) is computed lazily by the `Transpose`
+algorithm. Its two-pass design guarantees that each reverse row is in
+**ascending element-index order** without an explicit sort:
+
+1. **Pass 0 (sequential):** Scans elements 0, 1, 2, ... in order. For each
+   node encountered, a write-position counter is incremented. Since elements
+   are visited in ascending index order, the position assigned to element `i`
+   is always before the position assigned to element `j` when `i < j`.
+
+2. **Pass 1 (parallel or sequential):** Each element writes its index into
+   the pre-allocated target array at the position computed in Pass 0.
+   Because the positions were assigned in ascending element order, the
+   resulting array is sorted — no comparison sort is needed.
+
+The comment at the fill phase states this explicitly:
+*"No atomics, no synchronization, no sorting — positions guarantee sorted
+output."*
+
+**Invalidation model:** Every mutation (`Add`, `AddNodeToElement`,
+`ReplaceElementNodes`, etc.) invalidates the cached transpose. The next
+reverse-direction query triggers a fresh `Transpose()` that recomputes the
+entire reverse adjacency from the current forward adjacency. Since the
+recomputation always produces sorted output, the reverse ordering invariant
+is **self-healing** — it holds after every recomputation, regardless of which
+mutation caused the invalidation.
+
+### 13.6 Worked Example: Forward, Canonical, and Reverse Adjacency
 
 This section uses a small mixed mesh to illustrate how the topology stores
 connectivity in forward and reverse directions, and how the canonical form
