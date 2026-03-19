@@ -945,6 +945,251 @@ var (idx2, isNew2) = mesh.AddUnique<Edge, Node>(n1, n0); // Returns same
 bool equiv = Symmetry.Dihedral(2).AreEquivalent([0, 1], [1, 0]); // true
 ```
 
+### 13.5 Worked Example: Forward, Canonical, and Reverse Adjacency
+
+This section uses a small mixed mesh to illustrate how the topology stores
+connectivity in forward and reverse directions, and how the canonical form
+imposed by the symmetry class defines the ordering of the forward adjacency
+rows.
+
+**Mesh definition (8 nodes, 7 elements of 4 types):**
+
+| Type   | Symmetry       | Index | Nodes as given      |
+|--------|----------------|-------|---------------------|
+| Bar2   | Dihedral(2)    | b0    | [5, 2]              |
+| Tri3   | Dihedral(3)    | t0    | [3, 1, 4]           |
+| Tri3   | Dihedral(3)    | t1    | [4, 1, 6]           |
+| Tri3   | Dihedral(3)    | t2    | [7, 3, 4]           |
+| Quad4  | Dihedral(4)    | q0    | [6, 2, 5, 1]        |
+| Tet4   | Full(4)        | x0    | [4, 1, 3, 7]        |
+| Tet4   | Full(4)        | x1    | [6, 2, 5, 1]        |
+
+```csharp
+using var mesh = Topology.New<Node, Bar2, Tri3, Quad4, Tet4>();
+mesh.WithSymmetry<Bar2>(Symmetry.Dihedral(2));
+mesh.WithSymmetry<Tri3>(Symmetry.Dihedral(3));
+mesh.WithSymmetry<Quad4>(Symmetry.Dihedral(4));
+mesh.WithSymmetry<Tet4>(Symmetry.Full(4));
+
+// Add 8 nodes (indices 0..7)
+for (int i = 0; i < 8; i++) mesh.Add<Node>();
+
+// Add elements with user-given orderings
+int b0 = mesh.Add<Bar2, Node>(5, 2);
+int t0 = mesh.Add<Tri3, Node>(3, 1, 4);
+int t1 = mesh.Add<Tri3, Node>(4, 1, 6);
+int t2 = mesh.Add<Tri3, Node>(7, 3, 4);
+int q0 = mesh.Add<Quad4, Node>(6, 2, 5, 1);
+int x0 = mesh.Add<Tet4, Node>(4, 1, 3, 7);
+int x1 = mesh.Add<Tet4, Node>(6, 2, 5, 1);
+```
+
+#### (a) Forward adjacency — without canonical form
+
+If no symmetry were registered, `Add` stores the nodes exactly as the user
+provides them. Each forward row is the original calling order:
+
+```
+Bar2 → Node (no symmetry):
+  b0 → [5, 2]
+
+Tri3 → Node (no symmetry):
+  t0 → [3, 1, 4]
+  t1 → [4, 1, 6]
+  t2 → [7, 3, 4]
+
+Quad4 → Node (no symmetry):
+  q0 → [6, 2, 5, 1]
+
+Tet4 → Node (no symmetry):
+  x0 → [4, 1, 3, 7]
+  x1 → [6, 2, 5, 1]
+```
+
+There is **no ordering guarantee** on these rows. The positions carry meaning
+(e.g., local node 0, local node 1, ...) and the user controls them entirely.
+
+#### (b) Forward adjacency — with canonical form
+
+With symmetry registered, `Add` calls `GetCanonicalWithKey<TElement>` which
+applies `Symmetry.CanonicalSpan` before storing. The canonical form is the
+**lexicographically smallest** permutation of the node tuple under the symmetry
+group's action. This is itself a well-defined ordering.
+
+**Bar2 — Dihedral(2), group order 2:**
+The two permutations are `[0,1]` (identity) and `[1,0]` (swap).
+For `[5, 2]`: identity gives `[5, 2]`, swap gives `[2, 5]`.
+Lexicographic minimum: **[2, 5]**.
+
+**Tri3 — Dihedral(3), group order 6:**
+The 6 permutations are 3 rotations × 2 reflections.
+For `[3, 1, 4]`: all orbit members are `{[3,1,4], [1,4,3], [4,3,1], [4,1,3], [1,3,4], [3,4,1]}`.
+Lexicographic minimum: **[1, 3, 4]**.
+For `[4, 1, 6]`: orbit → minimum **[1, 4, 6]**.
+For `[7, 3, 4]`: orbit → minimum **[3, 4, 7]**.
+
+**Quad4 — Dihedral(4), group order 8:**
+The 8 permutations are 4 rotations × 2 reflections. *Not* all 24 permutations
+of 4 nodes — only those respecting the cyclic boundary structure.
+For `[6, 2, 5, 1]`, the full orbit is:
+
+| Permutation (rotation)   | Result      |
+|--------------------------|-------------|
+| `[0,1,2,3]` identity    | [6, 2, 5, 1] |
+| `[1,2,3,0]` rotate 1    | [2, 5, 1, 6] |
+| `[2,3,0,1]` rotate 2    | [5, 1, 6, 2] |
+| `[3,0,1,2]` rotate 3    | [1, 6, 2, 5] |
+
+| Permutation (reflection) | Result      |
+|--------------------------|-------------|
+| `[3,2,1,0]`             | [1, 5, 2, 6] |
+| `[0,3,2,1]`             | [6, 1, 5, 2] |
+| `[1,0,3,2]`             | [2, 6, 1, 5] |
+| `[2,1,0,3]`             | [5, 2, 6, 1] |
+
+Lexicographic minimum: **[1, 5, 2, 6]**
+(note: this is *not* the sorted order `[1, 2, 5, 6]` — Dihedral(4) cannot
+produce arbitrary permutations, only cyclic rotations and reflections).
+
+**Tet4 — Full(4), group order 24:**
+All 24 permutations of 4 positions are equivalent, so the canonical form is
+always the ascending sorted order.
+For `[4, 1, 3, 7]`: canonical = **[1, 3, 4, 7]**.
+For `[6, 2, 5, 1]`: canonical = **[1, 2, 5, 6]**.
+
+**Stored forward adjacency:**
+
+```
+Bar2 → Node (canonical):
+  b0 → [2, 5]
+
+Tri3 → Node (canonical):
+  t0 → [1, 3, 4]
+  t1 → [1, 4, 6]
+  t2 → [3, 4, 7]
+
+Quad4 → Node (canonical):
+  q0 → [1, 5, 2, 6]     ← NOT sorted; Dihedral(4) preserves cycle structure
+
+Tet4 → Node (canonical):
+  x0 → [1, 3, 4, 7]
+  x1 → [1, 2, 5, 6]
+```
+
+Each forward row is the unique canonical representative of its equivalence
+class under the registered symmetry group, chosen by lexicographic minimality.
+For `Full(n)` this coincides with ascending sort; for `Dihedral(n)` with
+`n > 2` it generally does not.
+
+#### (c) Reverse adjacency — transpose
+
+The reverse direction is computed lazily by `Transpose()`. It maps each node
+to the elements that reference it. The transpose algorithm guarantees that each
+reverse row is in **ascending element-index order** (via the position-counting
+scheme, not a sort).
+
+Using the **canonical** forward adjacency from (b):
+
+```
+Node → Bar2:
+  node 2 → [b0]
+  node 5 → [b0]
+
+Node → Tri3:
+  node 1 → [t0, t1]
+  node 3 → [t0, t2]
+  node 4 → [t0, t1, t2]
+  node 6 → [t1]
+  node 7 → [t2]
+
+Node → Quad4:
+  node 1 → [q0]
+  node 2 → [q0]
+  node 5 → [q0]
+  node 6 → [q0]
+
+Node → Tet4:
+  node 1 → [x0, x1]
+  node 2 → [x1]
+  node 3 → [x0]
+  node 4 → [x0]
+  node 5 → [x1]
+  node 6 → [x1]
+  node 7 → [x0]
+```
+
+Nodes 0 and 8 appear in no element and are omitted. Every reverse row is
+sorted by element index (b0 < t0 < t1 < ... within each type's own M2M block,
+with indices starting at 0 per type).
+
+#### Finding an element from its nodes — intersection search
+
+The **classical approach** to "find element from nodes" uses the reverse
+adjacency. Given a set of query nodes, retrieve the reverse row for each node
+and intersect them. The result is the set of elements containing *all* query
+nodes.
+
+**Example 1:** Find a Tri3 from nodes {1, 4, 6}
+
+```
+Reverse lookup in (Node → Tri3):
+  node 1 → {t0, t1}
+  node 4 → {t0, t1, t2}
+  node 6 → {t1}
+
+Intersection: {t0, t1} ∩ {t0, t1, t2} ∩ {t1} = {t1}  ✓
+```
+
+Found: t1 has canonical nodes [1, 4, 6].
+
+**Example 2:** Find a Tet4 from nodes {4, 1, 3, 7} (given in arbitrary order)
+
+```
+Reverse lookup in (Node → Tet4):
+  node 4 → {x0}           ← smallest set, start here
+  node 1 → {x0, x1}
+  node 3 → {x0}
+  node 7 → {x0}
+
+Intersection: {x0} ∩ {x0, x1} ∩ {x0} ∩ {x0} = {x0}  ✓
+```
+
+Found: x0 has canonical nodes [1, 3, 4, 7].
+
+**Example 3:** Search for a nonexistent Tri3 from nodes {1, 3, 7}
+
+```
+Reverse lookup in (Node → Tri3):
+  node 1 → {t0, t1}
+  node 3 → {t0, t2}
+  node 7 → {t2}
+
+Intersection: {t0, t1} ∩ {t0, t2} ∩ {t2} = {}  — empty
+```
+
+No Tri3 connects all three of these nodes.
+
+**Optimization — start with the smallest set:**
+Since each reverse row is already sorted, the intersection is an O(n) merge.
+Starting with the node whose reverse row is shortest minimizes work. In
+Example 2, node 4 has a single-element list `{x0}`, so the remaining
+intersections are trivial membership checks.
+
+**Topology's built-in approach — canonical hash lookup (O(1)):**
+When symmetry is registered, `Find<TElement>` and `Exists<TElement>` do *not*
+use intersection. Instead, they compute the canonical form of the query nodes
+and look up the canonical hash index directly:
+
+```csharp
+int? idx = mesh.Find<Tri3, Node>(4, 1, 6);
+// Internally: canonical([4,1,6]) = [1,4,6], hash → lookup → t1
+// O(1) amortized, no intersection needed
+```
+
+The intersection approach is the classical method used in legacy mesh codes.
+The canonical hash index makes it unnecessary when symmetry is configured, but
+both produce the same result.
+
 ---
 
 ## 14. Graph Coloring
