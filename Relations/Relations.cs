@@ -1,6 +1,6 @@
 // Relations.cs
 //
-// Copyright (C) 2026 Pedro de Jesus Pereira Areias
+// Copyright (C) 2026 Pedro Miguel de Almeida Areias
 //
 // This file is part of ManyToMany.
 //
