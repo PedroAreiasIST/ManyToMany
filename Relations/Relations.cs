@@ -8401,7 +8401,7 @@ public sealed class MM2M : IDisposable
 
     #region Validation Methods
 
-    /// <summary>
+    /// <summary>4
     ///     Validates the structural integrity of the entire MM2M.
     /// </summary>
     /// <returns>True if all M2M structures are valid and type dependencies are acyclic; false otherwise.</returns>
