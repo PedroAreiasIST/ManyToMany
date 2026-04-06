@@ -1558,8 +1558,7 @@ public static class SimplexRemesher
         double maxSnapError = 0.0;
         int skippedTooClose = 0;
         int skippedOutsideRegion = 0;
-        int skippedWouldInvert = 0;
-        
+
         for (int i = originalNodeCount; i < refinedMesh.Count<Node>(); i++)
         {
             var parents = refinedMesh.Get<Node, ParentNodes>(i);
@@ -1592,7 +1591,7 @@ public static class SimplexRemesher
 
                     // Don't snap if already very close to surface
                     double edgeLength = Math.Sqrt((x2-x1)*(x2-x1) + (y2-y1)*(y2-y1) + (z2-z1)*(z2-z1));
-                    double snapTolerance = Math.Max(1e-6, 1e-5 * edgeLength); // 0.001% of edge
+                    double snapTolerance = Math.Max(CrackSnapAbsoluteTolerance, CrackSnapRelativeTolerance * edgeLength);
 
                     if (Math.Abs(fCurr) < snapTolerance)
                     {
@@ -1615,21 +1614,15 @@ public static class SimplexRemesher
 
                     if (snapDist > snapTolerance)
                     {
-                        bool wouldInvert = false; // (kept disabled as before)
-                        if (!wouldInvert)
-                        {
-                            refinedCoords[i, 0] = xRoot;
-                            refinedCoords[i, 1] = yRoot;
-                            refinedCoords[i, 2] = zRoot;
+                        // Inversion is corrected post-snapping by FixNegativeJacobians,
+                        // so no per-snap inversion check is performed here.
+                        refinedCoords[i, 0] = xRoot;
+                        refinedCoords[i, 1] = yRoot;
+                        refinedCoords[i, 2] = zRoot;
 
-                            double finalError = Math.Abs(signedField(refinedCoords[i, 0], refinedCoords[i, 1], refinedCoords[i, 2]));
-                            maxSnapError = Math.Max(maxSnapError, finalError);
-                            snappedCount++;
-                        }
-                        else
-                        {
-                            skippedWouldInvert++;
-                        }
+                        double finalError = Math.Abs(signedField(refinedCoords[i, 0], refinedCoords[i, 1], refinedCoords[i, 2]));
+                        maxSnapError = Math.Max(maxSnapError, finalError);
+                        snappedCount++;
                     }
                     else
                     {
@@ -1680,9 +1673,8 @@ public static class SimplexRemesher
         avgEdgeLen /= numEdges2;
         
         // Step 5: Identify crack nodes (nodes where |surface| ≈ 0 AND region < -tol)
-        // Use 0.1% of avgEdgeLen to exclude crack tip boundary
-        const double zeroTolerance = 1e-5;
-        double regionTolerance = 0.001 * avgEdgeLen;  // 0.1% of average edge
+        const double zeroTolerance = CrackSurfaceZeroTolerance;
+        double regionTolerance = CrackRegionRelativeTolerance * avgEdgeLen;
         var crackNodes = new HashSet<int>();
         int rejectedByRegion = 0;
         
@@ -1970,8 +1962,8 @@ public static class SimplexRemesher
             
             // Fast conservative Laplacian smoothing
             var smoothedCoords = (double[,])crackedCoords.Clone();
-            int iterations = 3;  // Reduced from 5
-            double relaxation = 0.25;  // More conservative (was 0.5)
+            int iterations = DefaultCrackSmoothingIterations;
+            double relaxation = DefaultCrackSmoothingRelaxation;
             
             // Build neighbor map once (FAST)
             var nodeNeighbors = BuildNodeNeighborsTri(crackedMesh);
@@ -2186,7 +2178,7 @@ private static bool TryFindEdgeRootOnSegment(
     double tMid = 0.5 * (loT + hiT);
     double phiMid = 0.0;
 
-    for (int iter = 0; iter < 40; iter++)
+    for (int iter = 0; iter < RootFindingMaxIterations; iter++)
     {
         tMid = 0.5 * (loT + hiT);
         double xm = x1 + tMid * (x2 - x1);
@@ -2328,18 +2320,17 @@ if (TryFindEdgeRootOnSegment(signedField,
         Console.WriteLine($"  → Snapping crack nodes to exact zero crossing...");
         int snappedCount = 0;
         int skippedTooClose = 0;
-        int skippedWouldInvert = 0;
         int skippedOutsideRegion = 0;
         double maxSnapError = 0.0;
-        
+
         for (int i = originalNodeCount; i < refinedMesh.Count<Node>(); i++)
         {
             var parents = refinedMesh.Get<Node, ParentNodes>(i);
-            
+
             if (parents.Parent1 != parents.Parent2)
             {
                 int p1 = parents.Parent1, p2 = parents.Parent2;
-                
+
                 double x1 = refinedCoords[p1, 0], y1 = refinedCoords[p1, 1], z1 = refinedCoords[p1, 2];
                 double x2 = refinedCoords[p2, 0], y2 = refinedCoords[p2, 1], z2 = refinedCoords[p2, 2];
                 
@@ -2357,7 +2348,7 @@ if (TryFindEdgeRootOnSegment(signedField,
                     
                     // Don't snap if already very close to surface
                     double edgeLength = Math.Sqrt((x2-x1)*(x2-x1) + (y2-y1)*(y2-y1) + (z2-z1)*(z2-z1));
-                    double snapTolerance = Math.Max(1e-6, 1e-5 * edgeLength); // Much tighter: 0.001% of edge
+                    double snapTolerance = Math.Max(CrackSnapAbsoluteTolerance, CrackSnapRelativeTolerance * edgeLength);
                     
                     if (Math.Abs(fCurr) < snapTolerance)
                     {
@@ -2369,7 +2360,7 @@ if (TryFindEdgeRootOnSegment(signedField,
                     double tMin = 0.0, tMax = 1.0;
                     double t = 0.5;
                     
-                    for (int iter = 0; iter < 30; iter++)  // More iterations for curved surfaces
+                    for (int iter = 0; iter < BisectionMaxIterations; iter++)  // bisection on edge for curved surfaces
                     {
                         t = (tMin + tMax) / 2.0;
                         double xm = x1 + t * (x2 - x1);
@@ -2413,45 +2404,15 @@ if (TryFindEdgeRootOnSegment(signedField,
                     
                     if (snapDist > snapTolerance)
                     {
-                        // Validate: check if snapping would invert any adjacent tet
-                        bool wouldInvert = false;
-                        
-                        // TEMPORARILY DISABLED - diagnose snapping issues
-                        /*
-                        var incidentTets = refinedMesh.ElementsAt<Tet4, Node>(i);
-                        {
-                            var tempCoords = (double[,])refinedCoords.Clone();
-                            tempCoords[i, 0] = xNew;
-                            tempCoords[i, 1] = yNew;
-                            tempCoords[i, 2] = zNew;
-                            
-                            foreach (var tetIdx in incidentTets)
-                            {
-                                var tetNodes = refinedMesh.NodesOf<Tet4, Node>(tetIdx);
-                                double jac = ComputeTetrahedronJacobian(tempCoords, tetNodes[0], tetNodes[1], tetNodes[2], tetNodes[3]);
-                                if (jac <= 0)
-                                {
-                                    wouldInvert = true;
-                                    break;
-                                }
-                            }
-                        }
-                        */
-                        
-                        if (!wouldInvert)
-                        {
-                            refinedCoords[i, 0] = xNew;
-                            refinedCoords[i, 1] = yNew;
-                            refinedCoords[i, 2] = zNew;
-                            
-                            double finalError = Math.Abs(signedField(refinedCoords[i, 0], refinedCoords[i, 1], refinedCoords[i, 2]));
-                            maxSnapError = Math.Max(maxSnapError, finalError);
-                            snappedCount++;
-                        }
-                        else
-                        {
-                            skippedWouldInvert++;
-                        }
+                        // Snap node to surface. Inversion is corrected post-snapping by
+                        // FixNegativeJacobians below, so no per-snap inversion check is performed.
+                        refinedCoords[i, 0] = xNew;
+                        refinedCoords[i, 1] = yNew;
+                        refinedCoords[i, 2] = zNew;
+
+                        double finalError = Math.Abs(signedField(refinedCoords[i, 0], refinedCoords[i, 1], refinedCoords[i, 2]));
+                        maxSnapError = Math.Max(maxSnapError, finalError);
+                        snappedCount++;
                     }
                     else
                     {
@@ -2464,8 +2425,6 @@ if (TryFindEdgeRootOnSegment(signedField,
         Console.WriteLine($"  → Snapped {snappedCount} nodes to surface=0 (max error: {maxSnapError:E3})");
         if (skippedTooClose > 0)
             Console.WriteLine($"  → Skipped {skippedTooClose} nodes already close enough to surface");
-        if (skippedWouldInvert > 0)
-            Console.WriteLine($"  → Skipped {skippedWouldInvert} nodes that would invert tets");
         if (skippedOutsideRegion > 0)
             Console.WriteLine($"  → Skipped {skippedOutsideRegion} nodes outside crack region (tip area)");
 
@@ -2561,7 +2520,7 @@ if (TryFindEdgeRootOnSegment(signedField,
             var nodeNeighbors = BuildNodeNeighborsTet(refinedMesh);
             
             // Threshold for "near region boundary" - should be wider than regionTolerance
-            double regionBoundaryThreshold = 0.1 * avgEdgeLen;  // 10% of edge length
+            double regionBoundaryThreshold = CrackRegionBoundaryRelativeThreshold * avgEdgeLen;
             
             // Check each crack node for:
             // 1. Neighbors outside active region (classic tip detection)
@@ -2691,8 +2650,8 @@ if (TryFindEdgeRootOnSegment(signedField,
         int classifiedByClearNode = 0;
         int classifiedByCentroid = 0;
         
-        // Threshold for "clearly off the crack surface" - use 10% of average edge length
-        double clearThreshold = 0.1 * avgEdgeLen;
+        // Threshold for "clearly off the crack surface" — fraction of average edge length
+        double clearThreshold = CrackRegionBoundaryRelativeThreshold * avgEdgeLen;
         
         for (int t = 0; t < refinedMesh.Count<Tet4>(); t++)
         {
@@ -2825,8 +2784,8 @@ if (TryFindEdgeRootOnSegment(signedField,
             
             // Conservative Laplacian smoothing
             var smoothedCoords = (double[,])refinedCoords.Clone();
-            int iterations = 3;
-            double relaxation = 0.25;
+            int iterations = DefaultCrackSmoothingIterations;
+            double relaxation = DefaultCrackSmoothingRelaxation;
             
             for (int iter = 0; iter < iterations; iter++)
             {
@@ -3015,9 +2974,8 @@ if (TryFindEdgeRootOnSegment(signedField,
             var n = mesh.NodesOf<Tri3, Node>(i);
             double area2 = (coords[n[1],0] - coords[n[0],0]) * (coords[n[2],1] - coords[n[0],1]) -
                           (coords[n[1],1] - coords[n[0],1]) * (coords[n[2],0] - coords[n[0],0]);
-            
-            const double tol = 1e-14;
-            if (area2 < -tol)
+
+            if (area2 < -DegenerateAreaTolerance)
             {
                 // CW → CCW: swap nodes 1 and 2 (in-place)
                 mesh.ReplaceElementNodes<Tri3, Node>(i, n[0], n[2], n[1]);
@@ -3029,78 +2987,6 @@ if (TryFindEdgeRootOnSegment(signedField,
             Console.WriteLine($"  → Corrected {flipped} CW→CCW triangles");
     }
 
-    /// <summary>Correct quad orientations in-place to ensure positive Jacobians</summary>
-    private static void CorrectQuadOrientations(SimplexMesh mesh, double[,] coords)
-    {
-        int flipped = 0;
-        
-        for (int i = 0; i < mesh.Count<Quad4>(); i++)
-        {
-            var n = mesh.NodesOf<Quad4, Node>(i);
-            
-            double x1 = coords[n[0],0], y1 = coords[n[0],1];
-            double x2 = coords[n[1],0], y2 = coords[n[1],1];
-            double x3 = coords[n[2],0], y3 = coords[n[2],1];
-            double x4 = coords[n[3],0], y4 = coords[n[3],1];
-            
-            double dxdxi = 0.25 * (-x1 + x2 + x3 - x4);
-            double dydxi = 0.25 * (-y1 + y2 + y3 - y4);
-            double dxdeta = 0.25 * (-x1 - x2 + x3 + x4);
-            double dydeta = 0.25 * (-y1 - y2 + y3 + y4);
-            
-            double jac = dxdxi * dydeta - dydxi * dxdeta;
-            
-            if (jac < 0)
-            {
-                mesh.ReplaceElementNodes<Quad4, Node>(i, n[0], n[3], n[2], n[1]);
-                flipped++;
-            }
-        }
-        
-        if (flipped > 0)
-            Console.WriteLine($"  → Corrected {flipped} inverted quads");
-    }
-
-    /// <summary>Correct tetrahedron orientations in-place to ensure positive volumes</summary>
-    private static void CorrectTetOrientations(SimplexMesh mesh, double[,] coords)
-    {
-        int flipped = 0;
-        
-        for (int i = 0; i < mesh.Count<Tet4>(); i++)
-        {
-            var n = mesh.NodesOf<Tet4, Node>(i);
-            
-            double ax = coords[n[1],0] - coords[n[0],0];
-            double ay = coords[n[1],1] - coords[n[0],1];
-            double az = coords[n[1],2] - coords[n[0],2];
-            double bx = coords[n[2],0] - coords[n[0],0];
-            double by = coords[n[2],1] - coords[n[0],1];
-            double bz = coords[n[2],2] - coords[n[0],2];
-            double cx = coords[n[3],0] - coords[n[0],0];
-            double cy = coords[n[3],1] - coords[n[0],1];
-            double cz = coords[n[3],2] - coords[n[0],2];
-            
-            double vol6 = ax*(by*cz - bz*cy) - ay*(bx*cz - bz*cx) + az*(bx*cy - by*cx);
-            
-            if (vol6 < 0)
-            {
-                // Swap nodes 0 and 1 to fix orientation (in-place)
-                mesh.ReplaceElementNodes<Tet4, Node>(i, n[1], n[0], n[2], n[3]);
-                flipped++;
-            }
-        }
-        
-        if (flipped > 0)
-            Console.WriteLine($"  → Corrected {flipped} inverted tetrahedra");
-    }
-    
-    private static (int, int, int) CanonicalFace(int n1, int n2, int n3)
-    {
-        var sorted = new[] { n1, n2, n3 };
-        Array.Sort(sorted);
-        return (sorted[0], sorted[1], sorted[2]);
-    }
-    
     #endregion
 
     // ═══════════════════════════════════════════════════════════════════════════

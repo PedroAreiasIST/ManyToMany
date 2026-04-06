@@ -508,28 +508,6 @@ public static class MeshRefinement
         return newCoords;
     }
     
-    public static void CorrectTetOrientations(SimplexMesh mesh, double[,] coordinates)
-    {
-        int tetCount = mesh.Count<Tet4>();
-        int negativeCount = 0;
-
-        for (int i = 0; i < tetCount; i++)
-        {
-            var nodes = mesh.NodesOf<Tet4, Node>(i);
-            double vol6 = SignedVolume6x(coordinates, nodes[0], nodes[1], nodes[2], nodes[3]);
-            
-            if (vol6 < -1e-15)
-            {
-                // Swap nodes 2 and 3 to fix orientation (in-place)
-                mesh.ReplaceElementNodes<Tet4, Node>(i, nodes[0], nodes[1], nodes[3], nodes[2]);
-                negativeCount++;
-            }
-        }
-
-        if (negativeCount > 0)
-            Console.WriteLine($"  → Fixed {negativeCount} inverted tets");
-    }
-    
     /// <summary>
     /// Compute signed volume * 6 (uses shared MeshGeometry implementation).
     /// </summary>
