@@ -1205,7 +1205,6 @@ Adaptive refinement drivers that operate on an existing `SimplexMesh`:
 | `CheckEdgeTopology(mesh, label)` | Validate edge-to-element connectivity. |
 | `FixNegativeJacobians(mesh, coords)` | Flip element connectivity to correct negative Jacobians. |
 | `InterpolateCoordinates(mesh, originalCoords)` | Coordinate transfer after refinement. |
-| `CorrectTetOrientations(mesh, coords)` | Re-orient all tetrahedra to positive Jacobian. |
 
 #### `MeshGeometry`
 

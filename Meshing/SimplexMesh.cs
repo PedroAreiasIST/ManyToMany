@@ -63,6 +63,73 @@ public static class MeshConstants
     ///     Hexagonal grid row spacing factor (sqrt(3)/2).
     /// </summary>
     public const double HexRowSpacing = 0.86602540378;
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Crack-insertion tolerances and parameters
+    // (used by SimplexRemesher.CreateCrackFromSignedField{,3D})
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    ///     Absolute lower bound on the snap-tolerance used when snapping
+    ///     refined-edge midpoints onto a level-set surface.
+    /// </summary>
+    public const double CrackSnapAbsoluteTolerance = 1e-6;
+
+    /// <summary>
+    ///     Relative snap tolerance, expressed as a fraction of the edge length,
+    ///     used when snapping refined-edge midpoints onto a level-set surface.
+    /// </summary>
+    public const double CrackSnapRelativeTolerance = 1e-5;
+
+    /// <summary>
+    ///     Tolerance below which a level-set value is considered "on" the surface
+    ///     during sign-change detection in crack insertion.
+    /// </summary>
+    public const double CrackSurfaceZeroTolerance = 1e-5;
+
+    /// <summary>
+    ///     Tolerance for region-membership tests during crack insertion,
+    ///     expressed as a fraction of the average edge length.
+    /// </summary>
+    public const double CrackRegionRelativeTolerance = 0.001;
+
+    /// <summary>
+    ///     Threshold for "near region boundary" classification of crack-tip nodes,
+    ///     expressed as a fraction of the average edge length.
+    /// </summary>
+    public const double CrackRegionBoundaryRelativeThreshold = 0.1;
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Iteration limits
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    ///     Maximum number of iterations for the inner bisection root finder
+    ///     used when locating an edge–surface intersection.
+    /// </summary>
+    public const int BisectionMaxIterations = 30;
+
+    /// <summary>
+    ///     Maximum number of outer iterations for adaptive root finding on
+    ///     curved implicit surfaces.
+    /// </summary>
+    public const int RootFindingMaxIterations = 40;
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Smoothing parameters
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    ///     Default number of Laplacian smoothing iterations applied during
+    ///     post-crack mesh smoothing.
+    /// </summary>
+    public const int DefaultCrackSmoothingIterations = 3;
+
+    /// <summary>
+    ///     Default Laplacian smoothing relaxation factor used during
+    ///     post-crack mesh smoothing.
+    /// </summary>
+    public const double DefaultCrackSmoothingRelaxation = 0.25;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
