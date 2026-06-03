@@ -3187,9 +3187,17 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
             for (var i = 0; i < m; i++)
                 rowPtr[i + 1] = _adjacencies[i].Count;
 
-        // Sequential prefix sum
+        // Sequential prefix sum (checked to detect int32 overflow of the cumulative non-zero
+        // count for very large graphs, matching the guard in TransposeCore)
         for (var i = 1; i <= m; i++)
-            rowPtr[i] += rowPtr[i - 1];
+        {
+            var next = (long)rowPtr[i - 1] + rowPtr[i];
+            if (next > int.MaxValue)
+                throw new OverflowException(
+                    $"ToCsr total non-zero count exceeds int.MaxValue ({next:N0} entries) at row {i} of {m}. " +
+                    "The adjacency structure is too large for 32-bit CSR row pointers.");
+            rowPtr[i] = (int)next;
+        }
 
         var col = new int[rowPtr[m]];
 

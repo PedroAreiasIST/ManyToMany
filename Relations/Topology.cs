@@ -5675,7 +5675,12 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     {
         ThrowIfDisposed();
         var nodeCount = Count<TNode>();
-        var totalDofs = nodeCount * dofsPerNode;
+        var totalDofsLong = (long)nodeCount * dofsPerNode;
+        if (totalDofsLong > int.MaxValue)
+            throw new OverflowException(
+                $"GetSparsityPatternCSR: total DOF count exceeds int.MaxValue " +
+                $"({totalDofsLong:N0} = {nodeCount} nodes × {dofsPerNode} DOFs/node).");
+        var totalDofs = (int)totalDofsLong;
 
         var adjacency = new HashSet<int>[nodeCount];
         for (var i = 0; i < nodeCount; i++)
@@ -5735,11 +5740,16 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
                 adjacency[nodes[i]].Add(nodes[j]);
         }
 
-        var nnz = 0;
+        long nnz = 0;
         for (var i = 0; i < nodeCount; i++)
             nnz += adjacency[i].Count;
 
-        return nnz * dofsPerNode * dofsPerNode;
+        var totalNnz = nnz * dofsPerNode * dofsPerNode;
+        if (totalNnz > int.MaxValue)
+            throw new OverflowException(
+                $"GetNonZeroCount: assembled non-zero count exceeds int.MaxValue ({totalNnz:N0}). " +
+                "Use a 64-bit-aware assembly path for problems of this size.");
+        return (int)totalNnz;
     }
 
     /// <summary>
