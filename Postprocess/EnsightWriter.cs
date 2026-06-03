@@ -131,16 +131,19 @@ public static class EnsightWriter
         using var writer = new StreamWriter(filename);
         
         writer.WriteLine("FORMAT");
-        writer.WriteLine("type: ensight");  // Ensight 6.0
+        writer.WriteLine("type: ensight gold");  // geometry below uses the EnSight Gold layout
         writer.WriteLine();
         writer.WriteLine("GEOMETRY");
-        writer.WriteLine($"model: 1 {numSteps} {modelName}_****.geo");
+        // EnSight Gold transient geometry: "model: <time-set> <filename>"; the step count lives
+        // in the TIME section below, not on this line. Wildcards (****) match the D4 file suffix.
+        writer.WriteLine($"model: 1 {modelName}_****.geo");
         writer.WriteLine();
-        
+
         if (hasDisplacement)
         {
             writer.WriteLine("VARIABLE");
-            writer.WriteLine($"vector per node: CrackOpening {modelName}_****.CrackOpening");
+            // Transient variable lines also carry the time-set number.
+            writer.WriteLine($"vector per node: 1 CrackOpening {modelName}_****.CrackOpening");
             writer.WriteLine();
         }
         
@@ -164,7 +167,7 @@ public static class EnsightWriter
         using var writer = new StreamWriter(filename);
         
         writer.WriteLine("FORMAT");
-        writer.WriteLine("type: ensight");  // Ensight 6.0
+        writer.WriteLine("type: ensight gold");  // geometry below uses the EnSight Gold layout
         writer.WriteLine();
         writer.WriteLine("GEOMETRY");
         writer.WriteLine($"model: {modelName}.geo");
@@ -299,7 +302,7 @@ public static class EnsightWriter
         using var writer = new StreamWriter(filename);
         
         writer.WriteLine("FORMAT");
-        writer.WriteLine("type: ensight");  // Ensight 6.0
+        writer.WriteLine("type: ensight gold");  // geometry below uses the EnSight Gold layout
         writer.WriteLine();
         writer.WriteLine("GEOMETRY");
         writer.WriteLine($"model: {modelName}.geo");
@@ -362,10 +365,11 @@ public static class EnsightWriter
             writer.WriteLine($"{formatted,12}");
         }
         
-        // Write Z components
+        // Write Z components (2D vector arrays are [n,2]; emit 0 for the missing Z column)
+        bool hasZ = vectorData.GetLength(1) > 2;
         for (int i = 0; i < nNodes; i++)
         {
-            double val = vectorData[i, 2];
+            double val = hasZ ? vectorData[i, 2] : 0.0;
             string formatted = val.ToString("0.0000E+00", System.Globalization.CultureInfo.InvariantCulture);
             writer.WriteLine($"{formatted,12}");
         }
