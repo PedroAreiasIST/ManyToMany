@@ -216,8 +216,8 @@ public sealed class BatheTwoStageIntegrator
                     throw new InvalidOperationException(
                         $"Newton iteration diverged at time {tNew:E6}: " +
                         $"residual {resNorm:E3} > {DivergenceThreshold:E3} × initial {convergence.InitialResidualNorm:E3}");
-                // Accept last iterate and return
-                AcceptTrialState();
+                // Accept last iterate and return (guarded: never commit a non-finite blow-up)
+                AcceptTrialStateChecked(tNew);
                 Time = tNew;
                 return;
             }
@@ -249,8 +249,8 @@ public sealed class BatheTwoStageIntegrator
                 $"after {MaxNewtonIterations} iterations. " +
                 $"Final residual norm: {convergence.FinalResidualNorm:E3}");
 
-        // Accept last iterate
-        AcceptTrialState();
+        // Accept last iterate (guarded: never commit a non-finite blow-up)
+        AcceptTrialStateChecked(tNew);
         Time = tNew;
     }
 
@@ -992,6 +992,24 @@ public sealed class BatheTwoStageIntegrator
         _uTrial.AsSpan().CopyTo(_u);
         _vTrial.AsSpan().CopyTo(_v);
         _aTrial.AsSpan().CopyTo(_a);
+    }
+
+    /// <summary>
+    ///     Accepts the trial state as the new state, but first verifies it is finite. A non-finite
+    ///     trial state means the step blew up to NaN/Inf; committing it would silently poison every
+    ///     subsequent step, so this always throws regardless of the <see cref="ThrowOnDivergence" />
+    ///     / <see cref="ThrowOnConvergenceFailure" /> policy flags (those flags only govern whether a
+    ///     finite-but-unconverged iterate may be accepted).
+    /// </summary>
+    private void AcceptTrialStateChecked(double tNew)
+    {
+        for (var i = 0; i < _uTrial.Length; ++i)
+            if (!double.IsFinite(_uTrial[i]) || !double.IsFinite(_vTrial[i]) || !double.IsFinite(_aTrial[i]))
+                throw new InvalidOperationException(
+                    $"Time integration produced a non-finite state at time {tNew:E6} " +
+                    $"(index {i}: u={_uTrial[i]}, v={_vTrial[i]}, a={_aTrial[i]}). " +
+                    "The step diverged to NaN/Inf and cannot be accepted.");
+        AcceptTrialState();
     }
 
     /// <summary>
