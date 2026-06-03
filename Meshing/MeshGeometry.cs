@@ -370,7 +370,7 @@ public static class MeshGeometry
         var dy = segEnd.y - segStart.y;
         var lengthSquared = dx * dx + dy * dy;
 
-        if (lengthSquared < Epsilon) return Distance2D(point, segStart);
+        if (lengthSquared < Epsilon * Epsilon) return Distance2D(point, segStart); // compare length^2 to tolerance^2
 
         var t = Math.Clamp(((point.x - segStart.x) * dx + (point.y - segStart.y) * dy) / lengthSquared, 0, 1);
         return Distance2D(point, (segStart.x + t * dx, segStart.y + t * dy));
@@ -401,7 +401,7 @@ public static class MeshGeometry
         var dy = lineEnd.y - lineStart.y;
         var lengthSquared = dx * dx + dy * dy;
 
-        if (lengthSquared < Epsilon) return lineStart;
+        if (lengthSquared < Epsilon * Epsilon) return lineStart; // compare length^2 to tolerance^2
 
         var t = ((point.x - lineStart.x) * dx + (point.y - lineStart.y) * dy) / lengthSquared;
         return (lineStart.x + t * dx, lineStart.y + t * dy);
@@ -413,7 +413,7 @@ public static class MeshGeometry
         var dy = segEnd.y - segStart.y;
         var lengthSquared = dx * dx + dy * dy;
 
-        if (lengthSquared < Epsilon) return segStart;
+        if (lengthSquared < Epsilon * Epsilon) return segStart; // compare length^2 to tolerance^2
 
         var t = Math.Clamp(((point.x - segStart.x) * dx + (point.y - segStart.y) * dy) / lengthSquared, 0, 1);
         return (segStart.x + t * dx, segStart.y + t * dy);
