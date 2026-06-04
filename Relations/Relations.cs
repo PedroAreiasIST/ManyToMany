@@ -7554,7 +7554,8 @@ public sealed class MM2M : IDisposable
                 var old = _mat[elementType, nodeType];
                 _mat[elementType, nodeType] = value;
                 Interlocked.Increment(ref _version);
-                old.Dispose();
+                if (!ReferenceEquals(old, value)) // guard self-assignment: mm2m[i,j] = mm2m[i,j]
+                    old.Dispose();
             }
             finally
             {
