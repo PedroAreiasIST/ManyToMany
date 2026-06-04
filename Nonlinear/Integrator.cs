@@ -136,6 +136,15 @@ public sealed class BatheTwoStageIntegrator
 
         // Newton did not converge
         convergence.Converged = false;
+
+        // Never silently keep a blown-up (NaN/Inf) static solution: it would poison every
+        // subsequent dynamic Step. Throw regardless of ThrowOnConvergenceFailure.
+        for (var i = 0; i < _u.Length; ++i)
+            if (!double.IsFinite(_u[i]))
+                throw new InvalidOperationException(
+                    $"Initial static equilibrium produced a non-finite state at index {i} (u={_u[i]}) " +
+                    $"after {MaxNewtonIterations} iterations; the solve diverged to NaN/Inf.");
+
         if (ThrowOnConvergenceFailure)
             throw new InvalidOperationException(
                 $"Static equilibrium solve failed to converge in {MaxNewtonIterations} iterations. " +

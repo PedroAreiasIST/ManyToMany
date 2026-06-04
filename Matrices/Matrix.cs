@@ -3439,16 +3439,16 @@ public sealed class Matrix : IEquatable<Matrix>, IFormattable, ICloneable
                     var p = A[0, 0] - shift;
                     var q = A[1, 0];
                     var r = Math.Sqrt(p * p + q * q);
-                    c1 = p / r;
-                    s = q / r;
+                    if (r == 0.0) { c1 = 1.0; s = 0.0; } // already deflated; identity rotation (avoid 0/0 = NaN)
+                    else { c1 = p / r; s = q / r; }
                 }
                 else
                 {
                     var p = A[k, k - 1];
                     var q = A[k + 1, k - 1];
                     var r = Math.Sqrt(p * p + q * q);
-                    c1 = p / r;
-                    s = q / r;
+                    if (r == 0.0) { c1 = 1.0; s = 0.0; } // already deflated; identity rotation (avoid 0/0 = NaN)
+                    else { c1 = p / r; s = q / r; }
                     A[k, k - 1] = r;
                     A[k + 1, k - 1] = 0;
                 }

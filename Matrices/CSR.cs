@@ -1582,7 +1582,12 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
             // Parallel: compute row counts independently, then prefix sum
             var rowCounts = new int[A.nrows];
             Parallel.For(0, A.nrows, ParallelConfig.Options,
-                () => ArrayPool<int>.Shared.Rent(A.ncols),
+                () =>
+                {
+                    var workspace = ArrayPool<int>.Shared.Rent(A.ncols);
+                    Array.Clear(workspace, 0, A.ncols); // Rent does not zero; the i+1 timestamp scheme needs a known 0 baseline
+                    return workspace;
+                },
                 (i, loopState, workspace) =>
                 {
                     // Mark all columns present in row i of A using timestamp trick
@@ -1654,7 +1659,12 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
         {
             // Parallel: each row writes to its own non-overlapping segment in colIdx
             Parallel.For(0, A.nrows, ParallelConfig.Options,
-                () => ArrayPool<int>.Shared.Rent(A.ncols),
+                () =>
+                {
+                    var workspace = ArrayPool<int>.Shared.Rent(A.ncols);
+                    Array.Clear(workspace, 0, A.ncols); // Rent does not zero; the i+1 timestamp scheme needs a known 0 baseline
+                    return workspace;
+                },
                 (i, loopState, workspace) =>
                 {
                     for (var ka = A.rowPointers[i]; ka < A.rowPointers[i + 1]; ka++)

@@ -3363,19 +3363,23 @@ public static class ParallelConfig
         {
             EnsureMKLLoaded();
 
-            // Only call if we have a valid function pointer
-            if (_mkl_get_max_threads != null)
-                try
-                {
-                    return _mkl_get_max_threads.Invoke();
-                }
-                catch (Exception ex)
-                {
-                    LogDebug($"Failed to get MKL threads: {ex.Message}");
-                    return null;
-                }
+            // Hold the lock across the read+invoke so a concurrent Cleanup() cannot Free the
+            // library (and null the delegate) between the null-check and the call (use-after-free).
+            lock (_lock)
+            {
+                if (_mkl_get_max_threads != null)
+                    try
+                    {
+                        return _mkl_get_max_threads.Invoke();
+                    }
+                    catch (Exception ex)
+                    {
+                        LogDebug($"Failed to get MKL threads: {ex.Message}");
+                        return null;
+                    }
 
-            return null;
+                return null;
+            }
         }
     }
 
