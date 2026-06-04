@@ -751,40 +751,46 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static long ComputeCanonicalKey(ReadOnlySpan<int> nodes)
     {
-        // xxHash-inspired algorithm with better avalanche properties
-        const ulong Prime1 = 11400714785074694791UL;
-        const ulong Prime2 = 14029467366897019727UL;
-        const ulong Prime3 = 1609587929392839161UL;
-
-        var hash = (ulong)nodes.Length * Prime1 + Prime3;
-
-        // Process in 64-bit chunks when possible for better performance
-
-        // For odd node counts, 4*len is not divisible by 8, so cast only even-length prefix.
-        var evenLen = nodes.Length & ~1; // Round down to nearest even number
-        var uint64Span = evenLen > 0
-            ? MemoryMarshal.Cast<int, ulong>(nodes[..evenLen])
-            : ReadOnlySpan<ulong>.Empty;
-
-        foreach (var chunk in uint64Span)
+        // xxHash-inspired algorithm with better avalanche properties.
+        // The multiplications by these 64-bit primes intentionally wrap, so the whole computation
+        // must be `unchecked`: otherwise Debug builds (which enable CheckForOverflowUnderflow) throw
+        // OverflowException. This path is reached by DiscoverSubEntities / DiscoverEdges / symmetry
+        // AddUnique, so without this the 3D crack and sub-entity discovery crash under a Debug build.
+        unchecked
         {
-            hash ^= chunk * Prime2;
-            hash = BitOperations.RotateLeft(hash, 31) * Prime1;
+            const ulong Prime1 = 11400714785074694791UL;
+            const ulong Prime2 = 14029467366897019727UL;
+            const ulong Prime3 = 1609587929392839161UL;
+
+            var hash = (ulong)nodes.Length * Prime1 + Prime3;
+
+            // Process in 64-bit chunks when possible for better performance.
+            // For odd node counts, 4*len is not divisible by 8, so cast only even-length prefix.
+            var evenLen = nodes.Length & ~1; // Round down to nearest even number
+            var uint64Span = evenLen > 0
+                ? MemoryMarshal.Cast<int, ulong>(nodes[..evenLen])
+                : ReadOnlySpan<ulong>.Empty;
+
+            foreach (var chunk in uint64Span)
+            {
+                hash ^= chunk * Prime2;
+                hash = BitOperations.RotateLeft(hash, 31) * Prime1;
+            }
+
+            // Handle remaining element (0 or 1 int that doesn't fill a ulong)
+            if ((nodes.Length & 1) == 1)
+            {
+                hash ^= (ulong)nodes[nodes.Length - 1] * Prime2;
+                hash = BitOperations.RotateLeft(hash, 23);
+            }
+
+            // Final mixing for avalanche effect
+            hash ^= hash >> 33;
+            hash *= Prime2;
+            hash ^= hash >> 29;
+
+            return (long)hash;
         }
-
-        // Handle remaining element (0 or 1 int that doesn't fill a ulong)
-        if ((nodes.Length & 1) == 1)
-        {
-            hash ^= (ulong)nodes[nodes.Length - 1] * Prime2;
-            hash = BitOperations.RotateLeft(hash, 23);
-        }
-
-        // Final mixing for avalanche effect
-        hash ^= hash >> 33;
-        hash *= Prime2;
-        hash ^= hash >> 29;
-
-        return unchecked((long)hash);
     }
 
     /// <summary>
