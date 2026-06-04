@@ -213,19 +213,19 @@ public static class EnsightWriter
         // X coordinates
         for (int i = 0; i < nNodes; i++)
         {
-            writer.WriteLine(coordinates[i, 0].ToString("E5", culture).PadLeft(12));
+            writer.WriteLine(coordinates[i, 0].ToString("0.00000E+00", culture).PadLeft(12));
         }
         
         // Y coordinates
         for (int i = 0; i < nNodes; i++)
         {
-            writer.WriteLine(coordinates[i, 1].ToString("E5", culture).PadLeft(12));
+            writer.WriteLine(coordinates[i, 1].ToString("0.00000E+00", culture).PadLeft(12));
         }
         
         // Z coordinates (all zero for 2D)
         for (int i = 0; i < nNodes; i++)
         {
-            writer.WriteLine(0.0.ToString("E5", culture).PadLeft(12));
+            writer.WriteLine(0.0.ToString("0.00000E+00", culture).PadLeft(12));
         }
         
         // Triangles (tria3)
@@ -331,7 +331,7 @@ public static class EnsightWriter
         int nNodes = mesh.Count<Node>();
         for (int i = 0; i < nNodes; i++)
         {
-            writer.WriteLine(data[i].ToString("E5", culture).PadLeft(12));
+            writer.WriteLine(data[i].ToString("0.00000E+00", culture).PadLeft(12));
         }
     }
     
