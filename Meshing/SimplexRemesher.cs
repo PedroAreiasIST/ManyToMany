@@ -1419,9 +1419,10 @@ public static class SimplexRemesher
             double f1 = signedField(coordinates[n1, 0], coordinates[n1, 1], GetZ(coordinates, n1));
             double f2 = signedField(coordinates[n2, 0], coordinates[n2, 1], GetZ(coordinates, n2));
             
-            // Check if crack surface crosses this edge (sign change)
-            // With perturbation, f1*f2 == 0 should be extremely rare
-            bool crossesCrack = f1 * f2 < 0;
+            // Check if crack surface crosses this edge (sign change). Sign-based so an endpoint
+            // exactly on the surface (f==0, e.g. a crack plane aligned with a node layer) still
+            // counts as a crossing; f1*f2<0 missed those and produced "0 crack nodes".
+            bool crossesCrack = Math.Sign(f1) != Math.Sign(f2);
             
             if (crossesCrack)
             {
@@ -1505,7 +1506,7 @@ public static class SimplexRemesher
                 bool checkRegion = (regionField != null);
                 bool refineEdge12 = false, refineEdge23 = false, refineEdge31 = false;
 
-                if (f1 * f2 <= 0)
+                if (Math.Sign(f1) != Math.Sign(f2))
                 {
                     if (checkRegion)
                     {
@@ -2332,7 +2333,7 @@ if (TryFindEdgeRootOnSegment(signedField,
                 double f2 = signedField(x2, y2, z2);
                 
                 // Snap to zero-crossing if edge crosses crack
-                if (Math.Abs(f2 - f1) > 1e-10 && f1 * f2 <= 0)
+                if (Math.Abs(f2 - f1) > 1e-10 && Math.Sign(f1) != Math.Sign(f2))
                 {
                     // Current interpolated position
                     double xCurr = refinedCoords[i, 0];
@@ -2481,8 +2482,8 @@ if (TryFindEdgeRootOnSegment(signedField,
                 double f1 = signedField(coordinates[p1, 0], coordinates[p1, 1], coordinates[p1, 2]);
                 double f2 = signedField(coordinates[p2, 0], coordinates[p2, 1], coordinates[p2, 2]);
                 
-                // Sign change = edge crosses surface
-                if (f1 * f2 < 0)
+                // Sign change = edge crosses surface (sign-based: also catches an endpoint on the surface)
+                if (Math.Sign(f1) != Math.Sign(f2))
                 {
                     // Check if inside region
                     if (regionField == null || regionField(refinedCoords[i, 0], refinedCoords[i, 1], refinedCoords[i, 2]) <= 0)
