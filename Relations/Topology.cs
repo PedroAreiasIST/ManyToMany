@@ -1092,6 +1092,9 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
             ThrowIfDisposed();
             var list = GetOrCreateList<TElement, TData>();
             var index = AddInternal<TElement, TNode>(connectedNodes);
+            Debug.Assert(list.Count == index,
+                "Data list out of sync with element indices: mixing the data and no-data Add overloads " +
+                "for the same element type corrupts Get<TElement, TData>.");
             list.Add(data);
             return index;
         }
@@ -1186,6 +1189,8 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
                 // Hash collision but different nodes - add to collision chain
                 var list = GetOrCreateList<TElement, TData>();
                 var newIndex = _adjacency.AppendElement(GetTypeIndex<TElement>(), GetTypeIndex<TNode>(), canonical);
+                Debug.Assert(list.Count == newIndex,
+                    "Data list out of sync with element indices (mixing data/no-data adds for the same type).");
                 list.Add(data);
                 collisionChain.Add((newIndex, canonical));
 
@@ -1195,6 +1200,8 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
             // First element with this hash - create new collision chain
             var dataList = GetOrCreateList<TElement, TData>();
             var firstIndex = _adjacency.AppendElement(GetTypeIndex<TElement>(), GetTypeIndex<TNode>(), canonical);
+            Debug.Assert(dataList.Count == firstIndex,
+                "Data list out of sync with element indices (mixing data/no-data adds for the same type).");
             dataList.Add(data);
             typeIndex[key] = new List<(int Index, List<int> Nodes)> { (firstIndex, canonical) };
 
