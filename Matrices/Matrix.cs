@@ -893,7 +893,9 @@ public sealed class Matrix : IEquatable<Matrix>, IFormattable, ICloneable
         if (RowCount != other.RowCount || ColumnCount != other.ColumnCount) return false;
 
         for (var i = 0; i < _data.Length; i++)
-            if (Math.Abs(_data[i] - other._data[i]) > tolerance)
+            // Negated <= so NaN operands compare unequal (NaN > tol is false, which would
+            // otherwise treat NaN-vs-anything as "within tolerance").
+            if (!(Math.Abs(_data[i] - other._data[i]) <= tolerance))
                 return false;
 
         return true;
@@ -4742,7 +4744,8 @@ public sealed class Vector : IEquatable<Vector>, IFormattable, ICloneable
         if (Length != other.Length) return false;
 
         for (var i = 0; i < _data.Length; i++)
-            if (Math.Abs(_data[i] - other._data[i]) > DefaultTolerance)
+            // Negated <= so NaN operands compare unequal (see Matrix.Equals).
+            if (!(Math.Abs(_data[i] - other._data[i]) <= DefaultTolerance))
                 return false;
         return true;
     }
@@ -5865,10 +5868,13 @@ public sealed class QRDecomposition
 
         for (var k = 0; k < n; k++)
         {
+            var diag = _qr[k, k];
+            if (diag == 0.0)
+                continue; // zero Householder vector (rank-deficient column) ⇒ identity reflection; matches the Q getter
             double s = 0;
             for (var i = k; i < m; i++)
                 s += _qr[i, k] * x[i];
-            s = -s / _qr[k, k];
+            s = -s / diag;
             for (var i = k; i < m; i++)
                 x[i] += s * _qr[i, k];
         }

@@ -1388,7 +1388,7 @@ public sealed class CliqueSystem : IDisposable
             lock (_lockStripes[stripeIndex])
             {
                 var c = 0;
-                var rowBase = (long)matStart + r * numDofs; // FIX FOR ISSUE #2: Use long for 64-bit indexing
+                var rowBase = (long)matStart + (long)r * numDofs; // 64-bit indexing: cast r before the multiply so r*numDofs cannot overflow int
 
                 // Process 4 columns at a time
                 for (; c <= numDofs - 4; c += 4)

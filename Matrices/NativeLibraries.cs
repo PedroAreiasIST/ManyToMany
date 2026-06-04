@@ -548,15 +548,18 @@ public sealed class NativeLibraryConfig : INativeLibraryConfig
 
     /// <summary>
     ///     If true, automatically attempts MKL installation via package manager if not found.
-    ///     Default: true (can be disabled for air-gapped systems or CI/CD)
+    ///     Default: false. Auto-install shells out to the system package manager (e.g.
+    ///     <c>sudo apt-get install</c>) and must be opted into explicitly; leaving it off keeps
+    ///     library initialization side-effect free on servers, CI/CD, and air-gapped systems.
     /// </summary>
-    public bool EnableAutoInstall { get; set; } = true;
+    public bool EnableAutoInstall { get; set; } = false;
 
     /// <summary>
-    ///     If true, shows interactive prompts before installing MKL.
-    ///     Default: true (set false for silent/CI environments)
+    ///     If true, shows interactive prompts (blocking <see cref="Console.ReadLine" />) before
+    ///     installing MKL. Default: false so a missing dependency can never hang a headless
+    ///     process; only meaningful when <see cref="EnableAutoInstall" /> is enabled.
     /// </summary>
-    public bool InteractiveInstall { get; set; } = true;
+    public bool InteractiveInstall { get; set; } = false;
 
     /// <summary>
     ///     If true, performs deep recursive scanning of system directories to find libraries.

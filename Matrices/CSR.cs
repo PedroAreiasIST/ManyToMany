@@ -1237,7 +1237,12 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
             // Parallel: compute row counts independently, then prefix sum
             var rowCounts = new int[A.nrows];
             Parallel.For(0, A.nrows, ParallelConfig.Options,
-                () => ArrayPool<int>.Shared.Rent(A.ncols),
+                () =>
+                {
+                    var workspace = ArrayPool<int>.Shared.Rent(A.ncols);
+                    Array.Clear(workspace, 0, A.ncols); // Rent does not zero; the i+1 timestamp scheme needs a known 0 baseline
+                    return workspace;
+                },
                 (i, loopState, workspace) =>
                 {
                     var nnzThisRow = 0;
@@ -1329,7 +1334,12 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
         {
             // Parallel: each row writes to its own non-overlapping segment in colIdx
             Parallel.For(0, A.nrows, ParallelConfig.Options,
-                () => ArrayPool<int>.Shared.Rent(A.ncols),
+                () =>
+                {
+                    var workspace = ArrayPool<int>.Shared.Rent(A.ncols);
+                    Array.Clear(workspace, 0, A.ncols); // Rent does not zero; the i+1 timestamp scheme needs a known 0 baseline
+                    return workspace;
+                },
                 (i, loopState, workspace) =>
                 {
                     var pos = rowPtr[i];
@@ -1713,7 +1723,12 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
         {
             // Parallel: each row writes to its own non-overlapping segment in values
             Parallel.For(0, A.nrows, ParallelConfig.Options,
-                () => ArrayPool<int>.Shared.Rent(A.ncols),
+                () =>
+                {
+                    var workspace = ArrayPool<int>.Shared.Rent(A.ncols);
+                    Array.Clear(workspace, 0, A.ncols); // Rent does not zero; columns of B absent from A must read 0 ("not present")
+                    return workspace;
+                },
                 (i, loopState, workspace) =>
                 {
                     // Store index into A's values for each column (using timestamp+offset encoding)
@@ -3387,9 +3402,20 @@ public sealed class CSR : IFormattable, IEquatable<CSR>, ICloneable, IDisposable
                 }
             }
 
-            // Prefix sum
+            // Prefix sum (checked: the cumulative DOF-level nnz can exceed int.MaxValue at the
+            // 10M+ DOF scale this path targets, and Release disables overflow checks, so a plain
+            // int accumulation would silently wrap negative and corrupt the allocation)
+            long cumulativeNnz = 0;
             for (var i = 1; i <= totalDofs; i++)
-                dofRowPtrs[i] += dofRowPtrs[i - 1];
+            {
+                cumulativeNnz += dofRowPtrs[i];
+                if (cumulativeNnz > int.MaxValue)
+                    throw new OverflowException(
+                        $"CSR.FromTopology: cumulative non-zero count exceeds int.MaxValue " +
+                        $"({cumulativeNnz:N0}) at DOF row {i} of {totalDofs}. The DOF-level sparsity " +
+                        "pattern is too large for 32-bit row pointers; partition the problem.");
+                dofRowPtrs[i] = (int)cumulativeNnz;
+            }
 
             var totalNnz = dofRowPtrs[totalDofs];
             var dofColIdx = new int[totalNnz];
@@ -4286,6 +4312,12 @@ internal class PardisoSolver : IDisposable
             Array.Clear(iparm, 0, 64);
             CallPardisoInit(pt, ref matrixType, iparm);
             iparm[34] = 1; // 0-based indexing
+            iparm[2] = ParallelConfig.MKLNumThreads; // OpenMP thread count; PARDISO runs single-threaded if left 0
+
+            // Mark initialized BEFORE the analysis phase so that a symbolic-factorization failure
+            // still triggers the phase=-1 release in Dispose (otherwise partial native allocations leak).
+            isInitialized = true;
+            matrixSize = n;
 
             // Symbolic factorization
             phase = 11;
@@ -4293,9 +4325,6 @@ internal class PardisoSolver : IDisposable
                 ref msglvl, rhs, solution, ref error);
             if (error != 0)
                 throw new SolverException($"PARDISO symbolic factorization failed with error code: {error}");
-
-            isInitialized = true;
-            matrixSize = n;
         }
 
         // Numerical factorization
@@ -4340,13 +4369,18 @@ internal class PardisoSolver : IDisposable
             Array.Clear(iparm, 0, 64);
             CallPardisoInit(pt, ref matrixType, iparm);
             iparm[34] = 1;
+            iparm[2] = ParallelConfig.MKLNumThreads; // OpenMP thread count; PARDISO runs single-threaded if left 0
+
+            // Mark initialized BEFORE the analysis phase so that a symbolic-factorization failure
+            // still triggers the phase=-1 release in Dispose (otherwise partial native allocations leak).
+            isInitialized = true;
+            matrixSize = n;
 
             phase = 11;
             CallPardiso(pt, ref maxfct, ref mnum, ref matrixType, ref phase, ref n, vals, ia, ja, idum, ref nrhs, iparm,
                 ref msglvl, rhs, solution, ref error);
             if (error != 0)
                 throw new SolverException($"PARDISO symbolic factorization failed with error code: {error}");
-            isInitialized = true;
         }
 
         phase = 22;
