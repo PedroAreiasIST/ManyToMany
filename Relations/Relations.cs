@@ -2259,30 +2259,24 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
                             }
                     }
 
-                    // Pass 2: for right nodes, toggle: 1→2 (in both, exclude), 0→1 (right only, include)
+                    // Pass 2: record right membership in bit 1 (idempotent, so duplicates in either
+                    // operand are handled correctly). marker bits: 1 = in left, 2 = in right.
                     if (element < right.Count)
                     {
                         var rightNodes = right._adjacencies[element];
                         foreach (var node in rightNodes)
-                            if ((uint)node <= (uint)maxNode)
+                            if ((uint)node <= (uint)maxNode && (marker[node] & 2) == 0)
                             {
-                                if (marker[node] == 1)
-                                {
-                                    marker[node] = 2; // In both → exclude
-                                }
-                                else if (marker[node] == 0)
-                                {
-                                    marker[node] = 1; // Right only → include
+                                if (marker[node] == 0)
                                     touched[touchedCount++] = node;
-                                }
-                                // marker[node] == 2 means already excluded (duplicate in right), skip
+                                marker[node] |= 2;
                             }
                     }
 
-                    // Collect nodes with marker == 1 (appeared in exactly one operand)
+                    // Collect nodes present in exactly one operand (marker != 3, i.e. not in both)
                     var count = 0;
                     for (var i = 0; i < touchedCount; i++)
-                        if (marker[touched[i]] == 1)
+                        if (marker[touched[i]] != 3)
                             count++;
 
                     var temp = new List<int>(count);
@@ -2292,7 +2286,7 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
                         var tempSpan = CollectionsMarshal.AsSpan(temp);
                         var idx = 0;
                         for (var i = 0; i < touchedCount; i++)
-                            if (marker[touched[i]] == 1)
+                            if (marker[touched[i]] != 3)
                                 tempSpan[idx++] = touched[i];
                     }
 
@@ -2330,20 +2324,16 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
 
                 if (element < right.Count)
                     foreach (var node in right._adjacencies[element])
-                        if ((uint)node <= (uint)maxNode)
+                        if ((uint)node <= (uint)maxNode && (marker[node] & 2) == 0)
                         {
-                            if (marker[node] == 1)
-                                marker[node] = 2;
-                            else if (marker[node] == 0)
-                            {
-                                marker[node] = 1;
+                            if (marker[node] == 0)
                                 touched[touchedCount++] = node;
-                            }
+                            marker[node] |= 2;
                         }
 
                 var count = 0;
                 for (var i = 0; i < touchedCount; i++)
-                    if (marker[touched[i]] == 1)
+                    if (marker[touched[i]] != 3)
                         count++;
 
                 var temp = new List<int>(count);
@@ -2353,7 +2343,7 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
                     var tempSpan = CollectionsMarshal.AsSpan(temp);
                     var idx = 0;
                     for (var i = 0; i < touchedCount; i++)
-                        if (marker[touched[i]] == 1)
+                        if (marker[touched[i]] != 3)
                             tempSpan[idx++] = touched[i];
                 }
 
