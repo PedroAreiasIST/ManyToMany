@@ -236,13 +236,11 @@ public static class SimplexRemesher
                 tetsToFix.Add((i, new[] { nodes[1], nodes[0], nodes[2], nodes[3] }));
         }
 
-        tetsToFix.Sort((a, b) => b.index.CompareTo(a.index));
-
+        // Fix in place: ReplaceElementNodes preserves the element index and OriginalElement mapping.
+        // (The previous Remove+Add left the inverted tet marked-but-not-compacted, so without a Compress
+        // it lingered as a ghost element; in-place replacement avoids that entirely.)
         foreach (var (index, swappedNodes) in tetsToFix)
-        {
-            mesh.Remove<Tet4>(index);
-            mesh.AddTetrahedron(swappedNodes[0], swappedNodes[1], swappedNodes[2], swappedNodes[3]);
-        }
+            mesh.ReplaceElementNodes<Tet4, Node>(index, swappedNodes[0], swappedNodes[1], swappedNodes[2], swappedNodes[3]);
 
         if (tetsToFix.Count > 0)
             Console.WriteLine($"[CreateBoxMesh] Fixed {tetsToFix.Count} inverted tetrahedra");
@@ -2312,10 +2310,6 @@ if (TryFindEdgeRootOnSegment(signedField,
         Console.WriteLine($"  → Using MeshRefinement.InterpolateCoordinates...");
         var refinedCoords = MeshRefinement.InterpolateCoordinates(refinedMesh, coordinates);
         
-        // Save intermediate refined mesh for visualization
-        Console.WriteLine($"  → Saving refined mesh before snapping...");
-        SimplexRemesher.SaveGiD(refinedMesh, refinedCoords, "refined_crack_mesh.post.msh");
-        
         // Snap new nodes to exact crack surface (surface = 0) ONLY IF INSIDE REGION
         Console.WriteLine($"  → Snapping crack nodes to exact zero crossing...");
         int snappedCount = 0;
@@ -3484,6 +3478,22 @@ if (TryFindEdgeRootOnSegment(signedField,
     // Mesh Smoothing (was MeshOptimization)
     // ═══════════════════════════════════════════════════════════════════════════
 
+    // 6x the signed volume of tet (a,b,c,d) = (b-a)·((c-a)×(d-a)). If subNode is one of the four
+    // node ids, its coordinates are replaced by (sx,sy,sz) (used to test a candidate smoothing move).
+    private static double SignedTetVolume6(double[,] coords, int a, int b, int c, int d,
+        int subNode, double sx, double sy, double sz)
+    {
+        double ax = a == subNode ? sx : coords[a, 0], ay = a == subNode ? sy : coords[a, 1], az = a == subNode ? sz : coords[a, 2];
+        double bx = b == subNode ? sx : coords[b, 0], by = b == subNode ? sy : coords[b, 1], bz = b == subNode ? sz : coords[b, 2];
+        double cx = c == subNode ? sx : coords[c, 0], cy = c == subNode ? sy : coords[c, 1], cz = c == subNode ? sz : coords[c, 2];
+        double dx = d == subNode ? sx : coords[d, 0], dy = d == subNode ? sy : coords[d, 1], dz = d == subNode ? sz : coords[d, 2];
+        double bax = bx - ax, bay = by - ay, baz = bz - az;
+        double cax = cx - ax, cay = cy - ay, caz = cz - az;
+        double dax = dx - ax, day = dy - ay, daz = dz - az;
+        double crx = cay * daz - caz * day, cry = caz * dax - cax * daz, crz = cax * day - cay * dax;
+        return bax * crx + bay * cry + baz * crz;
+    }
+
     public static double[,] LaplacianSmoothing(
         SimplexMesh mesh, double[,] coords,
         int iterations = 5, HashSet<int>? fixedNodes = null,
@@ -3524,11 +3534,28 @@ if (TryFindEdgeRootOnSegment(signedField,
                 avgY /= count;
                 avgZ /= count;
 
-                newCoords[nodeId, 0] += relaxation * (avgX - newCoords[nodeId, 0]);
-                newCoords[nodeId, 1] += relaxation * (avgY - newCoords[nodeId, 1]);
-                newCoords[nodeId, 2] += relaxation * (avgZ - newCoords[nodeId, 2]);
+                var candX = newCoords[nodeId, 0] + relaxation * (avgX - newCoords[nodeId, 0]);
+                var candY = newCoords[nodeId, 1] + relaxation * (avgY - newCoords[nodeId, 1]);
+                var candZ = newCoords[nodeId, 2] + relaxation * (avgZ - newCoords[nodeId, 2]);
 
-                smoothedCount++;
+                // Reject the move if it would invert (flip the signed-volume sign of) any incident
+                // tetrahedron. No-op for non-tet meshes (ElementsAt<Tet4> is then empty).
+                var safe = true;
+                foreach (var tetId in mesh.ElementsAt<Tet4, Node>(nodeId))
+                {
+                    var nd = mesh.NodesOf<Tet4, Node>(tetId);
+                    var oldV = SignedTetVolume6(newCoords, nd[0], nd[1], nd[2], nd[3], -1, 0, 0, 0);
+                    var newV = SignedTetVolume6(newCoords, nd[0], nd[1], nd[2], nd[3], nodeId, candX, candY, candZ);
+                    if (newV == 0.0 || Math.Sign(oldV) != Math.Sign(newV)) { safe = false; break; }
+                }
+
+                if (safe)
+                {
+                    newCoords[nodeId, 0] = candX;
+                    newCoords[nodeId, 1] = candY;
+                    newCoords[nodeId, 2] = candZ;
+                    smoothedCount++;
+                }
             }
 
             if ((iter + 1) % Math.Max(1, iterations / 5) == 0 || iter == iterations - 1)
@@ -3586,10 +3613,32 @@ if (TryFindEdgeRootOnSegment(signedField,
                     centroidX /= totalArea;
                     centroidY /= totalArea;
 
-                    newCoords[nodeId, 0] += relaxation * (centroidX - newCoords[nodeId, 0]);
-                    newCoords[nodeId, 1] += relaxation * (centroidY - newCoords[nodeId, 1]);
+                    var candX = newCoords[nodeId, 0] + relaxation * (centroidX - newCoords[nodeId, 0]);
+                    var candY = newCoords[nodeId, 1] + relaxation * (centroidY - newCoords[nodeId, 1]);
 
-                    smoothedCount++;
+                    // Reject the move if it would invert (flip the signed-area sign of) any incident
+                    // triangle. Sign-flip (not area<=0) so the guard is correct for CW or CCW meshes.
+                    var safe = true;
+                    foreach (var triId in nodeTriangles)
+                    {
+                        var nd = mesh.NodesOf<Tri3, Node>(triId);
+                        double ox0 = newCoords[nd[0], 0], oy0 = newCoords[nd[0], 1];
+                        double ox1 = newCoords[nd[1], 0], oy1 = newCoords[nd[1], 1];
+                        double ox2 = newCoords[nd[2], 0], oy2 = newCoords[nd[2], 1];
+                        var oldA = (ox1 - ox0) * (oy2 - oy0) - (oy1 - oy0) * (ox2 - ox0);
+                        double nx0 = nd[0] == nodeId ? candX : ox0, ny0 = nd[0] == nodeId ? candY : oy0;
+                        double nx1 = nd[1] == nodeId ? candX : ox1, ny1 = nd[1] == nodeId ? candY : oy1;
+                        double nx2 = nd[2] == nodeId ? candX : ox2, ny2 = nd[2] == nodeId ? candY : oy2;
+                        var newA = (nx1 - nx0) * (ny2 - ny0) - (ny1 - ny0) * (nx2 - nx0);
+                        if (newA == 0.0 || Math.Sign(oldA) != Math.Sign(newA)) { safe = false; break; }
+                    }
+
+                    if (safe)
+                    {
+                        newCoords[nodeId, 0] = candX;
+                        newCoords[nodeId, 1] = candY;
+                        smoothedCount++;
+                    }
                 }
             }
 
