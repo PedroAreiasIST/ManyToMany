@@ -2703,7 +2703,7 @@ public sealed class Matrix : IEquatable<Matrix>, IFormattable, ICloneable
         for (var j = i + 1; j < RowCount; j++)
         {
             var diff = Math.Abs(this[i, j] - this[j, i]);
-            if (diff > tolerance) return false;
+            if (!(diff <= tolerance)) return false; // NaN-aware: a NaN entry must not read as symmetric
         }
 
         return true;
@@ -3410,75 +3410,89 @@ public sealed class Matrix : IEquatable<Matrix>, IFormattable, ICloneable
             }
         }
 
-        var maxIter = 30 * n;
-        for (var iter = 0; iter < maxIter; iter++)
+        // Symmetric tridiagonal QL with implicit shifts and deflation (EISPACK / JAMA tql2).
+        // The previous single-shift, no-deflation sweep failed to converge for n >= ~6 (it produced
+        // reconstruction residuals of 0.1-1.0). d/e hold the tridiagonal diagonal/sub-diagonal; V
+        // already holds the Householder tridiagonalizing transform and is refined into eigenvectors.
+        var d = new double[n];
+        var e = new double[n];
+        for (var i = 0; i < n; i++) d[i] = A[i, i];
+        for (var i = 0; i < n - 1; i++) e[i] = A[i + 1, i];
+        e[n - 1] = 0.0;
+
+        var f = 0.0;
+        var tst1 = 0.0;
+        for (var l = 0; l < n; l++)
         {
-            var converged = true;
-            for (var i = 0; i < n - 1; i++)
-                if (Math.Abs(A[i + 1, i]) > MachinePrecision * (Math.Abs(A[i, i]) + Math.Abs(A[i + 1, i + 1])))
-                {
-                    converged = false;
-                    break;
-                }
-
-            if (converged) break;
-
-            var a = A[n - 2, n - 2];
-            var b = A[n - 1, n - 2];
-            var c = A[n - 1, n - 1];
-            var d = (a - c) / 2;
-            var sign = d >= 0 ? 1.0 : -1.0;
-            var shift = c - b * b / (d + sign * Math.Sqrt(d * d + b * b));
-
-            for (var k = 0; k < n - 1; k++)
+            tst1 = Math.Max(tst1, Math.Abs(d[l]) + Math.Abs(e[l]));
+            var m = l;
+            while (m < n)
             {
-                double c1, s;
-
-                if (k == 0)
-                {
-                    var p = A[0, 0] - shift;
-                    var q = A[1, 0];
-                    var r = Math.Sqrt(p * p + q * q);
-                    if (r == 0.0) { c1 = 1.0; s = 0.0; } // already deflated; identity rotation (avoid 0/0 = NaN)
-                    else { c1 = p / r; s = q / r; }
-                }
-                else
-                {
-                    var p = A[k, k - 1];
-                    var q = A[k + 1, k - 1];
-                    var r = Math.Sqrt(p * p + q * q);
-                    if (r == 0.0) { c1 = 1.0; s = 0.0; } // already deflated; identity rotation (avoid 0/0 = NaN)
-                    else { c1 = p / r; s = q / r; }
-                    A[k, k - 1] = r;
-                    A[k + 1, k - 1] = 0;
-                }
-
-                for (var j = k; j < n; j++)
-                {
-                    var temp = c1 * A[k, j] + s * A[k + 1, j];
-                    A[k + 1, j] = -s * A[k, j] + c1 * A[k + 1, j];
-                    A[k, j] = temp;
-                }
-
-                for (var i = 0; i <= Math.Min(k + 2, n - 1); i++)
-                {
-                    var temp = c1 * A[i, k] + s * A[i, k + 1];
-                    A[i, k + 1] = -s * A[i, k] + c1 * A[i, k + 1];
-                    A[i, k] = temp;
-                }
-
-                for (var i = 0; i < n; i++)
-                {
-                    var temp = c1 * V[i, k] + s * V[i, k + 1];
-                    V[i, k + 1] = -s * V[i, k] + c1 * V[i, k + 1];
-                    V[i, k] = temp;
-                }
+                if (Math.Abs(e[m]) <= MachinePrecision * tst1) break;
+                m++;
             }
+
+            if (m > l)
+            {
+                var iter = 0;
+                do
+                {
+                    if (++iter > 1000)
+                        throw new InvalidOperationException("Eigenvalue QL iteration did not converge.");
+
+                    var g = d[l];
+                    var p = (d[l + 1] - g) / (2.0 * e[l]);
+                    var r = double.Hypot(p, 1.0);
+                    if (p < 0) r = -r;
+                    d[l] = e[l] / (p + r);
+                    d[l + 1] = e[l] * (p + r);
+                    var dl1 = d[l + 1];
+                    var h = g - d[l];
+                    for (var i = l + 2; i < n; i++) d[i] -= h;
+                    f += h;
+
+                    // Implicit QL transformation.
+                    p = d[m];
+                    var c = 1.0;
+                    var c2 = c;
+                    var c3 = c;
+                    var el1 = e[l + 1];
+                    var s = 0.0;
+                    var s2 = 0.0;
+                    for (var i = m - 1; i >= l; i--)
+                    {
+                        c3 = c2;
+                        c2 = c;
+                        s2 = s;
+                        g = c * e[i];
+                        h = c * p;
+                        r = double.Hypot(p, e[i]);
+                        e[i + 1] = s * r;
+                        s = e[i] / r;
+                        c = p / r;
+                        p = c * d[i] - s * g;
+                        d[i + 1] = h + s * (c * g + s * d[i]);
+
+                        // Accumulate eigenvector transformation.
+                        for (var k = 0; k < n; k++)
+                        {
+                            h = V[k, i + 1];
+                            V[k, i + 1] = s * V[k, i] + c * h;
+                            V[k, i] = c * V[k, i] - s * h;
+                        }
+                    }
+
+                    p = -s * s2 * c3 * el1 * e[l] / dl1;
+                    e[l] = s * p;
+                    d[l] = c * p;
+                } while (Math.Abs(e[l]) > MachinePrecision * tst1);
+            }
+
+            d[l] += f;
+            e[l] = 0.0;
         }
 
-        var eigenvalues = new double[n];
-        for (var i = 0; i < n; i++)
-            eigenvalues[i] = A[i, i];
+        var eigenvalues = d;
 
         var indices = new int[n];
         for (var i = 0; i < n; i++)
@@ -4562,6 +4576,9 @@ public sealed class Matrix : IEquatable<Matrix>, IFormattable, ICloneable
 
         var n = A.RowCount;
         var norm = A.InfinityNorm();
+        if (!double.IsFinite(norm))
+            throw new InvalidOperationException(
+                "MatrixExponential requires a finite matrix (non-finite norm would loop forever in scaling).");
 
         var s = 0;
         var scale = 1.0;

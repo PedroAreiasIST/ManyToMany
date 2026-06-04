@@ -1419,9 +1419,10 @@ public static class SimplexRemesher
             double f1 = signedField(coordinates[n1, 0], coordinates[n1, 1], GetZ(coordinates, n1));
             double f2 = signedField(coordinates[n2, 0], coordinates[n2, 1], GetZ(coordinates, n2));
             
-            // Check if crack surface crosses this edge (sign change)
-            // With perturbation, f1*f2 == 0 should be extremely rare
-            bool crossesCrack = f1 * f2 < 0;
+            // Check if crack surface crosses this edge (sign change). Sign-based so an endpoint
+            // exactly on the surface (f==0, e.g. a crack plane aligned with a node layer) still
+            // counts as a crossing; f1*f2<0 missed those and produced "0 crack nodes".
+            bool crossesCrack = Math.Sign(f1) != Math.Sign(f2);
             
             if (crossesCrack)
             {
@@ -1505,7 +1506,7 @@ public static class SimplexRemesher
                 bool checkRegion = (regionField != null);
                 bool refineEdge12 = false, refineEdge23 = false, refineEdge31 = false;
 
-                if (f1 * f2 <= 0)
+                if (Math.Sign(f1) != Math.Sign(f2))
                 {
                     if (checkRegion)
                     {
@@ -1853,22 +1854,33 @@ public static class SimplexRemesher
             var nodes = mesh.NodesOf<Tri3, Node>(i);
             var newNodes = new int[3];
             
-            // Determine element side from first non-crack node
-            double sideValue = 0.0;
-            bool hasNonCrackNode = false;
-            
+            // VOTING-BASED ELEMENT ASSIGNMENT (matches the 3D path). A triangle straddling the crack
+            // can have non-crack nodes on opposite sides, so classify by majority vote rather than by
+            // the first non-crack node (which mis-assigned such elements and left the crack
+            // non-conforming / could weld a face).
+            int positiveVotes = 0, negativeVotes = 0;
             for (int j = 0; j < 3; j++)
             {
                 if (!nodesToDuplicate.Contains(nodes[j]))
                 {
-                    sideValue = surfaceValues[nodes[j]];
-                    hasNonCrackNode = true;
-                    break;
+                    if (surfaceValues[nodes[j]] > 0) positiveVotes++;
+                    else negativeVotes++;
                 }
             }
-            
-            // If element has no non-crack nodes, default to negative side
-            bool usePositiveSide = hasNonCrackNode && (sideValue > 0);
+
+            bool usePositiveSide;
+            if (positiveVotes != negativeVotes)
+            {
+                usePositiveSide = positiveVotes > negativeVotes;
+            }
+            else
+            {
+                // Tie (or all-crack-node) element: lean to the side of the summed signed field
+                // (crack nodes contribute 0).
+                double sum = 0.0;
+                for (int j = 0; j < 3; j++) sum += surfaceValues[nodes[j]];
+                usePositiveSide = sum > 0;
+            }
             
             if (usePositiveSide)
                 positiveSideElements++;
@@ -2332,7 +2344,7 @@ if (TryFindEdgeRootOnSegment(signedField,
                 double f2 = signedField(x2, y2, z2);
                 
                 // Snap to zero-crossing if edge crosses crack
-                if (Math.Abs(f2 - f1) > 1e-10 && f1 * f2 <= 0)
+                if (Math.Abs(f2 - f1) > 1e-10 && Math.Sign(f1) != Math.Sign(f2))
                 {
                     // Current interpolated position
                     double xCurr = refinedCoords[i, 0];
@@ -2481,8 +2493,8 @@ if (TryFindEdgeRootOnSegment(signedField,
                 double f1 = signedField(coordinates[p1, 0], coordinates[p1, 1], coordinates[p1, 2]);
                 double f2 = signedField(coordinates[p2, 0], coordinates[p2, 1], coordinates[p2, 2]);
                 
-                // Sign change = edge crosses surface
-                if (f1 * f2 < 0)
+                // Sign change = edge crosses surface (sign-based: also catches an endpoint on the surface)
+                if (Math.Sign(f1) != Math.Sign(f2))
                 {
                     // Check if inside region
                     if (regionField == null || regionField(refinedCoords[i, 0], refinedCoords[i, 1], refinedCoords[i, 2]) <= 0)
@@ -2750,8 +2762,13 @@ if (TryFindEdgeRootOnSegment(signedField,
         refinedMesh = crackedMesh;
         refinedCoords = crackedCoords;
         
-        // Step 8: Validate mesh quality
+        // Step 8: Validate mesh quality and fix any inverted tetrahedra in place.
+        // Node duplication/reassignment for crack opening does not preserve signed volume, so the
+        // cracked mesh can contain negative-Jacobian tets even though FixNegativeJacobians ran before
+        // duplication. Repair them here by node permutation (this previously only warned, shipping
+        // inverted elements to downstream FE assembly).
         Console.WriteLine($"  → Validating cracked mesh...");
+        MeshRefinement.FixNegativeJacobians(refinedMesh, refinedCoords);
         int negativeCount = 0;
         for (int i = 0; i < refinedMesh.Count<Tet4>(); i++)
         {
@@ -2759,9 +2776,9 @@ if (TryFindEdgeRootOnSegment(signedField,
             double jac = ComputeTetrahedronJacobian(refinedCoords, nodes[0], nodes[1], nodes[2], nodes[3]);
             if (jac <= 0) negativeCount++;
         }
-        
+
         if (negativeCount > 0)
-            Console.WriteLine($"  ⚠️  WARNING: {negativeCount} elements with non-positive Jacobian");
+            Console.WriteLine($"  ⚠️  WARNING: {negativeCount} elements still have non-positive Jacobian (degenerate geometry)");
         else
             Console.WriteLine($"  ✓ All elements have positive Jacobians");
         
@@ -4420,32 +4437,34 @@ if (TryFindEdgeRootOnSegment(signedField,
 
         var merged = new HashSet<int>();
         var mergeCount = 0;
+        var tol2 = tolerance * tolerance;
 
-        foreach (var bucket in spatialBuckets.Values)
+        // For each node, scan its own bucket AND the 26 neighbouring buckets, so two coincident
+        // nodes that straddle a bucket boundary are still compared (the previous same-bucket-only
+        // scan silently missed those, leaving an unintended slit / duplicated coordinate).
+        for (var id1 = 0; id1 < nNodes; id1++)
         {
-            if (bucket.Count < 2) continue;
-            for (var i = 0; i < bucket.Count; i++)
+            if (merged.Contains(id1)) continue;
+            var bx = (int)Math.Floor(coords[id1, 0] / bucketSize);
+            var by = (int)Math.Floor(coords[id1, 1] / bucketSize);
+            var bz = (int)Math.Floor(coords[id1, 2] / bucketSize);
+            for (var ox = -1; ox <= 1; ox++)
+            for (var oy = -1; oy <= 1; oy++)
+            for (var oz = -1; oz <= 1; oz++)
             {
-                var id1 = bucket[i];
-                if (merged.Contains(id1)) continue;
-                for (var j = i + 1; j < bucket.Count; j++)
+                if (!spatialBuckets.TryGetValue((bx + ox, by + oy, bz + oz), out var bucket)) continue;
+                foreach (var id2 in bucket)
                 {
-                    var id2 = bucket[j];
-                    if (merged.Contains(id2)) continue;
+                    if (id2 <= id1 || merged.Contains(id2)) continue;
                     var dx = coords[id1, 0] - coords[id2, 0];
                     var dy = coords[id1, 1] - coords[id2, 1];
                     var dz = coords[id1, 2] - coords[id2, 2];
-                    var dist = Math.Sqrt(dx * dx + dy * dy + dz * dz);
-                    if (dist < tolerance)
+                    if (dx * dx + dy * dy + dz * dz < tol2 &&
+                        !(crackNodes.Contains(id1) && crackNodes.Contains(id2)))
                     {
-                        if (!(crackNodes.Contains(id1) && crackNodes.Contains(id2)))
-                        {
-                            var canonicalId = Math.Min(id1, id2);
-                            var mergedId = Math.Max(id1, id2);
-                            nodeMapping[mergedId] = canonicalId;
-                            merged.Add(mergedId);
-                            mergeCount++;
-                        }
+                        nodeMapping[id2] = id1; // id1 < id2, so id1 is canonical
+                        merged.Add(id2);
+                        mergeCount++;
                     }
                 }
             }

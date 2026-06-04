@@ -6,6 +6,12 @@
         <Nullable>enable</Nullable>
     </PropertyGroup>
 
+    <!-- Relations marks its public APIs [RequiresPreviewFeatures] in Release; opt in so this
+         project (which consumes them) builds in Release too (otherwise CA2252). -->
+    <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+        <EnablePreviewFeatures>true</EnablePreviewFeatures>
+    </PropertyGroup>
+
     <ItemGroup>
         <ProjectReference Include="..\Relations\Relations.csproj"/>
     </ItemGroup>
