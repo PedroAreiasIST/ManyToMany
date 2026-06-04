@@ -3788,8 +3788,12 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
         for (var e = 0; e < elementCount; e++)
         {
             var ns = nodesFromElement._adjacencies[e].Count;
-            var list = new List<int>(ns * ns);
-            CollectionsMarshal.SetCount(list, ns * ns);
+            var nsq = (long)ns * ns; // ns*ns is the clique-matrix size; guard the int multiply (overflow checks off in Release)
+            if (nsq > int.MaxValue)
+                throw new OverflowException(
+                    $"GetCliques: element {e} has arity {ns}; ns*ns = {nsq:N0} exceeds int.MaxValue.");
+            var list = new List<int>((int)nsq);
+            CollectionsMarshal.SetCount(list, (int)nsq);
             cliques.Add(list);
         }
 

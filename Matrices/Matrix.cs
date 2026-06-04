@@ -2703,7 +2703,7 @@ public sealed class Matrix : IEquatable<Matrix>, IFormattable, ICloneable
         for (var j = i + 1; j < RowCount; j++)
         {
             var diff = Math.Abs(this[i, j] - this[j, i]);
-            if (diff > tolerance) return false;
+            if (!(diff <= tolerance)) return false; // NaN-aware: a NaN entry must not read as symmetric
         }
 
         return true;

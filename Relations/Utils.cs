@@ -2919,7 +2919,7 @@ public static class Utils
 
         for (var i = 0; i < minLength; i++)
         {
-            var cmp = firstSpan[i].CompareTo(secondSpan[i]);
+            var cmp = Comparer<T>.Default.Compare(firstSpan[i], secondSpan[i]); // null-safe vs direct CompareTo
             if (cmp != 0) return cmp;
         }
 
@@ -2936,7 +2936,7 @@ public static class Utils
         var firstSpan = CollectionsMarshal.AsSpan(first);
         var secondSpan = CollectionsMarshal.AsSpan(second);
         for (var i = 0; i < firstSpan.Length; i++)
-            if (firstSpan[i].CompareTo(secondSpan[i]) != 0)
+            if (Comparer<T>.Default.Compare(firstSpan[i], secondSpan[i]) != 0) // null-safe vs direct CompareTo
                 return false;
         return true;
     }
@@ -3114,8 +3114,9 @@ public static class ParallelConfig
     private static readonly object _lock = new();
     private static volatile int _maxDegreeOfParallelism = Environment.ProcessorCount;
 
-    // GPU caching
-    private static bool? _isGPUAvailable;
+    // GPU caching. Tri-state, kept atomic via volatile (a non-atomic bool? could tear under the
+    // lock-free fast-path read in IsGPUAvailable). 0 = unknown, 1 = unavailable, 2 = available.
+    private static volatile int _gpuAvailability;
     private static volatile bool _skipGPUCheck; // Skip GPU check entirely if it causes crashes
 
     // MKL state
@@ -3187,9 +3188,18 @@ public static class ParallelConfig
             var opts = _cachedOptions;
             if (opts != null && opts.MaxDegreeOfParallelism == _maxDegreeOfParallelism)
                 return opts;
-            opts = new ParallelOptions { MaxDegreeOfParallelism = _maxDegreeOfParallelism };
-            _cachedOptions = opts;
-            return opts;
+            // Double-checked locking: the fast path above stays lock-free (the common case where the
+            // cache is valid), and only a rebuild on reconfigure takes the lock — avoiding the
+            // previous unsynchronized check-then-publish race.
+            lock (_lock)
+            {
+                opts = _cachedOptions;
+                if (opts != null && opts.MaxDegreeOfParallelism == _maxDegreeOfParallelism)
+                    return opts;
+                opts = new ParallelOptions { MaxDegreeOfParallelism = _maxDegreeOfParallelism };
+                _cachedOptions = opts;
+                return opts;
+            }
         }
     }
 
@@ -3210,10 +3220,10 @@ public static class ParallelConfig
             _skipGPUCheck = value;
             if (value)
                 // Clear cached value so it won't be checked
-                _isGPUAvailable = false;
+                _gpuAvailability = 1;
             else
                 // Allow re-checking after GPU checks are re-enabled
-                _isGPUAvailable = null;
+                _gpuAvailability = 0;
         }
     }
 
@@ -3241,14 +3251,16 @@ public static class ParallelConfig
             if (_skipGPUCheck)
                 return false;
 
-            if (_isGPUAvailable.HasValue)
-                return _isGPUAvailable.Value;
+            var g = _gpuAvailability;
+            if (g != 0)
+                return g == 2;
 
             lock (_lock)
             {
                 // Re-check after acquiring lock
-                if (_isGPUAvailable.HasValue)
-                    return _isGPUAvailable.Value;
+                g = _gpuAvailability;
+                if (g != 0)
+                    return g == 2;
 
                 var available = false;
                 try
@@ -3325,7 +3337,7 @@ public static class ParallelConfig
                     available = false;
                 }
 
-                _isGPUAvailable = available;
+                _gpuAvailability = available ? 2 : 1;
                 return available;
             }
         }
@@ -3612,7 +3624,7 @@ public static class ParallelConfig
         EnableGPU = true;
         EnableDebugOutput = false;
         _skipGPUCheck = false;
-        _isGPUAvailable = null;
+        _gpuAvailability = 0;
         MKLNumThreads = Environment.ProcessorCount;
     }
 
