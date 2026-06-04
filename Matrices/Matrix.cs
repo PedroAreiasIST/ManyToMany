@@ -4576,6 +4576,9 @@ public sealed class Matrix : IEquatable<Matrix>, IFormattable, ICloneable
 
         var n = A.RowCount;
         var norm = A.InfinityNorm();
+        if (!double.IsFinite(norm))
+            throw new InvalidOperationException(
+                "MatrixExponential requires a finite matrix (non-finite norm would loop forever in scaling).");
 
         var s = 0;
         var scale = 1.0;
