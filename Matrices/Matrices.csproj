@@ -52,6 +52,9 @@
     <!-- RELEASE CONFIGURATION - MAXIMUM OPTIMIZATION -->
     <!-- ============================================ -->
     <PropertyGroup Condition="'$(Configuration)'=='Release'">
+        <!-- Relations marks its public APIs [RequiresPreviewFeatures] in Release; opt in so this
+             project (which consumes them) builds in Release too (otherwise CA2252). -->
+        <EnablePreviewFeatures>true</EnablePreviewFeatures>
         <DefineConstants>TRACE;X64;AGGRESSIVE_INLINE</DefineConstants>
         <DebugType>none</DebugType>
         <DebugSymbols>false</DebugSymbols>
