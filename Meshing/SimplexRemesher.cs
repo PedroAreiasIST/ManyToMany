@@ -2750,8 +2750,13 @@ if (TryFindEdgeRootOnSegment(signedField,
         refinedMesh = crackedMesh;
         refinedCoords = crackedCoords;
         
-        // Step 8: Validate mesh quality
+        // Step 8: Validate mesh quality and fix any inverted tetrahedra in place.
+        // Node duplication/reassignment for crack opening does not preserve signed volume, so the
+        // cracked mesh can contain negative-Jacobian tets even though FixNegativeJacobians ran before
+        // duplication. Repair them here by node permutation (this previously only warned, shipping
+        // inverted elements to downstream FE assembly).
         Console.WriteLine($"  → Validating cracked mesh...");
+        MeshRefinement.FixNegativeJacobians(refinedMesh, refinedCoords);
         int negativeCount = 0;
         for (int i = 0; i < refinedMesh.Count<Tet4>(); i++)
         {
@@ -2759,9 +2764,9 @@ if (TryFindEdgeRootOnSegment(signedField,
             double jac = ComputeTetrahedronJacobian(refinedCoords, nodes[0], nodes[1], nodes[2], nodes[3]);
             if (jac <= 0) negativeCount++;
         }
-        
+
         if (negativeCount > 0)
-            Console.WriteLine($"  ⚠️  WARNING: {negativeCount} elements with non-positive Jacobian");
+            Console.WriteLine($"  ⚠️  WARNING: {negativeCount} elements still have non-positive Jacobian (degenerate geometry)");
         else
             Console.WriteLine($"  ✓ All elements have positive Jacobians");
         
