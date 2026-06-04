@@ -1854,22 +1854,33 @@ public static class SimplexRemesher
             var nodes = mesh.NodesOf<Tri3, Node>(i);
             var newNodes = new int[3];
             
-            // Determine element side from first non-crack node
-            double sideValue = 0.0;
-            bool hasNonCrackNode = false;
-            
+            // VOTING-BASED ELEMENT ASSIGNMENT (matches the 3D path). A triangle straddling the crack
+            // can have non-crack nodes on opposite sides, so classify by majority vote rather than by
+            // the first non-crack node (which mis-assigned such elements and left the crack
+            // non-conforming / could weld a face).
+            int positiveVotes = 0, negativeVotes = 0;
             for (int j = 0; j < 3; j++)
             {
                 if (!nodesToDuplicate.Contains(nodes[j]))
                 {
-                    sideValue = surfaceValues[nodes[j]];
-                    hasNonCrackNode = true;
-                    break;
+                    if (surfaceValues[nodes[j]] > 0) positiveVotes++;
+                    else negativeVotes++;
                 }
             }
-            
-            // If element has no non-crack nodes, default to negative side
-            bool usePositiveSide = hasNonCrackNode && (sideValue > 0);
+
+            bool usePositiveSide;
+            if (positiveVotes != negativeVotes)
+            {
+                usePositiveSide = positiveVotes > negativeVotes;
+            }
+            else
+            {
+                // Tie (or all-crack-node) element: lean to the side of the summed signed field
+                // (crack nodes contribute 0).
+                double sum = 0.0;
+                for (int j = 0; j < 3; j++) sum += surfaceValues[nodes[j]];
+                usePositiveSide = sum > 0;
+            }
             
             if (usePositiveSide)
                 positiveSideElements++;
@@ -4426,32 +4437,34 @@ if (TryFindEdgeRootOnSegment(signedField,
 
         var merged = new HashSet<int>();
         var mergeCount = 0;
+        var tol2 = tolerance * tolerance;
 
-        foreach (var bucket in spatialBuckets.Values)
+        // For each node, scan its own bucket AND the 26 neighbouring buckets, so two coincident
+        // nodes that straddle a bucket boundary are still compared (the previous same-bucket-only
+        // scan silently missed those, leaving an unintended slit / duplicated coordinate).
+        for (var id1 = 0; id1 < nNodes; id1++)
         {
-            if (bucket.Count < 2) continue;
-            for (var i = 0; i < bucket.Count; i++)
+            if (merged.Contains(id1)) continue;
+            var bx = (int)Math.Floor(coords[id1, 0] / bucketSize);
+            var by = (int)Math.Floor(coords[id1, 1] / bucketSize);
+            var bz = (int)Math.Floor(coords[id1, 2] / bucketSize);
+            for (var ox = -1; ox <= 1; ox++)
+            for (var oy = -1; oy <= 1; oy++)
+            for (var oz = -1; oz <= 1; oz++)
             {
-                var id1 = bucket[i];
-                if (merged.Contains(id1)) continue;
-                for (var j = i + 1; j < bucket.Count; j++)
+                if (!spatialBuckets.TryGetValue((bx + ox, by + oy, bz + oz), out var bucket)) continue;
+                foreach (var id2 in bucket)
                 {
-                    var id2 = bucket[j];
-                    if (merged.Contains(id2)) continue;
+                    if (id2 <= id1 || merged.Contains(id2)) continue;
                     var dx = coords[id1, 0] - coords[id2, 0];
                     var dy = coords[id1, 1] - coords[id2, 1];
                     var dz = coords[id1, 2] - coords[id2, 2];
-                    var dist = Math.Sqrt(dx * dx + dy * dy + dz * dz);
-                    if (dist < tolerance)
+                    if (dx * dx + dy * dy + dz * dz < tol2 &&
+                        !(crackNodes.Contains(id1) && crackNodes.Contains(id2)))
                     {
-                        if (!(crackNodes.Contains(id1) && crackNodes.Contains(id2)))
-                        {
-                            var canonicalId = Math.Min(id1, id2);
-                            var mergedId = Math.Max(id1, id2);
-                            nodeMapping[mergedId] = canonicalId;
-                            merged.Add(mergedId);
-                            mergeCount++;
-                        }
+                        nodeMapping[id2] = id1; // id1 < id2, so id1 is canonical
+                        merged.Add(id2);
+                        mergeCount++;
                     }
                 }
             }
