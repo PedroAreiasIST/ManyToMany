@@ -2266,8 +2266,11 @@ public class DiscreteLinearSystem : IDisposable
         if (result == null)
             throw new ArgumentNullException(nameof(result));
 
-        // OPTIMIZATION FIX (Issue #3): Validate dimensions BEFORE calling Solve
-        var expectedNodes = TotalDofs / NumberOfDofTypes;
+        // Solve first: cs.Solve() returns an ORIGINAL-space vector (length = OriginalDofCount when
+        // the DOF space was compressed), which is not TotalDofs. Validate the caller's array against
+        // the actual output length so compression cannot cause an out-of-bounds reshape.
+        var flatSolution = cs.Solve();
+        var expectedNodes = flatSolution.Length / NumberOfDofTypes;
 
         if (result.GetLength(0) != NumberOfDofTypes || result.GetLength(1) != expectedNodes)
             throw new ArgumentException(
@@ -2276,8 +2279,6 @@ public class DiscreteLinearSystem : IDisposable
                 $"got [{result.GetLength(0)}, {result.GetLength(1)}].",
                 nameof(result));
 
-        // NOW solve after validation
-        var flatSolution = cs.Solve();
         ReshapeFlatVectorInto(flatSolution, result);
     }
 
@@ -2333,8 +2334,10 @@ public class DiscreteLinearSystem : IDisposable
         if (result == null)
             throw new ArgumentNullException(nameof(result));
 
-        // OPTIMIZATION FIX (Issue #3): Validate dimensions BEFORE allocation
-        var expectedNodes = TotalDofs / NumberOfDofTypes;
+        // Get the force vector first: it is in ORIGINAL DOF space (length = OriginalDofCount when
+        // compressed), not TotalDofs. Validate against the actual length to avoid an OOB reshape.
+        var flatForceVector = cs.GetForceVector();
+        var expectedNodes = flatForceVector.Length / NumberOfDofTypes;
 
         if (result.GetLength(0) != NumberOfDofTypes || result.GetLength(1) != expectedNodes)
             throw new ArgumentException(
@@ -2343,8 +2346,6 @@ public class DiscreteLinearSystem : IDisposable
                 $"got [{result.GetLength(0)}, {result.GetLength(1)}].",
                 nameof(result));
 
-        // NOW allocate after validation
-        var flatForceVector = cs.GetForceVector();
         ReshapeFlatVectorInto(flatForceVector, result);
     }
 
@@ -2417,6 +2418,15 @@ public class DiscreteLinearSystem : IDisposable
                 $"The total number of DOFs ({totalDofs}) is not a multiple of " +
                 $"numberofdoftypes ({NumberOfDofTypes}). This indicates a " +
                 "mismatch in the DOF structure.");
+
+        var numNodes = totalDofs / NumberOfDofTypes;
+
+        // Defensive: never reshape past the caller's array bounds (protects every caller).
+        if (result.GetLength(0) != NumberOfDofTypes || result.GetLength(1) != numNodes)
+            throw new ArgumentException(
+                $"Result array [{result.GetLength(0)}, {result.GetLength(1)}] cannot hold the reshaped " +
+                $"{totalDofs}-DOF vector (need [{NumberOfDofTypes}, {numNodes}]).",
+                nameof(result));
 
         // Unpack from interleaved to [dofType, nodeIndex] format
         for (var i = 0; i < totalDofs; i++) result[i % NumberOfDofTypes, i / NumberOfDofTypes] = flatVector[i];
