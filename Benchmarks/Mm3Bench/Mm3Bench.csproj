@@ -10,6 +10,11 @@
     <!-- Relations marks its public API [RequiresPreviewFeatures]; opt in to consume it. -->
     <EnablePreviewFeatures>true</EnablePreviewFeatures>
     <Configurations>Debug;Release</Configurations>
+    <!-- Steady-state measurement: fully-optimized code (no tier-0) and Server GC so
+         the warm samples reflect MM3's real throughput, not JIT/GC warm-up. -->
+    <TieredCompilation>false</TieredCompilation>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\Relations\Relations.csproj" />

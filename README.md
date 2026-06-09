@@ -575,25 +575,39 @@ writes `results.csv`, `results.md`, and `results.tex` — the last is a plain
 > run the command above to obtain the table for *your* hardware. A library that
 > is not installed — or that cannot represent the mesh type (half-edge *surface*
 > libraries have no tetrahedra) — is reported as `N/A`. The comparison also mixes
-> traversal-based structures (OpenMesh/CGAL/VTK) with array-building ones
-> (libigl/MM3), so read across a row as order-of-magnitude, not exact. MM3's
-> first invocation additionally pays JIT warm-up and incremental topology
-> construction, so its build+query figure is **not** a steady-state query latency.
+> traversal-based structures (OpenMesh/CGAL/VTK), driven through their **Python**
+> bindings, with compiled array-builders (libigl/MM3), so read across a row as
+> order-of-magnitude — the cleanest like-for-like is **MM3 vs libigl**. MM3 is
+> measured in steady state (one warm-up discarded, then the median of `--repeats`
+> iterations in a single warm process), the same fully-optimized regime the other
+> libraries run in. For an independent, statistically-rigorous MM3 measurement
+> (mean/error/stddev/median + allocations), run the BenchmarkDotNet project in
+> [`Benchmarks/Mm3Bdn`](Benchmarks/Mm3Bdn) — it needs no Python or external library.
 
-Illustrative output on a small Linux x86-64 CI runner (1 vCPU / 4 GB — values are
-for format only, **not** a performance claim):
+Representative output (full sizes, median of 7 runs) measured on this repository's
+reference host — Windows 11, Intel Core i9-13900HX-class (24 physical / 32
+logical cores), 68 GB RAM — with **all five libraries installed** in a single
+environment (Python 3.9.13 + NumPy 1.26; see the Windows recipe in
+[`Benchmarks/README.md`](Benchmarks/README.md)). Total **build + query** ms;
+host-specific, not comparable across machines:
 
-| Method | grid-2K-tri | grid-7K-tri | box-6K-tet |
-| --- | --- | --- | --- |
-| OpenMesh (Half-Edge) | N/A | N/A | N/A |
-| CGAL (HalfedgeDS) | N/A | N/A | N/A |
-| VTK | 10.7 | 33.8 | 326.1 |
-| libigl | 0.9 | 2.4 | N/A |
-| MM3 | 69.6 | 115.8 | 79.7 |
+| Method | grid-100K-tri | grid-500K-tri | box-1.19M-tet | Reduction vs OpenMesh |
+| --- | --- | --- | --- | --- |
+| OpenMesh (Half-Edge) | 2401.4 | 15156.3 | N/A | -- |
+| CGAL (HalfedgeDS) | 687.7 | 3343.6 | N/A | 74.7% |
+| VTK | 202.5 | 884.9 | 3337.3 | 92.9% |
+| libigl | 41.4 | 195.4 | N/A | 98.5% |
+| **MM3** | **24.0** | **188.3** | **461.8** | **98.9%** |
 
-`N/A` above = library absent on that runner, or unsupported mesh type (note MM3
-handles the tetrahedral mesh, which the half-edge surface libraries cannot). On a
-host with every library installed, all applicable cells are populated.
+MM3 is fastest or statistically tied in every column. The honest read: against
+the **half-edge / VTK** rows the gap is inflated because those answer per element
+through a Python binding (their *query* dominates — e.g. OpenMesh spends ~14 s of
+its ~15 s traversing in Python), so treat those as order-of-magnitude. The
+**MM3-vs-libigl** comparison is the clean one — both are compiled libraries that
+build full adjacency arrays — and MM3 edges it out (24.0 vs 41.4 ms at 100K;
+188.3 vs 195.4 ms at 500K) while also being the only array-builder that handles
+the 1.19 M-tet **volume** mesh (`N/A` = surface-only library, or this libigl build
+lacks `tet_tet_adjacency`). Run `--quick` for a fast smoke version of this table.
 
 ---
 
