@@ -549,6 +549,50 @@ The library is engineered for high-throughput computational mechanics on modern 
 - Tiered-compilation + dynamic PGO and Server GC enabled in Release builds
 - Lock-striped assembly (4096 stripes) scales to 32+ hardware threads with minimal contention
 
+### Connectivity benchmark (reproducible)
+
+`Benchmarks/mesh_connectivity_benchmark.py` is a self-contained harness that times
+connectivity-query performance across mesh data-structure libraries on identical
+meshes and prints a comparison table. It is wired into CI
+(`.github/workflows/connectivity-benchmark.yml`), so the table is regenerated on
+every push (see the workflow run summary and its uploaded artifacts).
+
+```bash
+pip install numpy psutil libigl vtk openmesh      # every library is optional
+dotnet build Benchmarks/Mm3Bench -c Release       # builds the MM3 bridge
+python Benchmarks/mesh_connectivity_benchmark.py --mm3-project ./Benchmarks/Mm3Bench --out results
+```
+
+Identical workload for every library: build the topology, then traverse every
+cell's face-neighbours and every vertex's incident cells once. Reported time is
+total **build + query** in milliseconds.
+
+> **The numbers are hardware-specific and not comparable across machines.** They
+> depend on CPU, memory bandwidth, thread count and library versions. The
+> authors' measurements in the paper were taken on an **Intel Core i9-13900HX**;
+> run the command above to obtain the table for *your* hardware. A library that
+> is not installed — or that cannot represent the mesh type (half-edge *surface*
+> libraries have no tetrahedra) — is reported as `N/A`. The comparison also mixes
+> traversal-based structures (OpenMesh/CGAL/VTK) with array-building ones
+> (libigl/MM3), so read across a row as order-of-magnitude, not exact. MM3's
+> first invocation additionally pays JIT warm-up and incremental topology
+> construction, so its build+query figure is **not** a steady-state query latency.
+
+Illustrative output on a small Linux x86-64 CI runner (1 vCPU / 4 GB — values are
+for format only, **not** a performance claim):
+
+| Method | grid-2K-tri | grid-7K-tri | box-6K-tet |
+| --- | --- | --- | --- |
+| OpenMesh (Half-Edge) | N/A | N/A | N/A |
+| CGAL (HalfedgeDS) | N/A | N/A | N/A |
+| VTK | 10.7 | 33.8 | 326.1 |
+| libigl | 0.9 | 2.4 | N/A |
+| MM3 | 69.6 | 115.8 | 79.7 |
+
+`N/A` above = library absent on that runner, or unsupported mesh type (note MM3
+handles the tetrahedral mesh, which the half-edge surface libraries cannot). On a
+host with every library installed, all applicable cells are populated.
+
 ---
 
 ## Platforms & Prerequisites
