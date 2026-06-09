@@ -360,16 +360,17 @@ def bench_igl(mesh: Mesh):
         return 0.0, query * 1e3
 
 
-def bench_mm3(mesh: Mesh, project: Optional[str]):
+def bench_mm3(mesh: Mesh, project: Optional[str], repeats: int = 5):
     """Shell out to a .NET benchmark. Contract:
 
         dotnet run -c Release --project <project> -- <meshfile> <tri|tet> <repeats>
 
     must print a final line:   BUILD_MS QUERY_MS   (two floats, milliseconds).
 
-    A minimal C# Program.cs implementing this against the ManyToMany library is
-    provided alongside this script (mm3_bench_Program.cs). Without --mm3-project,
-    MM3 is reported as N/A.
+    The bridge runs `repeats` timed iterations (after a discarded warm-up) inside a
+    single warm process and prints the MEDIAN, so MM3 is measured in the same
+    steady-state regime as the in-process Python libraries and pays .NET process
+    start / JIT only once for the whole cell. Without --mm3-project, MM3 is N/A.
     """
     if not project:
         return None
@@ -379,7 +380,7 @@ def bench_mm3(mesh: Mesh, project: Optional[str]):
     try:
         (write_obj if mesh.kind == "tri" else write_tetmesh)(mesh, path)
         cmd = ["dotnet", "run", "-c", "Release", "--project", project, "--",
-               path, mesh.kind, "1"]
+               path, mesh.kind, str(repeats)]
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
         if res.returncode != 0:
             sys.stderr.write(f"[MM3] dotnet failed:\n{res.stderr[-2000:]}\n")
@@ -444,11 +445,11 @@ def median_run(fn: Callable[[Mesh], Optional[tuple]], mesh: Mesh, repeats: int):
 
 def run(meshes, repeats: int, mm3_project: Optional[str]):
     rows = []  # (method_name, {mesh_label: (build,query) or None})
-    method_list = list(METHODS) + [("MM3", "__mm3__",
-                                    lambda m: bench_mm3(m, mm3_project))]
+    method_list = list(METHODS) + [("MM3", "__mm3__", None)]
     for name, mod, fn in method_list:
-        available = (mod == "__mm3__" and mm3_project is not None) or \
-                    (mod not in ("__mm3__",) and _importable(mod))
+        is_mm3 = mod == "__mm3__"
+        available = (is_mm3 and mm3_project is not None) or \
+                    (not is_mm3 and _importable(mod))
         per_mesh = {}
         for mesh in meshes:
             if not available:
@@ -457,7 +458,14 @@ def run(meshes, repeats: int, mm3_project: Optional[str]):
             sys.stderr.write(f"  {name:22s} on {mesh.label:18s} ... ")
             sys.stderr.flush()
             try:
-                per_mesh[mesh.label] = median_run(fn, mesh, repeats)
+                if is_mm3:
+                    # The .NET bridge does its own warm-up + `repeats` timed runs in
+                    # one process and returns the median, so MM3 is measured in the
+                    # same steady-state regime as the in-process libraries above and
+                    # pays process start / JIT only once per cell.
+                    per_mesh[mesh.label] = bench_mm3(mesh, mm3_project, repeats)
+                else:
+                    per_mesh[mesh.label] = median_run(fn, mesh, repeats)
                 sys.stderr.write("ok\n" if per_mesh[mesh.label] else "N/A\n")
             except Exception as exc:
                 sys.stderr.write(f"error ({type(exc).__name__})\n")
