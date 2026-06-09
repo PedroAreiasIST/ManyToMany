@@ -841,7 +841,7 @@ bool shouldUseGpu = SparseBackendFactory.ShouldUseGPU(rows, cols, nnz);
 
 **Solutions**:
 1. Install Intel oneAPI MKL: `apt install intel-oneapi-mkl` (Linux) or via Intel installer (Windows)
-2. Install NuGet package: `dotnet add package Intel.oneAPI.MKL.redist`
+2. Install NuGet package (Windows x64): `dotnet add package intelmkl.redist.win-x64`
 3. Set environment: `export LD_LIBRARY_PATH=/opt/intel/oneapi/mkl/latest/lib/intel64:$LD_LIBRARY_PATH`
 
 #### "GPU not initialized. Call InitializeGpu() first"
