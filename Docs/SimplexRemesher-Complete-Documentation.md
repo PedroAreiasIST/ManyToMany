@@ -7,7 +7,7 @@ The SimplexRemesher library provides production-grade mesh refinement, modificat
 **Library Capabilities:**
 - Conforming mesh refinement via longest-edge bisection with quality preservation
 - Level set-based crack insertion with arbitrary geometry support
-- Multi-format I/O (VTK, MSH, GiD/CIMNE, ASCII) with comprehensive data preservation
+- Multi-format I/O (Gmsh MSH, GiD/CIMNE, ASCII; Ensight Gold for ParaView via `EnsightWriter`) with comprehensive data preservation
 - Mesh generation primitives for 2D/3D domains
 - Topological operations (edge discovery, element connectivity)
 
@@ -53,7 +53,7 @@ SimplexRemesher implements mesh modification algorithms following these principl
 ### 1.2 Dependencies
 
 ```csharp
-using Topology;              // SimplexMesh, Entity types (Node, Tri3, Tet4, etc.)
+using Numerical;             // SimplexMesh, SimplexRemesher, entity types (Node, Tri3, Tet4, …)
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -65,7 +65,7 @@ using System.Threading.Tasks;
 ### 1.3 Namespace Organization
 
 ```csharp
-namespace Numerical.Remeshing
+namespace Numerical
 {
     public static class SimplexRemesher
     {
@@ -73,6 +73,8 @@ namespace Numerical.Remeshing
     }
 }
 ```
+
+> **Namespace:** `SimplexRemesher` and every other public type in the library live in the single `Numerical` namespace — a single `using Numerical;` is all you need.
 
 ---
 
@@ -1242,7 +1244,25 @@ Creates horizontal crack plane in 3D mesh.
 
 ## 6. File I/O Operations
 
-### 6.1 VTK Legacy Format
+> ⚠️ **Accuracy note — VTK/VTU is not part of the current public API.**
+> The `SaveVTK` / `LoadVTK` / `LoadLegacyVTK` / `SaveVTU` / `LoadVTU` methods described in
+> sections 6.1–6.2 below (and used in some later examples) are **not implemented** in the
+> shipping library — no `vtk` symbol exists anywhere in the source. They are retained here for
+> historical/illustrative purposes only.
+>
+> **For visualization in ParaView, export Ensight Gold** with `EnsightWriter.SaveEnsight(mesh, coords, name)`
+> or `EnsightWriter.WriteAllMeshes(name)`. The **actually supported** mesh formats are:
+>
+> | Format | Read | Write | API |
+> |---|:---:|:---:|---|
+> | Gmsh `.msh` (v2) | ✅ | ✅ | `LoadMSH`, `LoadMSHWithTags`, `SaveMSH`, `SaveMSHWithCrackGroups` |
+> | GiD / CIMNE `.msh` | ✅ | ✅ | `LoadGiD`, `SaveGiD` |
+> | Plain ASCII | — | ✅ | `SaveASCII` |
+> | Ensight Gold `.case` | — | ✅ | `EnsightWriter.SaveEnsight` / `WriteAllMeshes` |
+>
+> Substitute `SaveGiD(mesh, coords, "name.msh")` for any `SaveVTK(...)` call in the examples that follow.
+
+### 6.1 VTK Legacy Format *(not implemented — see note above)*
 
 **SaveVTK - Write ASCII VTK:**
 ```csharp
