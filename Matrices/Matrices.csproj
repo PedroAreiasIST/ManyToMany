@@ -134,8 +134,9 @@
         <!-- Intel MKL: Official native library packages for CPU acceleration -->
         <!-- Includes MKL Sparse BLAS and PARDISO solver with native binaries -->
 
-        <!-- Windows: Use NuGet package (automatic) -->
-        <PackageReference Include="Intel.oneAPI.MKL.redist.win" Version="2024.2.1" Condition="$([MSBuild]::IsOSPlatform('Windows'))"/>
+        <!-- Windows: Use NuGet package (automatic). Intel publishes the redist
+             native binaries as "intelmkl.redist.win-x64" on nuget.org. -->
+        <PackageReference Include="intelmkl.redist.win-x64" Version="2024.2.1.102" Condition="$([MSBuild]::IsOSPlatform('Windows'))"/>
 
         <!-- Linux/macOS: Install via system package manager (NuGet packages don't exist) -->
         <!--   Linux:  sudo apt-get install intel-mkl   -->
