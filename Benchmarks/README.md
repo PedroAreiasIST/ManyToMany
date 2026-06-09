@@ -23,7 +23,9 @@ python mesh_connectivity_benchmark.py --quick --mm3-project ./Mm3Bench
 python mesh_connectivity_benchmark.py --download --mm3-project ./Mm3Bench
 ```
 
-Outputs a table to stdout and, with `--out results`, `results.csv` + `results.md`.
+Outputs a table to stdout and, with `--out results`, `results.csv` + `results.md`
++ `results.tex` (a plain `\begin{tabular}` — no extra packages — that you can
+`\input{}` straight into the paper).
 
 ## Workload
 
@@ -63,4 +65,5 @@ signatures, update the two calls in `Program.cs`.
 
 `.github/workflows/connectivity-benchmark.yml` runs this on every push: it builds
 the bridge, installs the Python libraries, runs the harness (`--quick`), writes
-the table to the job summary, and uploads `results.md`/`results.csv` as artifacts.
+the table to the job summary, and uploads `results.md`/`results.csv`/`results.tex`
+as artifacts.

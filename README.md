@@ -565,7 +565,9 @@ python Benchmarks/mesh_connectivity_benchmark.py --mm3-project ./Benchmarks/Mm3B
 
 Identical workload for every library: build the topology, then traverse every
 cell's face-neighbours and every vertex's incident cells once. Reported time is
-total **build + query** in milliseconds.
+total **build + query** in milliseconds. With `--out results` the harness also
+writes `results.csv`, `results.md`, and `results.tex` — the last is a plain
+`\begin{tabular}` (no extra LaTeX packages) ready to `\input{}` into the paper.
 
 > **The numbers are hardware-specific and not comparable across machines.** They
 > depend on CPU, memory bandwidth, thread count and library versions. The
