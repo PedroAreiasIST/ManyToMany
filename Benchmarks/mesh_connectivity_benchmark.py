@@ -51,7 +51,7 @@ Usage
     python mesh_connectivity_benchmark.py --repeats 5     # median of 5 timed runs
     python mesh_connectivity_benchmark.py --download      # real Bunny/Dragon
     python mesh_connectivity_benchmark.py --mm3-project ./Mm3Bench
-    python mesh_connectivity_benchmark.py --out results   # writes results.csv + results.md
+    python mesh_connectivity_benchmark.py --out results   # writes results.csv + results.md + results.tex
 
 No third-party package is required to RUN the script; only NumPy is needed for the
 synthetic mesh generators, and even that is optional (a pure-Python fallback is
@@ -503,6 +503,21 @@ def format_table(rows, meshes) -> str:
     return "\n".join(out)
 
 
+def _tex_escape(s: str) -> str:
+    """Escape the LaTeX special characters that can appear in a table cell.
+
+    The important one here is '%' (reduction percentages such as "33.8%"),
+    which would otherwise comment out the rest of the row.
+    """
+    repl = {
+        "\\": r"\textbackslash{}",
+        "&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#", "_": r"\_",
+        "{": r"\{", "}": r"\}",
+        "~": r"\textasciitilde{}", "^": r"\textasciicircum{}",
+    }
+    return "".join(repl.get(ch, ch) for ch in s)
+
+
 def write_outputs(rows, meshes, info, stem: str):
     labels = [m.label for m in meshes]
     with open(stem + ".csv", "w", newline="") as fh:
@@ -532,6 +547,24 @@ def write_outputs(rows, meshes, info, stem: str):
         for line in body[2:]:
             cells = [c.strip() for c in line.split("  ") if c.strip()]
             fh.write("| " + " | ".join(cells) + " |\n")
+    with open(stem + ".tex", "w") as fh:
+        host = ", ".join(f"{k}={v}" for k, v in info.items()
+                         if k in ("platform", "processor", "physical_cpus",
+                                  "logical_cpus", "ram_gb"))
+        body = format_table(rows, meshes).splitlines()
+        hdr = [c.strip() for c in body[0].split("  ") if c.strip()]
+        colspec = "l" + "r" * (len(hdr) - 1)   # method left, numbers right
+        # A bare tabular meant to be \input{} into a table float in the paper.
+        fh.write("% Mesh connectivity benchmark: total (build + query) ms, "
+                 "median over repeats.\n")
+        fh.write(f"% Host: {host}\n")
+        fh.write("% Host-specific; not comparable across machines.\n")
+        fh.write("\\begin{tabular}{" + colspec + "}\n\\hline\n")
+        fh.write(" & ".join(_tex_escape(h) for h in hdr) + " \\\\\n\\hline\n")
+        for line in body[2:]:
+            cells = [c.strip() for c in line.split("  ") if c.strip()]
+            fh.write(" & ".join(_tex_escape(c) for c in cells) + " \\\\\n")
+        fh.write("\\hline\n\\end{tabular}\n")
 
 
 def main(argv=None):
@@ -547,7 +580,8 @@ def main(argv=None):
     ap.add_argument("--tri-sizes", type=int, nargs="+",
                     help="triangle face counts (overrides defaults)")
     ap.add_argument("--tet-size", type=int, help="tet count (overrides default)")
-    ap.add_argument("--out", default=None, help="write <out>.csv and <out>.md")
+    ap.add_argument("--out", default=None,
+                    help="write <out>.csv, <out>.md and <out>.tex")
     args = ap.parse_args(argv)
 
     if not HAVE_NUMPY:
@@ -598,7 +632,7 @@ def main(argv=None):
 
     if args.out:
         write_outputs(rows, meshes, info, args.out)
-        print(f"\nWrote {args.out}.csv and {args.out}.md")
+        print(f"\nWrote {args.out}.csv, {args.out}.md and {args.out}.tex")
 
     return 0
 

@@ -50,3 +50,4 @@ jobs:
           path: |
             results.md
             results.csv
+            results.tex
