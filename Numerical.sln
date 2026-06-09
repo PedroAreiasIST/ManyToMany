@@ -12,14 +12,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Postprocess", "Postprocess\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Meshing", "Meshing\Meshing.csproj", "{783456A4-393A-490A-8E7B-92E77443BE93}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ISTVectorPostprocessor.Core", "ISTVectorPostprocessor\csharp\ISTVectorPostprocessor.Core\ISTVectorPostprocessor.Core.csproj", "{DFA24643-5A85-4214-9B9A-8EDEAB53F000}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ISTVectorPostprocessor.Desktop", "ISTVectorPostprocessor\csharp\ISTVectorPostprocessor.Desktop\ISTVectorPostprocessor.Desktop.csproj", "{786BFBE2-3C78-4C4B-B639-2FC67900CA45}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ISTVectorPostprocessor.Core.Tests", "ISTVectorPostprocessor\csharp\ISTVectorPostprocessor.Core.Tests\ISTVectorPostprocessor.Core.Tests.csproj", "{B75D9119-D44C-481D-A303-565E7A2E269A}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ISTVectorPostprocessor.Desktop.Tests", "ISTVectorPostprocessor\csharp\ISTVectorPostprocessor.Desktop.Tests\ISTVectorPostprocessor.Desktop.Tests.csproj", "{C66E6D6D-7282-45DE-AF44-A3718D8F6726}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Release|64 = Release|64
@@ -50,21 +42,5 @@ Global
 		{783456A4-393A-490A-8E7B-92E77443BE93}.Release|64.Build.0 = Release|Any CPU
 		{783456A4-393A-490A-8E7B-92E77443BE93}.Debug|64.ActiveCfg = Debug|Any CPU
 		{783456A4-393A-490A-8E7B-92E77443BE93}.Debug|64.Build.0 = Debug|Any CPU
-		{DFA24643-5A85-4214-9B9A-8EDEAB53F000}.Release|64.ActiveCfg = Release|Any CPU
-		{DFA24643-5A85-4214-9B9A-8EDEAB53F000}.Release|64.Build.0 = Release|Any CPU
-		{DFA24643-5A85-4214-9B9A-8EDEAB53F000}.Debug|64.ActiveCfg = Debug|Any CPU
-		{DFA24643-5A85-4214-9B9A-8EDEAB53F000}.Debug|64.Build.0 = Debug|Any CPU
-		{786BFBE2-3C78-4C4B-B639-2FC67900CA45}.Release|64.ActiveCfg = Release|Any CPU
-		{786BFBE2-3C78-4C4B-B639-2FC67900CA45}.Release|64.Build.0 = Release|Any CPU
-		{786BFBE2-3C78-4C4B-B639-2FC67900CA45}.Debug|64.ActiveCfg = Debug|Any CPU
-		{786BFBE2-3C78-4C4B-B639-2FC67900CA45}.Debug|64.Build.0 = Debug|Any CPU
-		{B75D9119-D44C-481D-A303-565E7A2E269A}.Release|64.ActiveCfg = Release|Any CPU
-		{B75D9119-D44C-481D-A303-565E7A2E269A}.Release|64.Build.0 = Release|Any CPU
-		{B75D9119-D44C-481D-A303-565E7A2E269A}.Debug|64.ActiveCfg = Debug|Any CPU
-		{B75D9119-D44C-481D-A303-565E7A2E269A}.Debug|64.Build.0 = Debug|Any CPU
-		{C66E6D6D-7282-45DE-AF44-A3718D8F6726}.Release|64.ActiveCfg = Release|Any CPU
-		{C66E6D6D-7282-45DE-AF44-A3718D8F6726}.Release|64.Build.0 = Release|Any CPU
-		{C66E6D6D-7282-45DE-AF44-A3718D8F6726}.Debug|64.ActiveCfg = Debug|Any CPU
-		{C66E6D6D-7282-45DE-AF44-A3718D8F6726}.Debug|64.Build.0 = Debug|Any CPU
 	EndGlobalSection
 EndGlobal
