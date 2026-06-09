@@ -16,3 +16,14 @@ project.lock.json
 ## OS-generated files
 .DS_Store
 Thumbs.db
+
+## Benchmark local environments & generated artifacts (not for the repo)
+Benchmarks/.venv/
+Benchmarks/.venv39/
+Benchmarks/python-*-amd64.exe
+Benchmarks/results*.csv
+Benchmarks/results*.md
+Benchmarks/results*.tex
+
+## BenchmarkDotNet run output
+BenchmarkDotNet.Artifacts/
