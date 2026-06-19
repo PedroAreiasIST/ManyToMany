@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Matrices\Matrices.csproj" />
+    <ProjectReference Include="..\..\src\Meshing\Meshing.csproj" />
+    <ProjectReference Include="..\..\src\Nonlinear\Nonlinear.csproj" />
+    <ProjectReference Include="..\..\src\Postprocess\Postprocess.csproj" />
+    <ProjectReference Include="..\..\src\Relations\Relations.csproj" />
+  </ItemGroup>
+
+</Project>

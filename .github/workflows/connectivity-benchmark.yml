@@ -28,13 +28,13 @@ jobs:
           pip install openmesh || echo "openmesh wheel unavailable on this runner; it will appear as N/A"
 
       - name: Build MM3 benchmark bridge
-        run: dotnet build Benchmarks/Mm3Bench/Mm3Bench.csproj -c Release
+        run: dotnet build benchmarks/Mm3Bench/Mm3Bench.csproj -c Release
 
       - name: Run connectivity benchmark
         run: |
-          python Benchmarks/mesh_connectivity_benchmark.py \
+          python benchmarks/mesh_connectivity_benchmark.py \
             --quick --repeats 3 \
-            --mm3-project ./Benchmarks/Mm3Bench \
+            --mm3-project ./benchmarks/Mm3Bench \
             --out results
 
       - name: Publish table to job summary

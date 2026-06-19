@@ -15,7 +15,7 @@ Thanks for your interest in improving **ManyToMany**! This guide covers how to b
 dotnet build Numerical.sln -c Release
 
 # Run the example suite (meshing + 2D/3D fracture mechanics)
-dotnet run --project Teste -c Release
+dotnet run --project tests/Teste -c Release
 ```
 
 The continuous-integration workflow (`.github/workflows/dotnet.yml`) restores, builds, and tests the solution on every push and pull request targeting `master`, so please make sure your branch builds cleanly before opening a PR.

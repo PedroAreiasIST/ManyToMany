@@ -2,7 +2,7 @@
 // Benchmark entry point used by ../mesh_connectivity_benchmark.py to time the
 // ManyToMany (MM3) library on the same mesh as the other libraries.
 //
-// Contract:  dotnet run -c Release --project Benchmarks/Mm3Bench -- <meshfile> <tri|tet> [repeats]
+// Contract:  dotnet run -c Release --project benchmarks/Mm3Bench -- <meshfile> <tri|tet> [repeats]
 //            prints, as the final stdout line:  BUILD_MS QUERY_MS
 //
 // Methodology (kept fair against the native/array libraries the harness also times):

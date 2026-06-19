@@ -504,7 +504,7 @@ Output is a `.case` descriptor plus per-part geometry files; displacement fields
 The `Teste` project contains **26 worked examples** in four parts. The default `Main` (`Examples2DA.Main`) runs a representative subset and writes a unified Ensight case; uncomment lines in `Main` (or call a public method directly) to run any specific one.
 
 ```bash
-dotnet run --project Teste -c Release
+dotnet run --project tests/Teste -c Release
 ```
 
 | Part | Examples | Theme |
@@ -551,7 +551,7 @@ The library is engineered for high-throughput computational mechanics on modern 
 
 ### Connectivity benchmark (reproducible)
 
-`Benchmarks/mesh_connectivity_benchmark.py` is a self-contained harness that times
+`benchmarks/mesh_connectivity_benchmark.py` is a self-contained harness that times
 connectivity-query performance across mesh data-structure libraries on identical
 meshes and prints a comparison table. It is wired into CI
 (`.github/workflows/connectivity-benchmark.yml`), so the table is regenerated on
@@ -559,8 +559,8 @@ every push (see the workflow run summary and its uploaded artifacts).
 
 ```bash
 pip install numpy psutil libigl vtk openmesh      # every library is optional
-dotnet build Benchmarks/Mm3Bench -c Release       # builds the MM3 bridge
-python Benchmarks/mesh_connectivity_benchmark.py --mm3-project ./Benchmarks/Mm3Bench --out results
+dotnet build benchmarks/Mm3Bench -c Release       # builds the MM3 bridge
+python benchmarks/mesh_connectivity_benchmark.py --mm3-project ./benchmarks/Mm3Bench --out results
 ```
 
 Identical workload for every library: build the topology, then traverse every
@@ -582,13 +582,13 @@ writes `results.csv`, `results.md`, and `results.tex` — the last is a plain
 > iterations in a single warm process), the same fully-optimized regime the other
 > libraries run in. For an independent, statistically-rigorous MM3 measurement
 > (mean/error/stddev/median + allocations), run the BenchmarkDotNet project in
-> [`Benchmarks/Mm3Bdn`](Benchmarks/Mm3Bdn) — it needs no Python or external library.
+> [`benchmarks/Mm3Bdn`](benchmarks/Mm3Bdn) — it needs no Python or external library.
 
 Representative output (full sizes, median of 7 runs) measured on this repository's
 reference host — Windows 11, Intel Core i9-13900HX-class (24 physical / 32
 logical cores), 68 GB RAM — with **all five libraries installed** in a single
 environment (Python 3.9.13 + NumPy 1.26; see the Windows recipe in
-[`Benchmarks/README.md`](Benchmarks/README.md)). Total **build + query** ms;
+[`benchmarks/README.md`](benchmarks/README.md)). Total **build + query** ms;
 host-specific, not comparable across machines:
 
 | Method | grid-100K-tri | grid-500K-tri | box-1.19M-tet | Reduction vs OpenMesh |
@@ -788,27 +788,33 @@ public CliqueSystem(int numElements, bool enableGpu = false);
 ```
 ManyToMany/
 ├── Numerical.sln                # Visual Studio solution
-├── Relations/                   # Core topology library (assembly: Topology)
-│   ├── Relations.cs             #   O2M and supporting adjacency structures
-│   ├── Topology.cs              #   Topology<TTypes>, SubEntityDefinition, Symmetry
-│   └── Utils.cs                 #   ITypeMap, TypeMap<…>, Utils, ParallelConfig
-├── Matrices/                    # Linear algebra
-│   ├── Matrix.cs                #   Dense Matrix/Vector, decompositions, SIMD
-│   ├── CSR.cs                   #   Sparse CSR, PARDISO, cuSPARSE, BiCGSTAB
-│   ├── Assembly.cs              #   CliqueSystem, DiscreteLinearSystem
-│   └── NativeLibraries.cs       #   Cross-platform MKL/CUDA discovery & loading
-├── Meshing/                     # Mesh generation & refinement
-│   ├── SimplexMesh.cs           #   Mesh container, element markers, constants
-│   ├── SimplexRemesher.cs       #   Generation, bisection refinement, fracture, I/O
-│   ├── MeshRefinement.cs        #   Conforming refinement driver
-│   └── MeshGeometry.cs          #   Geometric primitives, quality metrics
-├── Nonlinear/                   # Time integration & root finding
-│   ├── Integrator.cs            #   BatheTwoStageIntegrator
-│   └── RootFinder.cs            #   ITP, hybrid Newton-IQI, trust-region dogleg
-├── Postprocess/                 # Visualization
-│   └── EnsightWriter.cs         #   Ensight Gold export
-├── Teste/                       # 26 demo examples
-│   └── Examples2DA.cs           #   Meshing + 2D/3D fracture mechanics
+├── src/                         # Core libraries (all share the Numerical namespace)
+│   ├── Relations/               # Core topology library (assembly: Topology)
+│   │   ├── Relations.cs         #   O2M and supporting adjacency structures
+│   │   ├── Topology.cs          #   Topology<TTypes>, SubEntityDefinition, Symmetry
+│   │   └── Utils.cs             #   ITypeMap, TypeMap<…>, Utils, ParallelConfig
+│   ├── Matrices/                # Linear algebra
+│   │   ├── Matrix.cs            #   Dense Matrix/Vector, decompositions, SIMD
+│   │   ├── CSR.cs               #   Sparse CSR, PARDISO, cuSPARSE, BiCGSTAB
+│   │   ├── Assembly.cs          #   CliqueSystem, DiscreteLinearSystem
+│   │   └── NativeLibraries.cs   #   Cross-platform MKL/CUDA discovery & loading
+│   ├── Meshing/                 # Mesh generation & refinement
+│   │   ├── SimplexMesh.cs       #   Mesh container, element markers, constants
+│   │   ├── SimplexRemesher.cs   #   Generation, bisection refinement, fracture, I/O
+│   │   ├── MeshRefinement.cs    #   Conforming refinement driver
+│   │   └── MeshGeometry.cs      #   Geometric primitives, quality metrics
+│   ├── Nonlinear/               # Time integration & root finding
+│   │   ├── Integrator.cs        #   BatheTwoStageIntegrator
+│   │   └── RootFinder.cs        #   ITP, hybrid Newton-IQI, trust-region dogleg
+│   └── Postprocess/             # Visualization
+│       └── EnsightWriter.cs     #   Ensight Gold export
+├── tests/
+│   └── Teste/                   # 26 demo examples
+│       └── Examples2DA.cs       #   Meshing + 2D/3D fracture mechanics
+├── benchmarks/                  # Connectivity benchmarks (BenchmarkDotNet + Python)
+│   ├── Mm3Bench/                #   MM3 bridge for the Python comparison harness
+│   ├── Mm3Bdn/                  #   Standalone BenchmarkDotNet harness
+│   └── mesh_connectivity_benchmark.py
 └── Docs/                        # Extended documentation (see below)
 ```
 
@@ -835,7 +841,7 @@ Contributions are welcome! Please see [`CONTRIBUTING.md`](CONTRIBUTING.md) for b
 
 ```bash
 dotnet build Numerical.sln -c Release   # build everything
-dotnet run  --project Teste -c Release  # run the example suite
+dotnet run  --project tests/Teste -c Release  # run the example suite
 ```
 
 Open an issue to discuss substantial changes before sending a pull request.

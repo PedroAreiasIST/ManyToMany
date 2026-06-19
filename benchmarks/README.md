@@ -121,9 +121,9 @@ on a pre-built topology) for triangle and tetrahedral meshes, reporting
 mean/error/stddev/median and allocations.
 
 ```bash
-dotnet run -c Release --project Benchmarks/Mm3Bdn                      # all
-dotnet run -c Release --project Benchmarks/Mm3Bdn -- --filter '*Tet*'  # just tets
-dotnet run -c Release --project Benchmarks/Mm3Bdn -- --list flat       # list cases
+dotnet run -c Release --project benchmarks/Mm3Bdn                      # all
+dotnet run -c Release --project benchmarks/Mm3Bdn -- --filter '*Tet*'  # just tets
+dotnet run -c Release --project benchmarks/Mm3Bdn -- --list flat       # list cases
 ```
 
 It is intentionally **not** part of `Numerical.sln` (so a solution build stays

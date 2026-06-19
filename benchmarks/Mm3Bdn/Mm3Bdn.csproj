@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Standalone BenchmarkDotNet harness for MM3's connectivity queries.
+       Run it to independently reproduce and ASSESS the MM3 numbers reported in
+       README.md / the paper, with full statistics (mean, error, stddev, median,
+       allocations). It generates the same synthetic meshes the Python harness
+       uses, so no Python or external library is required.
+       See benchmarks/README.md for run commands and BenchmarkDotNet filters. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Relations\Relations.csproj" />
+    <ProjectReference Include="..\..\src\Meshing\Meshing.csproj" />
+  </ItemGroup>
+
+</Project>

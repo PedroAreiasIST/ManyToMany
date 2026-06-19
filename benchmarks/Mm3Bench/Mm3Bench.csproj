@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <!-- Steady-state measurement: fully-optimized code (no tier-0) and Server GC so the
+         warm samples reflect MM3's real throughput, not JIT/GC warm-up. -->
+    <TieredCompilation>false</TieredCompilation>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Relations\Relations.csproj" />
+    <ProjectReference Include="..\..\src\Meshing\Meshing.csproj" />
+  </ItemGroup>
+
+</Project>

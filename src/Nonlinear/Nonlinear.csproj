@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Leaf library: all settings inherited from the repo-root Directory.Build.props. -->
+
+</Project>

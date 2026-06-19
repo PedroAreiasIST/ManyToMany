@@ -17,13 +17,21 @@ project.lock.json
 .DS_Store
 Thumbs.db
 
+## Nested independent git repos checked out inside this working tree
+## (intentionally kept independent -- never embed them as submodules/gitlinks)
+/SimPlas/
+/ISTVectorPostprocessor/
+
+## Large local backup tarball (over GitHub's 100 MB limit -- keep on disk, out of git)
+/SimPlas.tar.gz
+
 ## Benchmark local environments & generated artifacts (not for the repo)
-Benchmarks/.venv/
-Benchmarks/.venv39/
-Benchmarks/python-*-amd64.exe
-Benchmarks/results*.csv
-Benchmarks/results*.md
-Benchmarks/results*.tex
+benchmarks/.venv/
+benchmarks/.venv39/
+benchmarks/python-*-amd64.exe
+benchmarks/results*.csv
+benchmarks/results*.md
+benchmarks/results*.tex
 
 ## BenchmarkDotNet run output
 BenchmarkDotNet.Artifacts/

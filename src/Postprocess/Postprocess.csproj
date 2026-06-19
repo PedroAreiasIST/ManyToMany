@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Meshing\Meshing.csproj" />
+    <ProjectReference Include="..\Relations\Relations.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,89 @@
+<Project>
+
+  <!--
+    Shared MSBuild properties for the Numerical product (ManyToMany repo).
+    Hoisted from the per-project .csproj files, which previously duplicated these
+    blocks verbatim (Matrices ~180 lines, Relations ~136, Teste ~134). Each project
+    overrides only what is project-specific (e.g. the two benchmarks set
+    ImplicitUsings=disable and TieredCompilation=false; Relations sets PackageId).
+    Note: the custom defines X64 / AGGRESSIVE_INLINE are not used in any #if and are
+    kept only to preserve the original DefineConstants verbatim.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Relations marks its public API [RequiresPreviewFeatures]; every project here
+         consumes Relations, so opt in product-wide (avoids CA2252). -->
+    <EnablePreviewFeatures>true</EnablePreviewFeatures>
+    <Deterministic>true</Deterministic>
+
+    <!-- 64-bit only. The solution uses a custom 'Debug|64' / 'Release|64' matrix. -->
+    <PlatformTarget>x64</PlatformTarget>
+    <Platforms>x64;64</Platforms>
+    <Prefer32Bit>false</Prefer32Bit>
+    <RuntimeIdentifiers>win-x64;linux-x64;osx-x64;osx-arm64</RuntimeIdentifiers>
+    <gcAllowVeryLargeObjects>true</gcAllowVeryLargeObjects>
+
+    <Configurations>Debug;Release</Configurations>
+  </PropertyGroup>
+
+  <!-- Debug: full symbols, overflow checks. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <Optimize>false</Optimize>
+    <DebugType>full</DebugType>
+    <DebugSymbols>true</DebugSymbols>
+    <DefineConstants>DEBUG;TRACE;X64</DefineConstants>
+    <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
+  </PropertyGroup>
+
+  <!-- Release: fully-optimized numerical code (no tier-0), server GC. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <Optimize>true</Optimize>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <DefineConstants>TRACE;X64;AGGRESSIVE_INLINE</DefineConstants>
+    <CheckForOverflowUnderflow>false</CheckForOverflowUnderflow>
+    <TieredCompilation>true</TieredCompilation>
+    <TieredCompilationQuickJit>false</TieredCompilationQuickJit>
+    <TieredCompilationQuickJitForLoops>false</TieredCompilationQuickJitForLoops>
+    <TieredPGO>true</TieredPGO>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+    <RetainVMGarbageCollection>true</RetainVMGarbageCollection>
+    <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
+    <IlcInstructionSet>x86-x64-v3</IlcInstructionSet>
+  </PropertyGroup>
+
+  <!-- Runtime host options written into executables' .runtimeconfig.json
+       (ignored by libraries). Superset previously duplicated in Matrices/Relations/Teste. -->
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.Runtime.TieredCompilation" Value="true" />
+    <RuntimeHostConfigurationOption Include="System.Runtime.TieredCompilation.QuickJit" Value="false" />
+    <RuntimeHostConfigurationOption Include="System.Runtime.TieredCompilation.QuickJitForLoops" Value="false" />
+    <RuntimeHostConfigurationOption Include="System.Runtime.TieredPGO" Value="true" />
+    <RuntimeHostConfigurationOption Include="System.GC.Server" Value="true" />
+    <RuntimeHostConfigurationOption Include="System.GC.Concurrent" Value="true" />
+    <RuntimeHostConfigurationOption Include="System.GC.RetainVM" Value="true" />
+    <RuntimeHostConfigurationOption Include="System.GC.AllowVeryLargeObjects" Value="true" />
+    <RuntimeHostConfigurationOption Include="System.Numerics.Tensors.EnableTensorOperations" Value="true" />
+    <RuntimeHostConfigurationOption Include="System.Threading.ThreadPool.MinThreads" Value="16" />
+    <RuntimeHostConfigurationOption Include="System.Threading.ThreadPool.MaxThreads" Value="1024" />
+    <RuntimeHostConfigurationOption Include="System.Threading.Thread.MaxStackSize" Value="2097152" />
+    <RuntimeHostConfigurationOption Include="System.Runtime.Loader.UseRidGraph" Value="true" />
+  </ItemGroup>
+
+  <!-- AOT publish profile (active only when publishing with PublishAot=true). -->
+  <PropertyGroup Condition="'$(PublishAot)' == 'true'">
+    <StripSymbols>true</StripSymbols>
+    <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
+    <IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
+    <EventSourceSupport>false</EventSourceSupport>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+</Project>
