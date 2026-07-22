@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnablePreviewFeatures>true</EnablePreviewFeatures>
+    <NoWarn>$(NoWarn);CA2252</NoWarn>
+
+    <!-- ================= maximum-throughput benchmarking configuration =================
+         Steady-state measurement: no tiering ramp, no R2R stubs, server GC with a large
+         gen0 so measured regions are not interrupted by collections. Run pinned to the
+         P-cores (see run-maxperf.sh) so the hybrid scheduler cannot migrate work onto
+         the slower E-cores mid-measurement. -->
+    <Optimize>true</Optimize>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <TieredCompilation>false</TieredCompilation>
+    <TieredCompilationQuickJit>false</TieredCompilationQuickJit>
+    <TieredCompilationQuickJitForLoops>false</TieredCompilationQuickJitForLoops>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <RetainVMGarbageCollection>true</RetainVMGarbageCollection>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    <AutoreleasePoolSupport>false</AutoreleasePoolSupport>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Relations\Relations.csproj" />
+    <ProjectReference Include="..\..\src\Matrices\Matrices.csproj" />
+  </ItemGroup>
+
+</Project>

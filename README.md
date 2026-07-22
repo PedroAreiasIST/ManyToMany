@@ -24,6 +24,8 @@
 
 > **Every public type in the library lives in the `Numerical` namespace.** A single `using Numerical;` gives you the whole API. (The core topology assembly is named `Topology` for historical reasons, but you never need to import a `Topology` namespace.)
 
+> **Terminology note (paper ↔ code).** The accompanying paper names the connectivity layers **O2M** (one-to-many), **BO2M** (*bidirectional one-to-many*: a one-to-many map paired with its lazily cached transpose), and **MBO2M** (a type-indexed matrix of BO2M instances), following the entity–relationship distinction between an M:N relation and its realization as two mutually inverse 1:N maps (Chen, 1976). The classes in this library keep their legacy names: `M2M` realizes the BO2M layer and `MM2M` the MBO2M layer. The renaming is purely terminological — the API is unchanged.
+
 ### Why ManyToMany?
 
 - 🧩 **One topology, many relations** — a generic, type-checked `Topology<TTypes>` models nodes, edges, faces, elements and arbitrary associations with graph algorithms (BFS/DFS, coloring, Cuthill–McKee, components) built in.

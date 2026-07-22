@@ -1,0 +1,16 @@
+Set operations on the CSR representation
+$n_{\mathrm{el}}$ [$\times 10^6$]
+wall clock time [ms]
+top left
+* *
+* *
+0 0.0
+fig11b_operations_csr.txt
+Union ($+$)
+2 1 2 1.0 1.0
+fig11b_operations_csr.txt
+Difference ($-$)
+2 1 3 1.0 1.0
+fig11b_operations_csr.txt
+Intersection ($\&$)
+2 1 4 1.0 1.0

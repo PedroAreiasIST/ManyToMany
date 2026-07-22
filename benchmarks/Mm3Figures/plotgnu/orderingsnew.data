@@ -1,0 +1,13 @@
+Lexicographic ordering and compression/renumbering
+$n_{\mathrm{el}}$ [$\times 10^6$]
+wall clock time [ms]
+top left
+* *
+* *
+0 0.0
+fig10_orderings.txt
+Lexicographic ordering
+2 1 2 1.0 1.0
+fig10_orderings.txt
+Compression/renumbering
+2 1 3 1.0 1.0

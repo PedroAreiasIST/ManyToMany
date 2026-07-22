@@ -1,0 +1,16 @@
+Local position searching and clique formation
+$n_{\mathrm{el}}$ [$\times 10^6$]
+wall clock time [ms]
+top left
+* *
+* *
+0 0.0
+fig13_cliques.txt
+Element local positions
+2 1 2 1.0 1.0
+fig13_cliques.txt
+Node local positions
+2 1 3 1.0 1.0
+fig13_cliques.txt
+Clique formation
+2 1 4 1.0 1.0

@@ -2572,10 +2572,12 @@ public class Topology<TTypes> : IDisposable where TTypes : ITypeMap, new()
             Parallel.For(0, connectivityList.Length, ParallelConfig.Options,
                 i => { canonicalForms[i] = GetCanonicalOrOriginal<TElement>(connectivityList[i]); });
 
-            // Add sequentially (adjacency structure not thread-safe internally)
+            // Bulk-append: the rows were built in parallel above, so the insertion is a
+            // single append under one lock rather than one locked call per element.
+            var first = _adjacency.AppendElementRange(elementType, nodeType, canonicalForms);
             var indices = new int[connectivityList.Length];
-            for (var i = 0; i < canonicalForms.Length; i++)
-                indices[i] = _adjacency.AppendElement(elementType, nodeType, canonicalForms[i]);
+            for (var i = 0; i < indices.Length; i++)
+                indices[i] = first + i;
 
             return indices;
         }

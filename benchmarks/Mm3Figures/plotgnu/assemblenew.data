@@ -1,0 +1,13 @@
+Assembling: flexible vs.\ CSR representation
+$n_{\mathrm{el}}$ [$\times 10^6$]
+wall clock time [ms]
+top left
+* *
+* *
+0 0.0
+fig08_assembly.txt
+\texttt{List<List<int>>}
+2 1 2 1.0 1.0
+fig08_assembly.txt
+CSR
+2 1 3 1.0 1.0

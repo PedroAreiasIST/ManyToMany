@@ -330,6 +330,33 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
         // Stale cache causes silent loss of connectivity in transposed structure
         // Also respect maxNodeCap if specified to limit memory allocation
         var maxNode = -1;
+        if (sourceCount >= ParallelizationThreshold)
+        {
+            // Parallel reduction: the scan is O(nnz) and would otherwise be a
+            // sequential prelude to an otherwise parallel algorithm.
+            var cap = maxNodeCap ?? int.MaxValue;
+            var localMax = new int[Environment.ProcessorCount];
+            Array.Fill(localMax, -1);
+            var slot = -1;
+            Parallel.For(0, sourceCount, ParallelConfig.Options,
+                () => Interlocked.Increment(ref slot) % localMax.Length,
+                (i, _, mySlot) =>
+                {
+                    var sp = CollectionsMarshal.AsSpan(_adjacencies[i]);
+                    var m = localMax[mySlot];
+                    foreach (var node in sp)
+                    {
+                        if (node < 0 || node > cap) continue;
+                        if (node > m) m = node;
+                    }
+                    localMax[mySlot] = m;
+                    return mySlot;
+                },
+                _ => { });
+            foreach (var v in localMax)
+                if (v > maxNode) maxNode = v;
+        }
+        else
         for (var i = 0; i < sourceCount; i++)
         {
             var span = CollectionsMarshal.AsSpan(_adjacencies[i]);
@@ -381,8 +408,11 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
         // P1 FIX 2.1: Compute element offsets for flat position buffer
         var elemDegrees = new int[sourceCount];
         var elemOffsets = new int[sourceCount + 1];
-        for (var i = 0; i < sourceCount; i++)
-            elemDegrees[i] = _adjacencies[i].Count;
+        if (sourceCount >= ParallelizationThreshold)
+            Parallel.For(0, sourceCount, ParallelConfig.Options, i => elemDegrees[i] = _adjacencies[i].Count);
+        else
+            for (var i = 0; i < sourceCount; i++)
+                elemDegrees[i] = _adjacencies[i].Count;
 
         // Prefix sum for flat buffer offsets (checked to detect overflow for very large graphs)
         elemOffsets[0] = 0;
@@ -403,7 +433,116 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
             ? ArrayPool<int>.Shared.Rent(totalSlots)
             : Array.Empty<int>();
 
+        // ============================================================================
+        // CHUNKED PARALLEL PATH
+        // Partition the elements into p contiguous chunks in ascending index order and
+        // give each chunk its own count vector. Each chunk assigns CHUNK-LOCAL ranks;
+        // an exclusive scan over chunks then turns those into global positions. Because
+        // chunk c's slice of every row precedes chunk c+1's, and elements are visited in
+        // ascending order inside a chunk, each output row is still sorted by construction
+        // -- the same argument as the sequential path, one level up.
+        //
+        // Cost: p x (maxNode+1) ints of scratch. The chunk count is reduced when that
+        // would exceed ChunkCountBudgetBytes, trading parallelism for memory on graphs
+        // with very large node ranges.
+        // ============================================================================
+        var resultArrays = new int[numberOfNodes][];
+        var useChunked = sourceCount >= ParallelizationThreshold && numberOfNodes > 0;
+        var chunks = 1;
+        if (useChunked)
+        {
+            chunks = Math.Max(1, Math.Min(ParallelConfig.MaxDegreeOfParallelism, sourceCount / 4096));
+            var perChunkBytes = (long)numberOfNodes * sizeof(int);
+            if (perChunkBytes > 0)
+            {
+                var affordable = (int)Math.Max(1, ChunkCountBudgetBytes / perChunkBytes);
+                chunks = Math.Min(chunks, affordable);
+            }
+            useChunked = chunks > 1;
+        }
+
         try
+        {
+        if (useChunked)
+        {
+            var chunkSize = (sourceCount + chunks - 1) / chunks;
+            var chunkCounts = new int[chunks][];
+
+            // Pass A (parallel): per-chunk counting, duplicate detection, chunk-local ranks.
+            Parallel.For(0, chunks, ParallelConfig.Options, c =>
+            {
+                var local = new int[numberOfNodes];
+                chunkCounts[c] = local;
+                var lo = c * chunkSize;
+                var hi = Math.Min(lo + chunkSize, sourceCount);
+                for (var elementIdx = lo; elementIdx < hi; elementIdx++)
+                {
+                    var nodes = CollectionsMarshal.AsSpan(_adjacencies[elementIdx]);
+                    var posBase = elemOffsets[elementIdx];
+                    for (var i = 0; i < nodes.Length; i++)
+                    {
+                        var node = nodes[i];
+                        if ((uint)node >= (uint)numberOfNodes) { flatPositions[posBase + i] = -1; continue; }
+                        var isDuplicate = false;
+                        for (var j = 0; j < i; j++)
+                            if (nodes[j] == node) { isDuplicate = true; break; }
+                        if (isDuplicate) { flatPositions[posBase + i] = -1; continue; }
+                        flatPositions[posBase + i] = local[node]++;   // chunk-local rank
+                    }
+                }
+            });
+
+            if (strict)
+                for (var elementIdx = 0; elementIdx < sourceCount; elementIdx++)
+                {
+                    var nodes = CollectionsMarshal.AsSpan(_adjacencies[elementIdx]);
+                    var posBase = elemOffsets[elementIdx];
+                    for (var i = 0; i < nodes.Length; i++)
+                        if (flatPositions[posBase + i] < 0 && (uint)nodes[i] < (uint)numberOfNodes)
+                            throw new InvalidOperationException(
+                                $"Element {elementIdx} contains duplicate node index {nodes[i]}. " +
+                                $"Duplicate nodes within an element are not allowed in strict mode. " +
+                                $"Use Transpose() with TransposeSkipsInvalidNodes=true to skip duplicates.");
+                }
+
+            // Pass B (parallel over nodes): totals + exclusive scan over chunks, in place.
+            Parallel.For(0, numberOfNodes, ParallelConfig.Options, node =>
+            {
+                var running = 0;
+                for (var c = 0; c < chunks; c++)
+                {
+                    var here = chunkCounts[c][node];
+                    chunkCounts[c][node] = running;   // becomes this chunk's base offset
+                    running += here;
+                }
+                counts[node] = running;
+            });
+
+            // Pass C (parallel): exact-size allocation.
+            Parallel.For(0, numberOfNodes, ParallelConfig.Options, node =>
+            {
+                resultArrays[node] = counts[node] > 0 ? new int[counts[node]] : Array.Empty<int>();
+            });
+
+            // Pass D (parallel): write each entry at base + chunk-local rank.
+            Parallel.For(0, chunks, ParallelConfig.Options, c =>
+            {
+                var bases = chunkCounts[c];
+                var lo = c * chunkSize;
+                var hi = Math.Min(lo + chunkSize, sourceCount);
+                for (var elementIdx = lo; elementIdx < hi; elementIdx++)
+                {
+                    var nodes = CollectionsMarshal.AsSpan(_adjacencies[elementIdx]);
+                    var posBase = elemOffsets[elementIdx];
+                    for (var i = 0; i < nodes.Length; i++)
+                    {
+                        var pos = flatPositions[posBase + i];
+                        if (pos >= 0) resultArrays[nodes[i]][bases[nodes[i]] + pos] = elementIdx;
+                    }
+                }
+            });
+        }
+        else
         {
         // Pass 0: Sequential counting + duplicate detection + position assignment
         for (var elementIdx = 0; elementIdx < sourceCount; elementIdx++)
@@ -454,79 +593,70 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
         // PHASE 2: Allocate arrays with exact sizes (duplicate-free counts)
         // Uses ARRAYS instead of Lists for guaranteed thread-safe concurrent access
         // ============================================================================
-        var resultArrays = new int[numberOfNodes][];
         for (var node = 0; node < numberOfNodes; node++)
             resultArrays[node] = counts[node] > 0
                 ? new int[counts[node]]
                 : Array.Empty<int>();
 
         // ============================================================================
-        // PHASE 3: Parallel fill using precomputed positions
+        // PHASE 3: Fill using precomputed positions
         // No atomics, no synchronization, no sorting - positions guarantee sorted output
         // ============================================================================
-        if (sourceCount >= ParallelizationThreshold)
-            Parallel.For(0, sourceCount, ParallelConfig.Options, elementIdx =>
-            {
-                var nodes = CollectionsMarshal.AsSpan(_adjacencies[elementIdx]);
-                var posBase = elemOffsets[elementIdx];
+        for (var elementIdx = 0; elementIdx < sourceCount; elementIdx++)
+        {
+            var nodes = CollectionsMarshal.AsSpan(_adjacencies[elementIdx]);
+            var posBase = elemOffsets[elementIdx];
 
-                for (var i = 0; i < nodes.Length; i++)
-                {
-                    var node = nodes[i];
-                    var pos = flatPositions[posBase + i];
-                    if (pos >= 0) resultArrays[node][pos] = elementIdx;
-                }
-            });
-        else
-            // Sequential fill for small graphs
-            for (var elementIdx = 0; elementIdx < sourceCount; elementIdx++)
+            for (var i = 0; i < nodes.Length; i++)
             {
-                var nodes = CollectionsMarshal.AsSpan(_adjacencies[elementIdx]);
-                var posBase = elemOffsets[elementIdx];
-
-                for (var i = 0; i < nodes.Length; i++)
-                {
-                    var node = nodes[i];
-                    var pos = flatPositions[posBase + i];
-                    if (pos >= 0) resultArrays[node][pos] = elementIdx;
-                }
+                var node = nodes[i];
+                var pos = flatPositions[posBase + i];
+                if (pos >= 0) resultArrays[node][pos] = elementIdx;
             }
+        }
 
-        // Copy final positions for invariant check
-        var offsets = writePositions;
+        }   // end sequential branch
 
         // ============================================================================
         // INVARIANT CHECK: Verify offsets match allocated counts
         // A mismatch indicates data corruption (concurrent mutation, or algorithm bug).
         // Duplicate nodes are already handled in Pass 0 above.
         // ============================================================================
-        for (var node = 0; node < numberOfNodes; node++)
-            if (offsets[node] != resultArrays[node].Length)
-                throw new InvalidOperationException(
-                    $"Transpose invariant violation at node {node}: expected {resultArrays[node].Length} elements, " +
-                    $"but filled {offsets[node]}. This indicates either: " +
-                    $"(1) concurrent modification of the O2M during transpose, or " +
-                    $"(2) a bug in the transpose algorithm.");
+        if (!useChunked)
+            for (var node = 0; node < numberOfNodes; node++)
+                if (writePositions[node] != resultArrays[node].Length)
+                    throw new InvalidOperationException(
+                        $"Transpose invariant violation at node {node}: expected {resultArrays[node].Length} elements, " +
+                        $"but filled {writePositions[node]}. This indicates either: " +
+                        $"(1) concurrent modification of the O2M during transpose, or " +
+                        $"(2) a bug in the transpose algorithm.");
 
         // ============================================================================
         // PHASE 4: Convert arrays to Lists
         // Now that arrays are filled and sorted, convert to O2M's internal format
         // ============================================================================
-        for (var node = 0; node < numberOfNodes; node++)
+        static List<int> Materialize(int[] array)
         {
-            var array = resultArrays[node];
-            if (array.Length == 0)
-            {
-                result._adjacencies.Add(new List<int>());
-            }
-            else
-            {
-                var list = new List<int>(array.Length);
-                CollectionsMarshal.SetCount(list, array.Length);
-                var listSpan = CollectionsMarshal.AsSpan(list);
-                array.AsSpan().CopyTo(listSpan);
-                result._adjacencies.Add(list);
-            }
+            if (array.Length == 0) return new List<int>();
+            var list = new List<int>(array.Length);
+            CollectionsMarshal.SetCount(list, array.Length);
+            array.AsSpan().CopyTo(CollectionsMarshal.AsSpan(list));
+            return list;
+        }
+
+        if (useChunked)
+        {
+            // Allocating and copying numberOfNodes rows is O(nnz) work and was the
+            // last O(nnz) sequential stage; each row is independent, so it parallelizes.
+            var rows = new List<int>[numberOfNodes];
+            Parallel.For(0, numberOfNodes, ParallelConfig.Options,
+                node => { rows[node] = Materialize(resultArrays[node]); });
+            result._adjacencies.AddRange(rows);
+        }
+        else
+        {
+            for (var node = 0; node < numberOfNodes; node++)
+                result._adjacencies.Add(Materialize(resultArrays[node]));
         }
 
         } // end try
@@ -558,6 +688,14 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
     private int? _maxNodeIndexCache;
 
     public static int DefaultParallelizationThreshold { get; set; } = 4096;
+
+    /// <summary>
+    ///     Scratch-memory budget for the chunked parallel transpose. The algorithm needs
+    ///     one int per node per chunk; when that would exceed this budget the chunk count
+    ///     (and hence the parallelism of the counting pass) is reduced to fit.
+    ///     Default 512 MB.
+    /// </summary>
+    public static long ChunkCountBudgetBytes { get; set; } = 512L << 20;
     public int ParallelizationThreshold { get; set; }
 
     /// <summary>
@@ -718,6 +856,40 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
     ///     For a safe alternative, use <see cref="AppendElementCopy"/>.
     /// </remarks>
     [MethodImpl(AggressiveOptimization | AggressiveInlining)]
+    /// <summary>
+    ///     Appends many rows in one operation, taking ownership of the supplied lists.
+    /// </summary>
+    /// <remarks>
+    ///     Bulk counterpart of <see cref="AppendElement(List{int})"/>. Callers that have
+    ///     already built their rows (typically in parallel) would otherwise pay the
+    ///     per-call overhead once per element; this collapses it to a single append and
+    ///     a single cache reset, which is what makes bulk construction scale.
+    /// </remarks>
+    /// <param name="rows">Rows to append, in order. Ownership transfers to this O2M.</param>
+    /// <returns>The index assigned to the first appended row, or -1 when none.</returns>
+    public int AppendElementRange(IReadOnlyList<List<int>> rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        if (rows.Count == 0) return -1;
+
+        var first = _adjacencies.Count;
+        if (_adjacencies.Capacity < first + rows.Count)
+            _adjacencies.Capacity = first + rows.Count;
+
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var row = rows[i];
+            if (row is null)
+                throw new ArgumentException($"Row at index {i} is null.", nameof(rows));
+            _adjacencies.Add(row);
+        }
+
+        // One reset instead of an incremental update per row; the next GetMaxNode()
+        // recomputes it in parallel.
+        _maxNodeIndexCache = null;
+        return first;
+    }
+
     public int AppendElement(List<int> nodes)
     {
         ArgumentNullException.ThrowIfNull(nodes);
@@ -2008,9 +2180,13 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
         }
         else
         {
-            // Sequential with single marker — P0.4 FIX: touched-index clearing, single-pass
-            var marker = new int[maxNode + 1];
-            var touched = new int[maxNode + 1];
+            // Sequential with single marker — P0.4 FIX: touched-index clearing, single-pass.
+            // Buffers rented from the shared pool (cleared once; per-row touched clearing
+            // keeps the marker consistent), so steady-state allocation is zero.
+            var markerLen = maxNode + 1;
+            var marker = ArrayPool<int>.Shared.Rent(markerLen);
+            var touched = ArrayPool<int>.Shared.Rent(markerLen);
+            Array.Clear(marker, 0, markerLen);
 
             for (var element = 0; element < maxElements; element++)
             {
@@ -2049,6 +2225,9 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
                 for (var i = 0; i < count; i++)
                     marker[touched[i]] = 0;
             }
+
+            ArrayPool<int>.Shared.Return(marker);
+            ArrayPool<int>.Shared.Return(touched);
         }
 
         result._adjacencies.AddRange(resultRows);
@@ -2063,6 +2242,9 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
     /// <summary>
     ///     Intersection operator.
     ///     Parallel per-element with vectorized merge.
+    ///     <b>ORDERING:</b> result rows are returned in ascending order (both the
+    ///     sort-merge path and the small-row hash path), unlike the union, which
+    ///     preserves the operands' stored order.
     /// </summary>
     [MethodImpl(AggressiveOptimization)]
     public static O2M operator &(O2M left, O2M right)
@@ -2164,6 +2346,7 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
                     {
                         CollectionsMarshal.SetCount(dst, src.Count);
                         CollectionsMarshal.AsSpan(src).CopyTo(CollectionsMarshal.AsSpan(dst));
+                        dst.Sort();   // ascending output contract (see GetDifferenceSorted)
                     }
 
                     resultRows[element] = dst;
@@ -2185,7 +2368,9 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
                 }
                 else
                 {
-                    resultRows[element] = new List<int>(left._adjacencies[element]);
+                    var copy = new List<int>(left._adjacencies[element]);
+                    copy.Sort();   // ascending output contract (see GetDifferenceSorted)
+                    resultRows[element] = copy;
                 }
 
         var result = new O2M(elementCount) { ParallelizationThreshold = threshold };
@@ -2306,9 +2491,12 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
         }
         else
         {
-            // Sequential with single marker
-            var marker = new int[maxNode + 1];
-            var touched = new int[maxNode + 1];
+            // Sequential with single marker; buffers rented from the shared pool
+            // (cleared once; per-row touched clearing keeps the marker consistent).
+            var markerLen = maxNode + 1;
+            var marker = ArrayPool<int>.Shared.Rent(markerLen);
+            var touched = ArrayPool<int>.Shared.Rent(markerLen);
+            Array.Clear(marker, 0, markerLen);
 
             for (var element = 0; element < maxElements; element++)
             {
@@ -2352,6 +2540,9 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
                 for (var i = 0; i < touchedCount; i++)
                     marker[touched[i]] = 0;
             }
+
+            ArrayPool<int>.Shared.Return(marker);
+            ArrayPool<int>.Shared.Return(touched);
         }
 
         result._adjacencies.AddRange(resultRows);
@@ -2462,8 +2653,12 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
         else
         {
             // Sequential path
-            var marker = new int[markerSize];
-            var touched = new int[markerSize];
+            // Buffers rented from the shared pool (cleared once; the generation and
+            // touched-index discipline keeps them consistent across rows), so the
+            // sequential path has zero steady-state allocation, like the parallel path.
+            var marker = ArrayPool<int>.Shared.Rent(markerSize);
+            var touched = ArrayPool<int>.Shared.Rent(markerSize);
+            Array.Clear(marker, 0, markerSize);
             for (var ra = 0; ra < leftCount; ra++)
             {
                 var generation = ra + 1;
@@ -2486,6 +2681,8 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
                 for (var i = 0; i < len; i++)
                     marker[touched[i]] = 0;
             }
+            ArrayPool<int>.Shared.Return(marker);
+            ArrayPool<int>.Shared.Return(touched);
         }
 
         // Allocate exact sizes
@@ -2545,8 +2742,12 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
         else
         {
             // Sequential path
-            var marker = new int[markerSize];
-            var touched = new int[markerSize];
+            // Buffers rented from the shared pool (cleared once; the generation and
+            // touched-index discipline keeps them consistent across rows), so the
+            // sequential path has zero steady-state allocation, like the parallel path.
+            var marker = ArrayPool<int>.Shared.Rent(markerSize);
+            var touched = ArrayPool<int>.Shared.Rent(markerSize);
+            Array.Clear(marker, 0, markerSize);
             for (var ra = 0; ra < leftCount; ra++)
             {
                 var generation = ra + 1;
@@ -2570,6 +2771,8 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
                 for (var i = 0; i < len; i++)
                     marker[touched[i]] = 0;
             }
+            ArrayPool<int>.Shared.Return(marker);
+            ArrayPool<int>.Shared.Return(touched);
         }
 
         return result;
@@ -2670,8 +2873,12 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
         }
         else
         {
-            var marker = new int[markerSize];
-            var touched = new int[markerSize];
+            // Buffers rented from the shared pool (cleared once; the generation and
+            // touched-index discipline keeps them consistent across rows), so the
+            // sequential path has zero steady-state allocation, like the parallel path.
+            var marker = ArrayPool<int>.Shared.Rent(markerSize);
+            var touched = ArrayPool<int>.Shared.Rent(markerSize);
+            Array.Clear(marker, 0, markerSize);
             for (var ra = 0; ra < leftCount; ra++)
             {
                 var generation = ra + 1;
@@ -2695,6 +2902,8 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
                 for (var i = 0; i < len; i++)
                     marker[touched[i]] = 0;
             }
+            ArrayPool<int>.Shared.Return(marker);
+            ArrayPool<int>.Shared.Return(touched);
         }
 
         // Allocate exact sizes
@@ -2753,8 +2962,12 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
         }
         else
         {
-            var marker = new int[markerSize];
-            var touched = new int[markerSize];
+            // Buffers rented from the shared pool (cleared once; the generation and
+            // touched-index discipline keeps them consistent across rows), so the
+            // sequential path has zero steady-state allocation, like the parallel path.
+            var marker = ArrayPool<int>.Shared.Rent(markerSize);
+            var touched = ArrayPool<int>.Shared.Rent(markerSize);
+            Array.Clear(marker, 0, markerSize);
             for (var ra = 0; ra < leftCount; ra++)
             {
                 var generation = ra + 1;
@@ -2779,6 +2992,8 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
                 for (var i = 0; i < len; i++)
                     marker[touched[i]] = 0;
             }
+            ArrayPool<int>.Shared.Return(marker);
+            ArrayPool<int>.Shared.Return(touched);
         }
 
         return result;
@@ -2802,6 +3017,11 @@ public sealed class O2M : IComparable<O2M>, IEquatable<O2M>, ICloneable
             if (hashSet.Contains(node))
                 result.Add(node);
 
+        // Intersection is contracted to return rows in increasing order (the
+        // sort-merge path does so by construction). The hash path iterates an
+        // operand in stored order, so sort here to honour the same contract;
+        // this path only runs for rows with < hashSetThreshold combined entries.
+        result.Sort();
         return result;
     }
 
@@ -4952,6 +5172,27 @@ public sealed class M2M : IComparable<M2M>, IEquatable<M2M>, IDisposable
         {
             InvalidateCache();
             return _nodesFromElement.AppendElement(nodes);
+        }
+        finally
+        {
+            _rwLock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>
+    ///     Appends many rows under a single write lock and a single cache invalidation.
+    /// </summary>
+    /// <param name="rows">Rows to append, in order. Ownership transfers to this M2M.</param>
+    /// <returns>The index assigned to the first appended row, or -1 when none.</returns>
+    public int AppendElementRange(IReadOnlyList<List<int>> rows)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(rows);
+        _rwLock.EnterWriteLock();
+        try
+        {
+            InvalidateCache();
+            return _nodesFromElement.AppendElementRange(rows);
         }
         finally
         {
@@ -8160,6 +8401,27 @@ public sealed class MM2M : IDisposable
         try
         {
             return _mat[elementType, nodeType].AppendElement(nodes);
+        }
+        finally
+        {
+            _rwLock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>
+    ///     Appends many rows of one type pair under a single lock acquisition.
+    /// </summary>
+    /// <returns>The index assigned to the first appended row, or -1 when none.</returns>
+    public int AppendElementRange(int elementType, int nodeType, IReadOnlyList<List<int>> rows)
+    {
+        ThrowIfDisposed();
+        ValidateTypeIndex(elementType);
+        ValidateTypeIndex(nodeType);
+        ArgumentNullException.ThrowIfNull(rows);
+        _rwLock.EnterWriteLock();
+        try
+        {
+            return _mat[elementType, nodeType].AppendElementRange(rows);
         }
         finally
         {

@@ -7,6 +7,7 @@
 // independently audited. Meshes are generated in-process and match the Python
 // generators, so nothing external (Python, OpenMesh, VTK, ...) is needed.
 using System;
+using System.Collections.Generic;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Running;
 using Numerical;   // O2M, Topology<>, TypeMap<>, Node, Tri3, Tet4
@@ -150,6 +151,78 @@ public class TetConnectivity
     public long QueryOnly() => Traverse(_prebuilt);
 }
 
+/// <summary>
+/// Backs the paper's set-union figure: the library's order-preserving,
+/// marker-array union (<c>O2M.operator|</c>, pooled marker with touched-index
+/// clearing) against a hash-set union with identical semantics (left row in
+/// stored order, then unseen right-row entries in theirs). The sequential
+/// kernel is forced on the library side (ParallelizationThreshold =
+/// int.MaxValue) so the comparison is mechanism vs. mechanism, not parallel
+/// vs. serial. Structures mimic a 10K-element mesh (4 nodes/row) whose node
+/// indices span [0, MaxNode); the marker occupies 4*MaxNode bytes, so it is
+/// L1-resident up to MaxNode = 4096 on typical hardware.
+/// </summary>
+[MemoryDiagnoser]
+[SimpleJob(warmupCount: 3, iterationCount: 7)]
+public class SetUnion
+{
+    [Params(100, 1_000, 4_096, 8_192, 16_384)] public int MaxNode;
+
+    private const int Rows = 10_000;
+    private const int NodesPerRow = 4;
+
+    private O2M _a = null!, _b = null!;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        var rng = new Random(42);   // fixed seed for reproducibility
+        _a = BuildRandom(rng);
+        _b = BuildRandom(rng);
+        _a.ParallelizationThreshold = int.MaxValue;   // force the sequential kernel
+        _b.ParallelizationThreshold = int.MaxValue;
+    }
+
+    private O2M BuildRandom(Random rng)
+    {
+        var o = new O2M(Rows);
+        Span<int> row = stackalloc int[NodesPerRow];
+        for (var i = 0; i < Rows; i++)
+        {
+            for (var j = 0; j < NodesPerRow; j++) row[j] = rng.Next(MaxNode);
+            o.AppendElementCopy(row);
+        }
+        return o;
+    }
+
+    [Benchmark(Baseline = true, Description = "hash-based union (reused HashSet)")]
+    public O2M HashUnion()
+    {
+        var n = Math.Max(_a.Count, _b.Count);
+        var result = new O2M(n);
+        var seen = new HashSet<int>();
+        var row = new List<int>(2 * NodesPerRow);
+        for (var i = 0; i < n; i++)
+        {
+            seen.Clear();
+            row.Clear();
+            if (i < _a.Count)
+                foreach (var v in _a[i])
+                    if (seen.Add(v))
+                        row.Add(v);
+            if (i < _b.Count)
+                foreach (var v in _b[i])
+                    if (seen.Add(v))
+                        row.Add(v);
+            result.AppendElementCopy(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(row));
+        }
+        return result;
+    }
+
+    [Benchmark(Description = "marker-array union (library operator |)")]
+    public O2M MarkerUnion() => _a | _b;
+}
+
 internal static class Program
 {
     private static void Main(string[] args)
@@ -157,6 +230,6 @@ internal static class Program
         // Default to running every benchmark non-interactively.
         if (args is null || args.Length == 0)
             args = new[] { "--filter", "*" };
-        BenchmarkSwitcher.FromTypes(new[] { typeof(TriangleConnectivity), typeof(TetConnectivity) }).Run(args);
+        BenchmarkSwitcher.FromTypes(new[] { typeof(TriangleConnectivity), typeof(TetConnectivity), typeof(SetUnion) }).Run(args);
     }
 }

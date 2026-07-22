@@ -1,0 +1,13 @@
+Bulk assembling ($4\times10^{6}$ elements): effect of threads
+$n_{\mathrm{threads}}$
+wall clock time [ms]
+top right
+* *
+* *
+0 0.0
+fig09_assembly_threads.txt
+With symmetry group ($D_4$)
+2 1 2 1.0 1.0
+fig09_assembly_threads.txt
+Without symmetry group
+2 1 3 1.0 1.0
