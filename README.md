@@ -11,6 +11,7 @@
 [![.NET 9.0](https://img.shields.io/badge/.NET-9.0-512BD4.svg)](https://dotnet.microsoft.com/download/dotnet/9.0)
 [![Language: C#](https://img.shields.io/badge/language-C%23-239120.svg)](https://learn.microsoft.com/dotnet/csharp/)
 [![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](#platforms--prerequisites)
+[![DOI](https://img.shields.io/badge/DOI-10.1016%2Fj.advengsoft.2026.104296-blue.svg)](https://doi.org/10.1016/j.advengsoft.2026.104296)
 
 *Mesh topology · sparse linear algebra · mesh generation & fracture · nonlinear dynamics · visualization — tuned for problems up to 10M+ degrees of freedom.*
 
@@ -24,7 +25,7 @@
 
 > **Every public type in the library lives in the `Numerical` namespace.** A single `using Numerical;` gives you the whole API. (The core topology assembly is named `Topology` for historical reasons, but you never need to import a `Topology` namespace.)
 
-> **Terminology note (paper ↔ code).** The accompanying paper names the connectivity layers **O2M** (one-to-many), **BO2M** (*bidirectional one-to-many*: a one-to-many map paired with its lazily cached transpose), and **MBO2M** (a type-indexed matrix of BO2M instances), following the entity–relationship distinction between an M:N relation and its realization as two mutually inverse 1:N maps (Chen, 1976). The classes in this library keep their legacy names: `M2M` realizes the BO2M layer and `MM2M` the MBO2M layer. The renaming is purely terminological — the API is unchanged.
+> **Terminology note (paper ↔ code).** The accompanying paper ([Areias, Sardinha & Silvestre, 2026](https://doi.org/10.1016/j.advengsoft.2026.104296)) names the connectivity layers **O2M** (one-to-many), **BO2M** (*bidirectional one-to-many*: a one-to-many map paired with its lazily cached transpose), and **MBO2M** (a type-indexed matrix of BO2M instances), following the entity–relationship distinction between an M:N relation and its realization as two mutually inverse 1:N maps (Chen, 1976). The classes in this library keep their legacy names: `M2M` realizes the BO2M layer and `MM2M` the MBO2M layer. The renaming is purely terminological — the API is unchanged.
 
 ### Why ManyToMany?
 
@@ -833,7 +834,7 @@ Start with this README, then dive into the per-module deep-dives in [`Docs/`](Do
 | [`Topology-Complete-Documentation.md`](Docs/Topology-Complete-Documentation.md) | Topology operations, graph algorithms, serialization |
 | [`SimplexRemesher-Complete-Documentation.md`](Docs/SimplexRemesher-Complete-Documentation.md) | Mesh refinement, crack insertion, file I/O, tutorials |
 
-A companion paper, *A Simple C# Library for Computational Mechanics*, is included as [`Docs/p_areias_simple_csharp_final.pdf`](Docs/p_areias_simple_csharp_final.pdf).
+The library is described in the open-access paper P. Areias, M. Sardinha, N. Silvestre, *A multi-level framework for type-safe topological structures with efficient connectivity queries*, Advances in Engineering Software 222 (2026) 104296, [doi:10.1016/j.advengsoft.2026.104296](https://doi.org/10.1016/j.advengsoft.2026.104296) — see [Citation](#citation) for the BibTeX entry. A quick-reference sheet for the C# features used throughout the code base, *P. Areias simple C# — Numerical & Scientific Computing Edition*, is included as [`Docs/p_areias_simple_csharp_final.pdf`](Docs/p_areias_simple_csharp_final.pdf).
 
 ---
 
@@ -852,17 +853,36 @@ Open an issue to discuss substantial changes before sending a pull request.
 
 ## Citation
 
-If you use ManyToMany in academic work, please cite:
+ManyToMany is described in the following open-access paper. If you use the library in academic work, please cite it:
+
+> P. Areias, M. Sardinha, N. Silvestre. **A multi-level framework for type-safe topological structures with efficient connectivity queries.** *Advances in Engineering Software* **222** (2026) 104296. [doi:10.1016/j.advengsoft.2026.104296](https://doi.org/10.1016/j.advengsoft.2026.104296)
+
+```bibtex
+@article{Areias2026multilevel,
+  author  = {Areias, P. and Sardinha, M. and Silvestre, N.},
+  title   = {A multi-level framework for type-safe topological structures
+             with efficient connectivity queries},
+  journal = {Advances in Engineering Software},
+  volume  = {222},
+  pages   = {104296},
+  year    = {2026},
+  doi     = {10.1016/j.advengsoft.2026.104296}
+}
+```
+
+To refer to the software itself (for example a specific release or commit), you can additionally cite:
 
 ```bibtex
 @software{areias_manytomany,
-  author  = {Areias, Pedro},
-  title   = {ManyToMany: A High-Performance Scientific Computing and
-             Finite Element Library for .NET},
-  year     = {2026},
-  url      = {https://github.com/PedroAreiasIST/ManyToMany}
+  author = {Areias, Pedro},
+  title  = {ManyToMany: A High-Performance Scientific Computing and
+            Finite Element Library for .NET},
+  year   = {2026},
+  url    = {https://github.com/PedroAreiasIST/ManyToMany}
 }
 ```
+
+A machine-readable [`CITATION.cff`](CITATION.cff) is included; GitHub's **Cite this repository** button exports APA and BibTeX from it.
 
 ---
 

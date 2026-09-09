@@ -13,7 +13,8 @@ This directory holds the in-depth reference documentation for **ManyToMany**. Fo
 | Work with dense/sparse matrices & FE assembly | [Numerical-Complete-Documentation.md](Numerical-Complete-Documentation.md) |
 | Model connectivity & run graph algorithms | [Topology-Complete-Documentation.md](Topology-Complete-Documentation.md) |
 | Generate meshes, refine, and insert cracks | [SimplexRemesher-Complete-Documentation.md](SimplexRemesher-Complete-Documentation.md) |
-| See the theory & motivation | [p_areias_simple_csharp_final.pdf](p_areias_simple_csharp_final.pdf) |
+| See the theory & motivation | Areias, Sardinha & Silvestre, *Advances in Engineering Software* 222 (2026) 104296 — [doi:10.1016/j.advengsoft.2026.104296](https://doi.org/10.1016/j.advengsoft.2026.104296) |
+| Brush up on the C# used in the code base | [p_areias_simple_csharp_final.pdf](p_areias_simple_csharp_final.pdf) |
 
 ## Documents
 

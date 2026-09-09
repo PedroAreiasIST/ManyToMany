@@ -1,0 +1,41 @@
+cff-version: 1.2.0
+message: "If you use ManyToMany in academic work, please cite the paper listed under preferred-citation."
+type: software
+title: "ManyToMany: A High-Performance Scientific Computing and Finite Element Library for .NET"
+authors:
+  - family-names: Areias
+    given-names: Pedro
+    orcid: "https://orcid.org/0000-0001-6865-1326"
+    affiliation: "Instituto Superior Técnico, Universidade de Lisboa"
+repository-code: "https://github.com/PedroAreiasIST/ManyToMany"
+license: GPL-3.0
+keywords:
+  - finite elements
+  - mesh topology
+  - many-to-many relations
+  - sparse linear algebra
+  - C#
+  - .NET
+preferred-citation:
+  type: article
+  title: "A multi-level framework for type-safe topological structures with efficient connectivity queries"
+  authors:
+    - family-names: Areias
+      given-names: Pedro
+      orcid: "https://orcid.org/0000-0001-6865-1326"
+    - family-names: Sardinha
+      given-names: Manuel
+    - family-names: Silvestre
+      given-names: Nuno
+  journal: "Advances in Engineering Software"
+  volume: 222
+  start: 104296
+  end: 104296
+  year: 2026
+  month: 11
+  doi: "10.1016/j.advengsoft.2026.104296"
+  issn: "0965-9978"
+  publisher:
+    name: Elsevier
+  license: CC-BY-4.0
+  url: "https://doi.org/10.1016/j.advengsoft.2026.104296"
