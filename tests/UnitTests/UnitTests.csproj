@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Relations\Relations.csproj" />
+    <ProjectReference Include="..\..\src\Meshing\Meshing.csproj" />
   </ItemGroup>
 
   <ItemGroup>
