@@ -262,19 +262,8 @@ public static class SimplexRemesher
         => MeshRefinement.InterpolateCoordinates(refinedMesh, originalCoords);
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // Edge Refinement Internal Structures
+    // Edge Discovery
     // ═══════════════════════════════════════════════════════════════════════════
-
-    static readonly (int A, int B)[] TetEdges = new (int A, int B)[] { (0,1), (1,2), (0,2), (2,3), (0,3), (1,3) };
-
-    static readonly int[,] EdgeIdx = BuildEdgeIndex();
-    static int[,] BuildEdgeIndex()
-    {
-        var t = new int[4, 4];
-        for (int i = 0; i < 4; i++) for (int j = 0; j < 4; j++) t[i, j] = -1;
-        for (int e = 0; e < 6; e++) { t[TetEdges[e].A, TetEdges[e].B] = e; t[TetEdges[e].B, TetEdges[e].A] = e; }
-        return t;
-    }
 
     public static void DiscoverEdges(SimplexMesh m)
     {
@@ -1740,7 +1729,7 @@ public static class SimplexRemesher
         if (regionField != null)
         {
             // Build node-to-node connectivity
-            var nodeNeighbors = BuildNodeNeighborsTri(refinedMesh);
+            var nodeNeighbors = BuildNodeNeighbors(refinedMesh, refinedMesh.Count<Node>(), tetrahedra: false);
             
             // Check each crack node for neighbors outside active region
             // Interior tips (crack terminates inside mesh): DON'T duplicate
@@ -1963,7 +1952,10 @@ public static class SimplexRemesher
             
             var boundaryNodes = new HashSet<int>();
             
-            // Fix ALL boundary nodes in the cracked mesh (includes crack surfaces)
+            // Fix ALL boundary nodes in the cracked mesh (includes crack surfaces).
+            // The edges are discovered here, before the orientation correction below, so
+            // that the returned mesh carries them in the order a further crack step reads.
+            DiscoverEdges(crackedMesh);
             var crackedBoundary = FindBoundaryNodes(crackedMesh);
             foreach (var node in crackedBoundary)
                 boundaryNodes.Add(node);
@@ -1976,7 +1968,7 @@ public static class SimplexRemesher
             double relaxation = DefaultCrackSmoothingRelaxation;
             
             // Build neighbor map once (FAST)
-            var nodeNeighbors = BuildNodeNeighborsTri(crackedMesh);
+            var nodeNeighbors = BuildNodeNeighbors(crackedMesh, crackedMesh.Count<Node>(), tetrahedra: false);
             
             for (int iter = 0; iter < iterations; iter++)
             {
@@ -2048,27 +2040,10 @@ public static class SimplexRemesher
     }
     
     /// <summary>
-    /// Find boundary nodes (nodes that share boundary edges).
+    /// Find boundary nodes of the triangles: the nodes of edges used by exactly one triangle.
     /// </summary>
     public static HashSet<int> FindBoundaryNodes(SimplexMesh mesh)
-    {
-        var boundaryNodes = new HashSet<int>();
-        
-        DiscoverEdges(mesh);
-        
-        // Boundary edges are shared by exactly 1 triangle
-        for (int e = 0; e < mesh.Count<Edge>(); e++)
-        {
-            if (mesh.CountElementsSharingSubEntity<Tri3, Edge, Node>(e) == 1)
-            {
-                var edgeNodes = mesh.NodesOf<Edge, Node>(e);
-                boundaryNodes.Add(edgeNodes[0]);
-                boundaryNodes.Add(edgeNodes[1]);
-            }
-        }
-        
-        return boundaryNodes;
-    }
+        => mesh.FindBoundaryNodes<Tri3, Node>(2);
     
     #region Crack Insertion - 3D (Tetrahedral Meshes)
     
@@ -2523,7 +2498,7 @@ if (TryFindEdgeRootOnSegment(signedField,
         if (regionField != null)
         {
             // Build node-to-node connectivity from tets
-            var nodeNeighbors = BuildNodeNeighborsTet(refinedMesh);
+            var nodeNeighbors = BuildNodeNeighbors(refinedMesh, refinedMesh.Count<Node>(), triangles: false);
             
             // Threshold for "near region boundary" - should be wider than regionTolerance
             double regionBoundaryThreshold = CrackRegionBoundaryRelativeThreshold * avgEdgeLen;
@@ -2791,7 +2766,7 @@ if (TryFindEdgeRootOnSegment(signedField,
             Console.WriteLine($"  → Fixed {boundaryNodes.Count} boundary nodes");
             
             // Build neighbor map from tetrahedra
-            var nodeNeighbors = BuildNodeNeighborsTet(refinedMesh);
+            var nodeNeighbors = BuildNodeNeighbors(refinedMesh, refinedMesh.Count<Node>(), triangles: false);
             
             // Conservative Laplacian smoothing
             var smoothedCoords = (double[,])refinedCoords.Clone();
@@ -2877,97 +2852,49 @@ if (TryFindEdgeRootOnSegment(signedField,
         
         return (refinedMesh, refinedCoords);
     }
+    /// <summary>
+    /// Find boundary nodes of the tetrahedra: the nodes of faces used by exactly one tetrahedron.
+    /// </summary>
     public static HashSet<int> FindBoundaryNodes3D(SimplexMesh mesh)
-    {
-        var boundaryNodes = new HashSet<int>();
-        
-        // Count how many tetrahedra share each face
-        var faceCount = new Dictionary<(int, int, int), int>();
-        
-        for (int i = 0; i < mesh.Count<Tet4>(); i++)
-        {
-            var nodes = mesh.NodesOf<Tet4, Node>(i);
-            
-            // Four faces per tetrahedron
-            var faces = new[]
-            {
-                (nodes[0], nodes[1], nodes[2]),
-                (nodes[0], nodes[1], nodes[3]),
-                (nodes[0], nodes[2], nodes[3]),
-                (nodes[1], nodes[2], nodes[3])
-            };
-            
-            foreach (var face in faces)
-            {
-                // Sort to get canonical form
-                var sorted = new[] { face.Item1, face.Item2, face.Item3 };
-                Array.Sort(sorted);
-                var key = (sorted[0], sorted[1], sorted[2]);
-                
-                if (!faceCount.ContainsKey(key))
-                    faceCount[key] = 0;
-                faceCount[key]++;
-            }
-        }
-        
-        // Boundary faces have count == 1
-        foreach (var (face, count) in faceCount)
-        {
-            if (count == 1)
-            {
-                boundaryNodes.Add(face.Item1);
-                boundaryNodes.Add(face.Item2);
-                boundaryNodes.Add(face.Item3);
-            }
-        }
-        
-        return boundaryNodes;
-    }
+        => mesh.FindBoundaryNodes<Tet4, Node>(3);
     
     #endregion
     
     #region Node Connectivity Helpers
     
     /// <summary>
-    /// Build node-to-node connectivity from triangles.
-    /// Returns a dictionary mapping each node to its set of topological neighbors.
+    /// Node-to-node connectivity: for each of the <paramref name="nNodes"/> nodes, the set of
+    /// nodes sharing a triangle and/or a tetrahedron with it. Each set is filled element by
+    /// element in row order, so its enumeration order (which fixes the summation order of
+    /// the smoothers) depends only on the mesh.
     /// </summary>
-    private static Dictionary<int, HashSet<int>> BuildNodeNeighborsTri(SimplexMesh mesh)
+    private static List<HashSet<int>> BuildNodeNeighbors(SimplexMesh mesh, int nNodes,
+        bool triangles = true, bool tetrahedra = true)
     {
-        var neighbors = new Dictionary<int, HashSet<int>>();
-        for (int i = 0; i < mesh.Count<Node>(); i++)
-            neighbors[i] = new HashSet<int>();
-        
-        for (int elemId = 0; elemId < mesh.Count<Tri3>(); elemId++)
-        {
-            var n = mesh.NodesOf<Tri3, Node>(elemId);
-            neighbors[n[0]].Add(n[1]); neighbors[n[0]].Add(n[2]);
-            neighbors[n[1]].Add(n[0]); neighbors[n[1]].Add(n[2]);
-            neighbors[n[2]].Add(n[0]); neighbors[n[2]].Add(n[1]);
-        }
-        return neighbors;
-    }
-    
-    /// <summary>
-    /// Build node-to-node connectivity from tetrahedra.
-    /// Returns a dictionary mapping each node to its set of topological neighbors.
-    /// </summary>
-    private static Dictionary<int, HashSet<int>> BuildNodeNeighborsTet(SimplexMesh mesh)
-    {
-        var neighbors = new Dictionary<int, HashSet<int>>();
-        for (int i = 0; i < mesh.Count<Node>(); i++)
-            neighbors[i] = new HashSet<int>();
-        
-        for (int elemId = 0; elemId < mesh.Count<Tet4>(); elemId++)
-        {
-            var n = mesh.NodesOf<Tet4, Node>(elemId);
-            for (int i = 0; i < 4; i++)
-                for (int j = i + 1; j < 4; j++)
-                {
-                    neighbors[n[i]].Add(n[j]);
-                    neighbors[n[j]].Add(n[i]);
-                }
-        }
+        var neighbors = new List<HashSet<int>>(nNodes);
+        for (var i = 0; i < nNodes; i++) neighbors.Add(new HashSet<int>());
+
+        if (triangles)
+            for (var i = 0; i < mesh.Count<Tri3>(); i++)
+            {
+                var nodes = mesh.NodesOf<Tri3, Node>(i);
+                neighbors[nodes[0]].Add(nodes[1]);
+                neighbors[nodes[0]].Add(nodes[2]);
+                neighbors[nodes[1]].Add(nodes[0]);
+                neighbors[nodes[1]].Add(nodes[2]);
+                neighbors[nodes[2]].Add(nodes[0]);
+                neighbors[nodes[2]].Add(nodes[1]);
+            }
+
+        if (tetrahedra)
+            for (var i = 0; i < mesh.Count<Tet4>(); i++)
+            {
+                var nodes = mesh.NodesOf<Tet4, Node>(i);
+                for (var j = 0; j < 4; j++)
+                    for (var k = 0; k < 4; k++)
+                        if (j != k) neighbors[nodes[j]].Add(nodes[k]);
+            }
+
         return neighbors;
     }
     
@@ -3526,9 +3453,9 @@ if (TryFindEdgeRootOnSegment(signedField,
         Console.WriteLine($"[LaplacianSmoothing] Starting {iterations} iterations...");
         Console.WriteLine($"[LaplacianSmoothing] Fixed nodes: {allFixedNodes.Count}/{nNodes}");
 
+        var neighbors = BuildNodeNeighbors(mesh, nNodes);
         for (var iter = 0; iter < iterations; iter++)
         {
-            var neighbors = BuildNodeNeighbors(mesh, nNodes);
             var smoothedCount = 0;
 
             for (var nodeId = 0; nodeId < nNodes; nodeId++)
@@ -3596,9 +3523,9 @@ if (TryFindEdgeRootOnSegment(signedField,
 
         Console.WriteLine($"[CVTSmoothing] Starting {iterations} iterations...");
 
+        var nodeTris = BuildNodeToTriangles(mesh, nNodes);
         for (var iter = 0; iter < iterations; iter++)
         {
-            var nodeTris = BuildNodeToTriangles(mesh, nNodes);
             var smoothedCount = 0;
 
             for (var nodeId = 0; nodeId < nNodes; nodeId++)
@@ -3711,84 +3638,16 @@ if (TryFindEdgeRootOnSegment(signedField,
         return RebuildMeshWithoutElements(mesh, coords, new HashSet<int>(), degenerateTets);
     }
 
+    /// <summary>
+    /// Boundary nodes of a mixed mesh: the union of <see cref="FindBoundaryNodes"/> (triangles)
+    /// and <see cref="FindBoundaryNodes3D"/> (tetrahedra).
+    /// </summary>
     public static HashSet<int> IdentifyBoundaryNodes(SimplexMesh mesh)
     {
         var boundaryNodes = new HashSet<int>();
-
-        if (mesh.Count<Tri3>() > 0)
-        {
-            var edgeCount = new Dictionary<(int, int), int>();
-
-            for (var i = 0; i < mesh.Count<Tri3>(); i++)
-            {
-                var nodes = mesh.NodesOf<Tri3, Node>(i);
-                IncrementEdgeCount(edgeCount, nodes[0], nodes[1]);
-                IncrementEdgeCount(edgeCount, nodes[1], nodes[2]);
-                IncrementEdgeCount(edgeCount, nodes[2], nodes[0]);
-            }
-
-            foreach (var (edge, count) in edgeCount)
-            {
-                if (count == 1)
-                {
-                    boundaryNodes.Add(edge.Item1);
-                    boundaryNodes.Add(edge.Item2);
-                }
-            }
-        }
-
-        if (mesh.Count<Tet4>() > 0)
-        {
-            var faceCount = new Dictionary<(int, int, int), int>();
-
-            for (var i = 0; i < mesh.Count<Tet4>(); i++)
-            {
-                var nodes = mesh.NodesOf<Tet4, Node>(i);
-                IncrementFaceCount(faceCount, nodes[0], nodes[1], nodes[2]);
-                IncrementFaceCount(faceCount, nodes[0], nodes[1], nodes[3]);
-                IncrementFaceCount(faceCount, nodes[0], nodes[2], nodes[3]);
-                IncrementFaceCount(faceCount, nodes[1], nodes[2], nodes[3]);
-            }
-
-            foreach (var (face, count) in faceCount)
-            {
-                if (count == 1)
-                {
-                    boundaryNodes.Add(face.Item1);
-                    boundaryNodes.Add(face.Item2);
-                    boundaryNodes.Add(face.Item3);
-                }
-            }
-        }
-
+        if (mesh.Count<Tri3>() > 0) boundaryNodes.UnionWith(FindBoundaryNodes(mesh));
+        if (mesh.Count<Tet4>() > 0) boundaryNodes.UnionWith(FindBoundaryNodes3D(mesh));
         return boundaryNodes;
-    }
-
-    private static List<HashSet<int>> BuildNodeNeighbors(SimplexMesh mesh, int nNodes)
-    {
-        var neighbors = new List<HashSet<int>>(nNodes);
-        for (var i = 0; i < nNodes; i++) neighbors.Add(new HashSet<int>());
-
-        for (var i = 0; i < mesh.Count<Tri3>(); i++)
-        {
-            var nodes = mesh.NodesOf<Tri3, Node>(i);
-            neighbors[nodes[0]].Add(nodes[1]);
-            neighbors[nodes[0]].Add(nodes[2]);
-            neighbors[nodes[1]].Add(nodes[0]);
-            neighbors[nodes[1]].Add(nodes[2]);
-            neighbors[nodes[2]].Add(nodes[0]);
-            neighbors[nodes[2]].Add(nodes[1]);
-        }
-
-        for (var i = 0; i < mesh.Count<Tet4>(); i++)
-        {
-            var nodes = mesh.NodesOf<Tet4, Node>(i);
-            for (var j = 0; j < 4; j++)
-                for (var k = 0; k < 4; k++)
-                    if (j != k) neighbors[nodes[j]].Add(nodes[k]);
-        }
-
-        return neighbors;
     }
 
     private static List<HashSet<int>> BuildNodeToTriangles(SimplexMesh mesh, int nNodes)
@@ -3805,19 +3664,6 @@ if (TryFindEdgeRootOnSegment(signedField,
         }
 
         return nodeTris;
-    }
-
-    private static void IncrementEdgeCount(Dictionary<(int, int), int> dict, int n0, int n1)
-    {
-        var edge = n0 < n1 ? (n0, n1) : (n1, n0);
-        dict[edge] = dict.GetValueOrDefault(edge, 0) + 1;
-    }
-
-    private static void IncrementFaceCount(Dictionary<(int, int, int), int> dict, int n0, int n1, int n2)
-    {
-        var sorted = new[] { n0, n1, n2 }.OrderBy(x => x).ToArray();
-        var face = (sorted[0], sorted[1], sorted[2]);
-        dict[face] = dict.GetValueOrDefault(face, 0) + 1;
     }
 
     private static (SimplexMesh mesh, double[,] coords) RebuildMeshWithoutElements(
