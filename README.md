@@ -761,6 +761,7 @@ public CliqueSystem(int numElements, bool enableGpu = false);
 | `SimplexRemesher` | `static class` | Generation, refinement, crack insertion, smoothing, I/O (see below). |
 | `MeshGeometry` | `static class` | Element geometry, point/curve predicates, quality statistics. |
 | `MeshRefinement` | `static class` | `Refine`, `CheckJacobians`, `FixNegativeJacobians`, `InterpolateCoordinates`. |
+| `SubdivisionTemplates` | `static class` | `SplitBar`, `SplitTriangle`, `SplitTet`, `TetChildren`: the marked-edge subdivision templates (Fortran `remeshsimplex.f90`) used by `MeshRefinement` and by the Step2 edge cutter. |
 | `MeshConstants` | `static class` | Numerical tolerances (`Epsilon` = 1e-10, …). |
 | `FiniteElementTopologies` | `static class` | Pre-built `SubEntityDefinition`s (`Tri3Edges`, `Tet4Faces`, …). |
 | `MeshQualityStats` | `class` | Quality metrics from `ComputeQualityStatistics`. |
@@ -768,7 +769,7 @@ public CliqueSystem(int numElements, bool enableGpu = false);
 | `ParentNodes`, `OriginalElement` | `readonly record struct` | Refinement lineage attributes. |
 | `SignedFieldFunction` | `delegate` | `double (double x, double y, double z)` — level-set for crack insertion. |
 
-**`SimplexRemesher` methods** — *generation:* `CreateRectangularMesh`, `CreateRectangularQuadMesh`, `CreateUnitSquareMesh`, `CreateBoxMesh`, `CreateUnitCubeMesh`, `Triangulate`, `TriangulateWithHoles`, `DelaunayTriangulate`; *refinement:* `Refine`, `InterpolateCoordinates`, `DiscoverEdges`; *fracture:* `CreateCrackFromSignedField`, `CreateCrackFromSignedField3D`, `CreateCrack`, `CreateCrackFromRefinedMesh`; *smoothing/cleanup:* `LaplacianSmoothing`, `CVTSmoothing`, `RemoveDegenerateTriangles`, `RemoveDegenerateTetrahedra`, `ConvertToQuads`; *boundary:* `FindBoundaryNodes`, `FindBoundaryNodes3D`; *I/O:* `SaveMSH`, `SaveMSHWithCrackGroups`, `LoadMSH`, `LoadMSHWithTags`, `SaveGiD`, `LoadGiD`, `SaveASCII`; *reporting:* `PrintStats`, `PrintQualityReport`.
+**`SimplexRemesher` methods** — *generation:* `CreateRectangularMesh`, `CreateRectangularQuadMesh`, `CreateUnitSquareMesh`, `CreateBoxMesh`, `CreateUnitCubeMesh`, `Triangulate`, `TriangulateWithHoles`, `DelaunayTriangulate`; *refinement:* `Refine`, `InterpolateCoordinates`, `DiscoverEdges`; *fracture:* `CreateCrackFromSignedField`, `CreateCrackFromSignedField3D`, `CreateCrack`, `CreateCrackFromRefinedMesh`; *smoothing/cleanup:* `LaplacianSmoothing`, `CVTSmoothing`, `RemoveDegenerateTriangles`, `RemoveDegenerateTetrahedra`, `ConvertToQuads`; *boundary:* `FindBoundaryNodes`, `FindBoundaryNodes3D`, `IdentifyBoundaryNodes`; *I/O:* `SaveMSH`, `SaveMSHWithCrackGroups`, `LoadMSH`, `LoadMSHWithTags`, `SaveGiD`, `LoadGiD`, `SaveASCII`; *reporting:* `PrintStats`, `PrintQualityReport`.
 
 ### Nonlinear
 
@@ -791,7 +792,7 @@ public CliqueSystem(int numElements, bool enableGpu = false);
 ```
 ManyToMany/
 ├── Numerical.sln                # Visual Studio solution
-├── src/                         # Core libraries (all share the Numerical namespace)
+├── src/                         # Core libraries (Numerical namespace; Incremental: Step2)
 │   ├── Relations/               # Core topology library (assembly: Topology)
 │   │   ├── Relations.cs         #   O2M and supporting adjacency structures
 │   │   ├── Topology.cs          #   Topology<TTypes>, SubEntityDefinition, Symmetry
@@ -805,18 +806,23 @@ ManyToMany/
 │   │   ├── SimplexMesh.cs       #   Mesh container, element markers, constants
 │   │   ├── SimplexRemesher.cs   #   Generation, bisection refinement, fracture, I/O
 │   │   ├── MeshRefinement.cs    #   Conforming refinement driver
+│   │   ├── SubdivisionTemplates.cs # Marked-edge subdivision templates
 │   │   └── MeshGeometry.cs      #   Geometric primitives, quality metrics
 │   ├── Nonlinear/               # Time integration & root finding
 │   │   ├── Integrator.cs        #   BatheTwoStageIntegrator
 │   │   └── RootFinder.cs        #   ITP, hybrid Newton-IQI, trust-region dogleg
-│   └── Postprocess/             # Visualization
-│       └── EnsightWriter.cs     #   Ensight Gold export
+│   ├── Postprocess/             # Visualization
+│   │   └── EnsightWriter.cs     #   Ensight Gold export
+│   └── Incremental/             # Step2.Core: incremental MM3 upkeep (snapshots, cutting, cracks)
 ├── tests/
+│   ├── UnitTests/               # xUnit: relations, topology, meshing golden masters
 │   └── Teste/                   # 26 demo examples
 │       └── Examples2DA.cs       #   Meshing + 2D/3D fracture mechanics
 ├── benchmarks/                  # Connectivity benchmarks (BenchmarkDotNet + Python)
 │   ├── Mm3Bench/                #   MM3 bridge for the Python comparison harness
 │   ├── Mm3Bdn/                  #   Standalone BenchmarkDotNet harness
+│   ├── Mm3Remeasure/            #   Revised-paper Tables 10-14
+│   ├── Step2Bench/              #   Step2 verification and measurement driver
 │   └── mesh_connectivity_benchmark.py
 └── Docs/                        # Extended documentation (see below)
 ```
