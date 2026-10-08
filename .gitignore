@@ -35,3 +35,6 @@ benchmarks/results*.tex
 
 ## BenchmarkDotNet run output
 BenchmarkDotNet.Artifacts/
+
+## Step2Bench measurement output
+benchmarks/Step2Bench/data/

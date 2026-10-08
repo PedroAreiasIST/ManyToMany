@@ -129,6 +129,26 @@ dotnet run -c Release --project benchmarks/Mm3Bdn -- --list flat       # list ca
 It is intentionally **not** part of `Numerical.sln` (so a solution build stays
 lean) and must be run in `Release` — BenchmarkDotNet refuses a debug build.
 
+## Incremental upkeep (`Step2Bench`, library `src/Incremental`)
+
+`src/Incremental/Step2.Core.csproj` (namespace `Step2`) keeps MM3 connectivity
+up to date under local edits instead of rebuilding it: versioned snapshots with
+commit/rollback, local and parallel edge cutting, and crack insertion whose cost
+is proportional to the crack front. `Step2Bench/` is its verification and
+measurement driver (the harness of the step2 paper).
+
+```bash
+dotnet build benchmarks/Step2Bench -c Release
+cd benchmarks/Step2Bench
+./run-maxperf.sh verify-work 6          # crack / bisection / erosion against the oracle
+./run-maxperf.sh verify-fuzz 3 2000 5 12345
+./run-maxperf.sh work crack 26 0 10 1   # a measurement mode (see Bench.cs for all)
+```
+
+Verification modes: `verify-work`, `verify-fuzz`, `verify-cut`, `verify-uncut`,
+`verify-crack`, `verify-cutpar`; measurement modes are listed in `Bench.Run`.
+Measurement output goes to `$STEP2_DATA` (default `./data`, git-ignored).
+
 ## CI
 
 `.github/workflows/connectivity-benchmark.yml` runs this on every push: it builds
