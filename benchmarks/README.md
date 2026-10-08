@@ -149,6 +149,13 @@ Verification modes: `verify-work`, `verify-fuzz`, `verify-cut`, `verify-uncut`,
 `verify-crack`, `verify-cutpar`; measurement modes are listed in `Bench.Run`.
 Measurement output goes to `$STEP2_DATA` (default `./data`, git-ignored).
 
+## Revised-paper tables (`Mm3Remeasure`)
+
+`Mm3Remeasure/` regenerates the MM3 numbers of Tables 10-14 of the revised ADES
+manuscript (construction, query throughput against the caption-exact Naive
+baseline with span vs API access, cache synchronization, canonicalization and
+the Table 14 framework rows). See its README for the table-to-command map.
+
 ## CI
 
 `.github/workflows/connectivity-benchmark.yml` runs this on every push: it builds

@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Re-measurement harness of the revised ADES Tables 10-14. Shared settings come
+       from the root Directory.Build.props; the measurement configuration below is
+       the one the tables were taken with (no tiering, no PGO, no R2R, server GC,
+       concurrent GC off). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <NoWarn>$(NoWarn);CA2252</NoWarn>
+    <Optimize>true</Optimize>
+    <TieredCompilation>false</TieredCompilation>
+    <TieredPGO>false</TieredPGO>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <AssemblyName>Mm3Remeasure</AssemblyName>
+    <RootNamespace>Mm3Remeasure</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Relations\Relations.csproj" />
+  </ItemGroup>
+
+</Project>
