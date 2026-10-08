@@ -24,6 +24,8 @@
 // edge, so its cost follows the advance of the crack, not the crack or the mesh. A
 // global scan is used for the first increment, or on request for verification.
 
+using Numerical;
+
 namespace Step2;
 
 public sealed class CrackStep
@@ -185,7 +187,7 @@ public sealed class CrackInserter : ICutObserver
             visited++;
             var row = _m.Row(g).ToArray();
             var active = false;
-            foreach (var en in Templates.EdgeNodes)
+            foreach (var en in SubdivisionTemplates.EdgeNodes)
             {
                 int a = Math.Min(row[en[0]], row[en[1]]), b = Math.Max(row[en[0]], row[en[1]]);
                 if (!CrackEdge(a, b, phiS, phiR, out var t)) continue;

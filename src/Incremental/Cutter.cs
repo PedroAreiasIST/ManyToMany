@@ -12,6 +12,8 @@
 // depends only on the row, the midpoint labels and their relative order, the cut
 // produces the same rows as the batch cutter applied to the whole mesh.
 
+using Numerical;
+
 namespace Step2;
 
 /// <summary>Callbacks for data that follow the cut (coordinates, fields, history).</summary>
@@ -255,20 +257,20 @@ public static partial class Cutter
         switch (row.Length)
         {
             case 2:
-                Templates.SplitBar(row[0], row[1], Lookup(mid, row[0], row[1]), children);
+                SubdivisionTemplates.SplitBar(row[0], row[1], Lookup(mid, row[0], row[1]), children);
                 break;
             case 3:
-                Templates.SplitTriangle(row[0], row[1], row[2], Lookup(mid, row[0], row[1]),
+                SubdivisionTemplates.SplitTriangle(row[0], row[1], row[2], Lookup(mid, row[0], row[1]),
                     Lookup(mid, row[1], row[2]), Lookup(mid, row[2], row[0]), children);
                 break;
             case 4:
                 for (var ie = 0; ie < 6; ie++)
                 {
-                    var x = Lookup(mid, row[Templates.EdgeNodes[ie][0]], row[Templates.EdgeNodes[ie][1]]);
+                    var x = Lookup(mid, row[SubdivisionTemplates.EdgeNodes[ie][0]], row[SubdivisionTemplates.EdgeNodes[ie][1]]);
                     mid6[ie] = x >= 0 ? x : 0;
                 }
 
-                Templates.SplitTet(row, mid6, children);
+                SubdivisionTemplates.SplitTet(row, mid6, children);
                 break;
             default:
                 throw new InvalidOperationException($"row of length {row.Length} cannot be split");

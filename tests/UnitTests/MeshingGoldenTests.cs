@@ -179,6 +179,27 @@ public class MeshingGoldenTests
         Assert.Equal("e2cb564b71cfde86", h.Hex);
     }
 
+    /// <summary>The sizing count of the templates equals the number of children they emit.</summary>
+    [Fact]
+    public void TetChildrenCountsMatchTheTemplates()
+    {
+        var rows = new List<int[]>();
+        Span<int> mid = stackalloc int[6];
+        for (var mask = 0; mask < 64; mask++)
+        {
+            var nmarked = 0;
+            for (var e = 0; e < 6; e++)
+            {
+                mid[e] = (mask & (1 << e)) != 0 ? 10 + e : 0;
+                if (mid[e] > 0) nmarked++;
+            }
+
+            rows.Clear();
+            SubdivisionTemplates.SplitTet([0, 1, 2, 3], mid, rows);
+            Assert.Equal(SubdivisionTemplates.TetChildren(nmarked, mid), rows.Count);
+        }
+    }
+
     /// <summary>Every marked-edge pattern of a triangle under every vertex relabelling.</summary>
     [Fact]
     public void RefineSingleTriangleAllPatternsMatchesGolden()

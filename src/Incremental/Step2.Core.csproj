@@ -3,9 +3,14 @@
   <!-- Step2.Core: incremental upkeep of MM3 connectivity under local mesh edits
        (versioned snapshots with commit/rollback, local and parallel edge cutting,
        crack insertion by node duplication). Shared settings come from the root
-       Directory.Build.props. -->
+       Directory.Build.props. The subdivision templates of the cutter are Meshing's
+       SubdivisionTemplates, shared with MeshRefinement. -->
   <PropertyGroup>
     <RootNamespace>Step2</RootNamespace>
   </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Meshing\Meshing.csproj" />
+  </ItemGroup>
 
 </Project>

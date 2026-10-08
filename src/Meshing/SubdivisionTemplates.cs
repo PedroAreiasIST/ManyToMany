@@ -1,16 +1,41 @@
-// Templates.cs — the Steiner-point-free subdivision templates of the edge cutter.
+// SubdivisionTemplates.cs
 //
-// Exact port of the case logic of remeshsimplex.f90 (splittetwork1, splittria31,
-// splitbar21) through its C# translation MeshRefinement.cs in the Numerical
-// repository; the only change is that children are emitted as rows into a list
-// instead of being appended to a mesh. Every decision is either the pattern of
-// marked edges (a midpoint label or the sentinel) or an order comparison of global
-// labels, Max(a, b) > Max(c, d) and mid1 > mid2: the subdivision of an element is a
-// function of its row, its midpoint labels and the relative order of these labels.
+// Copyright (C) 2026 Pedro Miguel de Almeida Areias
+//
+// This file is part of ManyToMany.
+//
+// ManyToMany is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// ManyToMany is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with ManyToMany. If not, see <https://www.gnu.org/licenses/>.
 
-namespace Step2;
+// The Steiner-point-free subdivision templates of edge refinement: the single C#
+// implementation of the case logic of remeshsimplex.f90 (splittetwork1, splittria31,
+// splitbar21), converted from 1-based to 0-based indexing. Used by MeshRefinement.Refine
+// (which appends the children to a SimplexMesh) and by the incremental edge cutter of
+// Step2.Core (which writes them into its own arrays); children are emitted as rows.
+//
+// Every decision is either the pattern of marked edges (a midpoint label or the
+// sentinel) or an order comparison of global labels, Max(a, b) > Max(c, d) and
+// mid1 > mid2: the subdivision of an element is a function of its row, its midpoint
+// labels and the relative order of these labels, so two elements sharing a face choose
+// the same diagonals and the refinement is conforming.
 
-public static class Templates
+namespace Numerical;
+
+/// <summary>
+///     Subdivision templates of bars, triangles and tetrahedra with marked edges
+///     (no Steiner points). Children are appended to an output list as node rows.
+/// </summary>
+public static class SubdivisionTemplates
 {
     // local edges of a tetrahedron (0-based), node -> incident edges, opposite-edge nodes
     public static readonly int[][] EdgeNodes =

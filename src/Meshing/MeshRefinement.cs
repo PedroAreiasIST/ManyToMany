@@ -17,8 +17,10 @@
 // You should have received a copy of the GNU General Public License
 // along with ManyToMany. If not, see <https://www.gnu.org/licenses/>.
 
-// Perfect 1-to-1 translation of Fortran remeshsimplex.f90 splittetwork1
-// Converted from 1-based to 0-based indexing
+// Edge refinement of simplex meshes, after Fortran remeshsimplex.f90: midpoint
+// creation, closure, point propagation (splitpoint1) and the per-element split.
+// The split itself (splitbar21, splittria31, splittetwork1) is SubdivisionTemplates,
+// the single implementation shared with the incremental edge cutter of Step2.Core.
 // License: GPLv3
 //
 // JACOBIAN CHECKING WORKFLOW:
@@ -48,36 +50,6 @@ namespace Numerical;
 
 public static class MeshRefinement
 {
-    #region Topology Arrays (Fortran lines 570-611, converted to 0-based)
-    
-    // Fortran: edgenodes(1:2, 1:6) -> C#: edgenodes[6][2]
-    // Edge i connects node edgenodes[i][0] to node edgenodes[i][1]
-    private static readonly int[][] edgenodes = new int[][]
-    {
-        new int[] {0, 1}, // Edge 0: nodes 0-1 (Fortran edge 1: nodes 1-2)
-        new int[] {1, 2}, // Edge 1: nodes 1-2 (Fortran edge 2: nodes 2-3)
-        new int[] {0, 2}, // Edge 2: nodes 0-2 (Fortran edge 3: nodes 1-3)
-        new int[] {2, 3}, // Edge 3: nodes 2-3 (Fortran edge 4: nodes 3-4)
-        new int[] {3, 0}, // Edge 4: nodes 3-0 (Fortran edge 5: nodes 4-1)
-        new int[] {1, 3}  // Edge 5: nodes 1-3 (Fortran edge 6: nodes 2-4)
-    };
-    
-    // Fortran: nodeedges(1:3, 1:4) -> C#: nodeedges[4][3]
-    // Node i connects to edges nodeedges[i][0], nodeedges[i][1], nodeedges[i][2]
-    private static readonly int[][] nodeedges = new int[][]
-    {
-        new int[] {0, 2, 4}, // Node 0: edges 0,2,4 (Fortran node 1: edges 1,3,5)
-        new int[] {0, 1, 5}, // Node 1: edges 0,1,5 (Fortran node 2: edges 1,2,6)
-        new int[] {1, 2, 3}, // Node 2: edges 1,2,3 (Fortran node 3: edges 2,3,4)
-        new int[] {3, 4, 5}  // Node 3: edges 3,4,5 (Fortran node 4: edges 4,5,6)
-    };
-    
-    // Fortran: prev(1:6), post(1:6) - opposing edge nodes (converted to 0-based)
-    private static readonly int[] prev = new int[] {2, 0, 3, 0, 2, 2}; // Fortran: {3,1,4,1,3,3}
-    private static readonly int[] post = new int[] {3, 3, 1, 1, 1, 0}; // Fortran: {4,4,2,2,2,1}
-    
-    #endregion
-    
     #region Main Refine Function
     
     public static (SimplexMesh, int[]) Refine(SimplexMesh input, IReadOnlyList<(int, int)> markedEdges,
@@ -241,24 +213,18 @@ public static class MeshRefinement
         if (inputBarCount > 0)
         {
             int barsCopied = 0, barsSplit = 0;
+            var barRows = new List<int[]>(2);
             for (int iel = 0; iel < inputBarCount; iel++)
             {
                 var bnodes = input.NodesOf<Bar2, Node>(iel);
                 int midNode = GetMidpoint(midpointMap, bnodes[0], bnodes[1]);
+                if (midNode < 0) barsCopied++;
+                else barsSplit++;
                 
-                if (midNode < 0)
-                {
-                    // Edge not marked — copy unchanged
-                    AddBar(output, iel, nodeRemap[bnodes[0]], nodeRemap[bnodes[1]]);
-                    barsCopied++;
-                }
-                else
-                {
-                    // Edge marked — split into two bars
-                    AddBar(output, iel, nodeRemap[bnodes[0]], midNode);
-                    AddBar(output, iel, midNode, nodeRemap[bnodes[1]]);
-                    barsSplit++;
-                }
+                // Copied when the edge is not marked, split in two otherwise (SubdivisionTemplates)
+                barRows.Clear();
+                SubdivisionTemplates.SplitBar(nodeRemap[bnodes[0]], nodeRemap[bnodes[1]], midNode, barRows);
+                foreach (var r in barRows) AddBar(output, iel, r[0], r[1]);
             }
             Console.WriteLine($"  → Bars: {barsCopied} copied + {barsSplit} split (×2) = {output.Count<Bar2>()} total");
         }
@@ -266,11 +232,12 @@ public static class MeshRefinement
         // ═══════════════════════════════════════════════════════════════════
         // Refine Tri3 elements (Fortran: splittria30/splittria31)
         // ═══════════════════════════════════════════════════════════════════
+        var children = new List<int[]>(8); // rows emitted by a template for one parent element
         int triRefinedCount = 0;
         for (var i = 0; i < input.Count<Tri3>(); i++)
         {
             var nodes = input.NodesOf<Tri3, Node>(i);
-            var v = new int[] { nodeRemap[nodes[0]], nodeRemap[nodes[1]], nodeRemap[nodes[2]] };
+            int v0 = nodeRemap[nodes[0]], v1 = nodeRemap[nodes[1]], v2 = nodeRemap[nodes[2]];
             
             // Look up midpoints using INPUT indices (midpointMap keys are input indices)
             var m01 = GetMidpoint(midpointMap, nodes[0], nodes[1]);
@@ -280,7 +247,10 @@ public static class MeshRefinement
             if (!(m01 < 0 && m12 < 0 && m20 < 0))
                 triRefinedCount++;
             
-            SplitTriangle(output, i, v[0], v[1], v[2], m01, m12, m20);
+            // Fortran splittria30/splittria31 (SubdivisionTemplates)
+            children.Clear();
+            SubdivisionTemplates.SplitTriangle(v0, v1, v2, m01, m12, m20, children);
+            AddTris(output, i, children);
         }
         Console.WriteLine($"  → Triangles: {triRefinedCount} refined out of {input.Count<Tri3>()} → {output.Count<Tri3>()} total");
 
@@ -288,19 +258,20 @@ public static class MeshRefinement
         // Refine Tet4 elements (Fortran: splittetra40/splittetra41)
         // ═══════════════════════════════════════════════════════════════════
         int tetCount = input.Count<Tet4>();
+        Span<int> globalNodes = stackalloc int[4];
+        Span<int> midnodes = stackalloc int[6]; // midpoint label of local edge e, 0 when not marked
         
         for (var i = 0; i < tetCount; i++)
         {
             var nodes = input.NodesOf<Tet4, Node>(i);
-            var globalNodes = new int[] { nodeRemap[nodes[0]], nodeRemap[nodes[1]], nodeRemap[nodes[2]], nodeRemap[nodes[3]] };
+            for (int k = 0; k < 4; k++) globalNodes[k] = nodeRemap[nodes[k]];
             
-            // Build midnodes array (0 means no midpoint, >0 means midpoint node index)
-            var midnodes = new int[6];
             int nmarked = 0;
             for (int e = 0; e < 6; e++)
             {
                 // Look up using INPUT mesh indices
-                int mid = GetMidpoint(midpointMap, nodes[edgenodes[e][0]], nodes[edgenodes[e][1]]);
+                var en = SubdivisionTemplates.EdgeNodes[e];
+                int mid = GetMidpoint(midpointMap, nodes[en[0]], nodes[en[1]]);
                 midnodes[e] = (mid >= 0) ? mid : 0;
                 if (mid >= 0) nmarked++;
                 else missingMidpoints++;
@@ -309,8 +280,10 @@ public static class MeshRefinement
             // Track case distribution
             caseCounts[nmarked]++;
             
-            // Call exact Fortran splittetwork1 translation
-            SplitTetWork1(globalNodes, midnodes, output, i);
+            // Fortran splittetwork1 (SubdivisionTemplates)
+            children.Clear();
+            SubdivisionTemplates.SplitTet(globalNodes, midnodes, children);
+            AddTets(output, i, children);
         }
         
         }); // end WithBatch
@@ -516,570 +489,6 @@ public static class MeshRefinement
     
     #endregion
     
-    #region Exact Fortran splittetwork1 Translation (lines 612-939)
-    
-    /// <summary>
-    /// EXACT translation of Fortran splittetwork1 (lines 612-939)
-    /// All logic preserved, only converted from 1-based to 0-based indexing
-    /// </summary>
-    private static void SplitTetWork1(int[] nodes, int[] midnodes, SimplexMesh output, int origIdx)
-    {
-        // Line 612-619: identify the marked edges
-        int nmarked = 0;
-        var marked = new int[6];
-        for (int i = 0; i < 6; i++)
-        {
-            if (midnodes[i] > 0)
-            {
-                marked[nmarked] = i;
-                nmarked++;
-            }
-        }
-
-        // Line 620-632: determine the number of marked edges per node and record the edges
-        var imarks = new int[5]; // imarks(1:5) in Fortran
-        var jmarks = new int[12]; // jmarks(1:12) in Fortran
-        imarks[0] = 0; // Fortran: imarks(1) = 1, converted to 0-based
-        
-        for (int i = 0; i < 4; i++)
-        {
-            imarks[i + 1] = imarks[i];
-            for (int j = 0; j < 3; j++)
-            {
-                int ie = nodeedges[i][j]; // Fortran: nodeedges(j+1, i+1)
-                if (midnodes[ie] > 0)
-                {
-                    jmarks[imarks[i + 1]] = ie;
-                    imarks[i + 1]++;
-                }
-            }
-        }
-
-        // Line 633-939: split the tetrahedron based on the number of marked edges
-        switch (nmarked)
-        {
-            case 0:
-                // Case #1: no marked edges (line 635-638)
-                AddTet(output, origIdx, nodes[0], nodes[1], nodes[2], nodes[3]);
-                break;
-
-            case 1:
-                // Case #2: one marked edge (lines 639-656)
-                Case1Edge(nodes, midnodes, marked, output, origIdx);
-                break;
-
-            case 2:
-                // Cases #3 and #4: two marked edges (lines 657-755)
-                Case2Edges(nodes, midnodes, marked, imarks, jmarks, output, origIdx);
-                break;
-
-            case 3:
-                // Cases #5, #6, #7: three marked edges (lines 756-816)
-                Case3Edges(nodes, midnodes, marked, imarks, jmarks, output, origIdx);
-                break;
-
-            case 4:
-                // Cases #8, #9: four marked edges (lines 817-885)
-                Case4Edges(nodes, midnodes, imarks, output, origIdx);
-                break;
-
-            case 5:
-                // Case #10: five marked edges (lines 886-917)
-                Case5Edges(nodes, midnodes, output, origIdx);
-                break;
-
-            case 6:
-                // Case #11: all edges marked (lines 918-938)
-                Case6Edges(nodes, midnodes, output, origIdx);
-                break;
-        }
-    }
-    
-    #endregion
-    
-    #region Case Implementations (Exact Fortran Translation)
-    
-    // Case #2: one marked edge (Fortran lines 639-656)
-    private static void Case1Edge(int[] nodes, int[] midnodes, int[] marked, SimplexMesh output, int origIdx)
-    {
-        int n1 = edgenodes[marked[0]][0];
-        int n2 = edgenodes[marked[0]][1];
-        
-        // Find opposing nodes
-        var (n3, n4) = NodesfFrom2Nodes(n1, n2);
-        
-        // Convert to global indices
-        n1 = nodes[n1];
-        n2 = nodes[n2];
-        n3 = nodes[n3];
-        n4 = nodes[n4];
-        int n5 = midnodes[marked[0]];
-        
-        if (n5 == 0)
-            throw new InvalidOperationException($"Case1Edge: marked edge {marked[0]} has no midpoint");
-        
-        // Build two new tetrahedra (Fortran lines 654-656)
-        AddTet(output, origIdx, n3, n4, n5, n2);
-        AddTet(output, origIdx, n4, n3, n5, n1);
-    }
-    
-    // Cases #3 and #4: two marked edges (Fortran lines 657-755)
-    private static void Case2Edges(int[] nodes, int[] midnodes, int[] marked, int[] imarks, int[] jmarks, SimplexMesh output, int origIdx)
-    {
-        // Find maximum number of marked edges connected to any node
-        int mm = 0;
-        for (int i = 0; i < 4; i++)
-            mm = Math.Max(mm, imarks[i + 1] - imarks[i]);
-
-        if (mm == 2)
-        {
-            // Case #3: one node with 2 marked edges (Fortran lines 664-693)
-            int n3 = -1, n4 = -1;
-            for (int i = 0; i < 4; i++)
-            {
-                if (imarks[i + 1] - imarks[i] == 0) n3 = i;
-                if (imarks[i + 1] - imarks[i] == 2) n4 = i;
-            }
-
-            // Fortran line 680: CALL nodesfrom2nodes(edgenodes, post, prev, n1, n3, n4, n2)
-            var (n1, n2) = NodesfFrom2Nodes(n3, n4);
-            
-            // Fortran lines 683-684 - get midpoint nodes
-            int n5 = SplitNode(n2, n4, midnodes);  // Fortran: splitnode(n2, n4, ...)
-            int n6 = SplitNode(n1, n4, midnodes);  // Fortran: splitnode(n1, n4, ...)
-            
-            // Fortran lines 685-688 - convert to global indices
-            n1 = nodes[n1];
-            n2 = nodes[n2];
-            n3 = nodes[n3];
-            n4 = nodes[n4];
-            
-            // Fortran lines 691-692 - build 3 tets
-            var pyrTets = SplitPyramidIntoTets(n1, n2, n5, n6, n3);  // Fortran: splitpyramidintotets(n1, n2, n5, n6, n3, ...)
-            foreach (var tet in pyrTets)
-                AddTet(output, origIdx, tet[0], tet[1], tet[2], tet[3]);
-            AddTet(output, origIdx, n6, n5, n3, n4);  // Fortran: splitetintoitself(n6, n5, n3, n4, ...)
-        }
-        else
-        {
-            // Case #4: each node has 1 marked edge (Fortran lines 694-714)
-            int ie1 = marked[0];  // Fortran: marked(1) - first marked edge
-            int n1 = edgenodes[ie1][0];
-            int n2 = edgenodes[ie1][1];
-            
-            // Fortran line 700: CALL nodesfrom2nodes(edgenodes, post, prev, n3, n1, n2, n4)
-            var (n3, n4) = NodesfFrom2Nodes(n1, n2);
-            
-            // Fortran lines 702-703 - get midpoint nodes
-            int n5 = SplitNode(n1, n2, midnodes);  // Fortran: splitnode(n1, n2, ...)
-            int n6 = SplitNode(n3, n4, midnodes);  // Fortran: splitnode(n3, n4, ...)
-            
-            // Fortran lines 705-708 - convert to global indices
-            n1 = nodes[n1];
-            n2 = nodes[n2];
-            n3 = nodes[n3];
-            n4 = nodes[n4];
-            
-            // Fortran lines 711-714 - build 4 tets
-            AddTet(output, origIdx, n2, n3, n5, n6);  // Fortran: splitetintoitself(n2, n3, n5, n6, ...)
-            AddTet(output, origIdx, n2, n6, n5, n4);  // Fortran: splitetintoitself(n2, n6, n5, n4, ...)
-            AddTet(output, origIdx, n1, n5, n6, n4);  // Fortran: splitetintoitself(n1, n5, n6, n4, ...)
-            AddTet(output, origIdx, n1, n5, n3, n6);  // Fortran: splitetintoitself(n1, n5, n3, n6, ...)
-        }
-    }
-    
-    // Cases #5, #6, #7: three marked edges (Fortran lines 716-816)
-    private static void Case3Edges(int[] nodes, int[] midnodes, int[] marked, int[] imarks, int[] jmarks, SimplexMesh output, int origIdx)
-    {
-        // Fortran lines 719-727: identify n3 (0 marks) and n4 (3 marks)
-        int n3 = -1, n4 = -1;
-        for (int i = 0; i < 4; i++)
-        {
-            if (imarks[i + 1] - imarks[i] == 3) n4 = i;
-            if (imarks[i + 1] - imarks[i] == 0) n3 = i;
-        }
-
-        if (n4 >= 0)
-        {
-            // Case #6: one node with 3 marked edges (Fortran lines 728-744)
-            int n1 = (n4 + 1) % 4;
-            int n2;
-            (n2, n3) = NodesfFrom2Nodes(n1, n4);  // Fortran line 731: OVERWRITES n3
-            
-            int n5 = SplitNode(n3, n4, midnodes);
-            int n6 = SplitNode(n1, n4, midnodes);
-            int n7 = SplitNode(n2, n4, midnodes);
-            
-            n1 = nodes[n1];
-            n2 = nodes[n2];
-            n3 = nodes[n3];
-            n4 = nodes[n4];
-            
-            AddTet(output, origIdx, n4, n7, n6, n5);
-            var prismTets = SplitPrismIntoTets(n2, n7, n6, n1, n3, n5);
-            foreach (var tet in prismTets)
-                AddTet(output, origIdx, tet[0], tet[1], tet[2], tet[3]);
-        }
-        else if (n3 >= 0)
-        {
-            // Case #5: one node with 0 marked edges (Fortran lines 745-763)
-            int n4_local = (n3 + 1) % 4;
-            int n1, n2;
-            (n1, n2) = NodesfFrom2Nodes(n3, n4_local);
-            
-            int n5 = SplitNode(n1, n4_local, midnodes);
-            int n6 = SplitNode(n1, n2, midnodes);
-            int n7 = SplitNode(n2, n4_local, midnodes);
-            
-            n1 = nodes[n1];
-            n2 = nodes[n2];
-            n3 = nodes[n3];
-            n4_local = nodes[n4_local];
-            
-            AddTet(output, origIdx, n1, n6, n3, n5);
-            AddTet(output, origIdx, n2, n3, n6, n7);
-            AddTet(output, origIdx, n6, n3, n5, n7);
-            AddTet(output, origIdx, n5, n7, n3, n4_local);
-        }
-        else
-        {
-            // Case #7: complex case (Fortran lines 764-815)
-            int n1 = -1, n2 = -1;
-            n3 = -1;
-            n4 = -1;
-            
-            for (int i = 0; i < 4; i++)
-            {
-                if (imarks[i + 1] - imarks[i] == 1)
-                {
-                    int ie = jmarks[imarks[i]];
-                    if (n1 < 0)
-                    {
-                        n1 = i;
-                        if (edgenodes[ie][0] == n1)
-                            n4 = edgenodes[ie][1];
-                        else
-                            n4 = edgenodes[ie][0];
-                    }
-                    else
-                    {
-                        n2 = i;
-                        if (edgenodes[ie][0] == n2)
-                            n3 = edgenodes[ie][1];
-                        else
-                            n3 = edgenodes[ie][0];
-                    }
-                }
-            }
-            
-            if (n1 < 0 || n2 < 0) return;  // Safety
-            
-            int n5 = SplitNode(n1, n4, midnodes);
-            int n6 = SplitNode(n2, n3, midnodes);
-            int n7 = SplitNode(n3, n4, midnodes);
-            
-            n1 = nodes[n1];
-            n2 = nodes[n2];
-            n3 = nodes[n3];
-            n4 = nodes[n4];
-            
-            var pyr1 = SplitPyramidIntoTets(n6, n7, n4, n2, n5);
-            foreach (var tet in pyr1)
-                AddTet(output, origIdx, tet[0], tet[1], tet[2], tet[3]);
-                
-            var pyr2 = SplitPyramidIntoTets(n3, n1, n5, n7, n6);
-            foreach (var tet in pyr2)
-                AddTet(output, origIdx, tet[0], tet[1], tet[2], tet[3]);
-                
-            AddTet(output, origIdx, n1, n2, n6, n5);
-        }
-    }
-    
-    // Cases #8, #9: four marked edges (Fortran lines 817-885)
-    private static void Case4Edges(int[] nodes, int[] midnodes, int[] imarks, SimplexMesh output, int origIdx)
-    {
-        int mm = 0;
-        for (int i = 0; i < 4; i++)
-            mm = Math.Max(mm, imarks[i + 1] - imarks[i]);
-
-        if (mm == 3)
-        {
-            // Case #8: one node with 3 marked edges (lines 824-855)
-            int n3 = -1, n4 = -1;
-            for (int i = 0; i < 4; i++)
-            {
-                if (imarks[i + 1] - imarks[i] == 1) n3 = i;
-                if (imarks[i + 1] - imarks[i] == 3) n4 = i;
-            }
-
-            var (n1, n2) = NodesfFrom2Nodes(n3, n4);
-            
-            int n5 = SplitNode(n1, n2, midnodes);
-            int n6 = SplitNode(n2, n4, midnodes);
-            int n7 = SplitNode(n3, n4, midnodes);
-            int n8 = SplitNode(n1, n4, midnodes);
-            
-            n1 = nodes[n1];
-            n2 = nodes[n2];
-            n3 = nodes[n3];
-            n4 = nodes[n4];
-            
-            AddTet(output, origIdx, n8, n6, n7, n4);
-            AddTet(output, origIdx, n7, n8, n5, n6);
-            
-            var pyr1 = SplitPyramidIntoTets(n2, n3, n7, n6, n5);
-            foreach (var tet in pyr1)
-                AddTet(output, origIdx, tet[0], tet[1], tet[2], tet[3]);
-                
-            var pyr2 = SplitPyramidIntoTets(n1, n8, n7, n3, n5);
-            foreach (var tet in pyr2)
-                AddTet(output, origIdx, tet[0], tet[1], tet[2], tet[3]);
-        }
-        else
-        {
-            // Case #9: quadrilateral (one unmarked edge) (lines 857-884)
-            int ie = -1;
-            for (int i = 0; i < 6; i++)
-            {
-                if (midnodes[i] == 0)
-                {
-                    ie = i;
-                    break;
-                }
-            }
-
-            int n1 = edgenodes[ie][0];
-            int n2 = edgenodes[ie][1];
-            var (n3, n4) = NodesfFrom2Nodes(n1, n2);
-            
-            int n5 = SplitNode(n1, n4, midnodes);
-            int n6 = SplitNode(n1, n3, midnodes);
-            int n7 = SplitNode(n2, n3, midnodes);
-            int n8 = SplitNode(n2, n4, midnodes);
-            
-            n1 = nodes[n1];
-            n2 = nodes[n2];
-            n3 = nodes[n3];
-            n4 = nodes[n4];
-            
-            var prism1 = SplitPrismIntoTets(n8, n7, n3, n4, n5, n6);
-            foreach (var tet in prism1)
-                AddTet(output, origIdx, tet[0], tet[1], tet[2], tet[3]);
-                
-            var prism2 = SplitPrismIntoTets(n1, n2, n8, n5, n6, n7);
-            foreach (var tet in prism2)
-                AddTet(output, origIdx, tet[0], tet[1], tet[2], tet[3]);
-        }
-    }
-    
-    // Case #10: five marked edges (Fortran lines 886-917)
-    private static void Case5Edges(int[] nodes, int[] midnodes, SimplexMesh output, int origIdx)
-    {
-        int ie = -1;
-        for (int i = 0; i < 6; i++)
-        {
-            if (midnodes[i] == 0)
-            {
-                ie = i;
-                break;
-            }
-        }
-
-        int n1 = edgenodes[ie][0];
-        int n2 = edgenodes[ie][1];
-        var (n3, n4) = NodesfFrom2Nodes(n1, n2);
-        
-        int n5 = SplitNode(n1, n4, midnodes);
-        int n6 = SplitNode(n1, n3, midnodes);
-        int n7 = SplitNode(n2, n3, midnodes);
-        int n8 = SplitNode(n3, n4, midnodes);
-        int n9 = SplitNode(n2, n4, midnodes);
-        
-        n1 = nodes[n1];
-        n2 = nodes[n2];
-        n3 = nodes[n3];
-        n4 = nodes[n4];
-        
-        AddTet(output, origIdx, n9, n8, n5, n4);
-        AddTet(output, origIdx, n3, n6, n7, n8);
-        
-        var pyr = SplitPyramidIntoTets(n6, n7, n9, n5, n8);
-        foreach (var tet in pyr)
-            AddTet(output, origIdx, tet[0], tet[1], tet[2], tet[3]);
-            
-        var prism = SplitPrismIntoTets(n1, n2, n9, n5, n6, n7);
-        foreach (var tet in prism)
-            AddTet(output, origIdx, tet[0], tet[1], tet[2], tet[3]);
-    }
-    
-    // Case #11: all edges marked (octahedron) (Fortran lines 918-938)
-    private static void Case6Edges(int[] nodes, int[] midnodes, SimplexMesh output, int origIdx)
-    {
-        int n5 = SplitNode(0, 3, midnodes);
-        int n6 = SplitNode(1, 3, midnodes);
-        int n7 = SplitNode(2, 3, midnodes);
-        int n8 = SplitNode(0, 2, midnodes);
-        int n9 = SplitNode(0, 1, midnodes);
-        int n10 = SplitNode(1, 2, midnodes);
-        
-        int n1 = nodes[0];
-        int n2 = nodes[1];
-        int n3 = nodes[2];
-        int n4 = nodes[3];
-        
-        AddTet(output, origIdx, n1, n9, n8, n5);
-        AddTet(output, origIdx, n2, n10, n9, n6);
-        AddTet(output, origIdx, n3, n8, n10, n7);
-        AddTet(output, origIdx, n5, n6, n7, n4);
-        
-        var octa = SplitOctoIntoTets(n8, n6, n7, n5, n9, n10);
-        foreach (var tet in octa)
-            AddTet(output, origIdx, tet[0], tet[1], tet[2], tet[3]);
-    }
-    
-    #endregion
-    
-    #region Helper Functions (Fortran translations)
-    
-    // Fortran: nodesfrom2nodes (lines 1419-1435)
-    private static (int, int) NodesfFrom2Nodes(int i2, int i3)
-    {
-        if (i2 == i3)
-            throw new InvalidOperationException($"NodesfFrom2Nodes({i2},{i3}): cannot find edge from node to itself");
-            
-        // Find edge containing nodes i2 and i3
-        for (int ie = 0; ie < 6; ie++)
-        {
-            if ((edgenodes[ie][0] == i2 && edgenodes[ie][1] == i3))
-                return (prev[ie], post[ie]);
-            if ((edgenodes[ie][0] == i3 && edgenodes[ie][1] == i2))
-                return (post[ie], prev[ie]);
-        }
-        
-        throw new InvalidOperationException($"NodesfFrom2Nodes({i2},{i3}): edge not found in topology");
-    }
-    
-    // Fortran: splitnode (finds midpoint node for edge)
-    private static int SplitNode(int n1, int n2, int[] midnodes)
-    {
-        for (int ie = 0; ie < 6; ie++)
-        {
-            if ((edgenodes[ie][0] == n1 && edgenodes[ie][1] == n2) ||
-                (edgenodes[ie][0] == n2 && edgenodes[ie][1] == n1))
-            {
-                if (midnodes[ie] == 0)
-                {
-                    throw new InvalidOperationException($"SplitNode({n1},{n2}): edge {ie} found but has no midpoint (midnodes[{ie}]=0)");
-                }
-                return midnodes[ie];
-            }
-        }
-        throw new InvalidOperationException($"SplitNode({n1},{n2}): edge not found in edgenodes");
-    }
-    
-    // Fortran: splitpyramidintotets (lines 1130-1145)
-    private static List<int[]> SplitPyramidIntoTets(int i1, int i2, int i3, int i4, int i5)
-    {
-        var result = new List<int[]>();
-        bool swap13 = Math.Max(i1, i3) > Math.Max(i2, i4);
-        
-        if (swap13)
-        {
-            result.Add(new int[] { i1, i2, i5, i3 });
-            result.Add(new int[] { i1, i5, i4, i3 });
-        }
-        else
-        {
-            result.Add(new int[] { i1, i2, i5, i4 });
-            result.Add(new int[] { i2, i3, i5, i4 });
-        }
-        
-        return result;
-    }
-    
-    // Fortran: splitprismintotets (lines 982-1038)
-    // Fortran: splitprismintotets (remeshsimplex.f90 lines 961-1000)
-    private static List<int[]> SplitPrismIntoTets(int i1, int i2, int i3, int i4, int i5, int i6)
-    {
-        var result = new List<int[]>(3);
-        bool swap46 = Math.Max(i4, i6) > Math.Max(i3, i5);
-        bool swap13 = Math.Max(i1, i3) > Math.Max(i2, i4);
-        bool swap16 = Math.Max(i1, i6) > Math.Max(i2, i5);
-        
-        if (swap46)
-        {
-            if (swap13)
-            {
-                result.Add(new[] { i1, i2, i6, i3 });
-                result.Add(new[] { i1, i6, i4, i3 });
-                result.Add(new[] { i1, i6, i5, i4 });
-            }
-            else if (swap16)
-            {
-                result.Add(new[] { i1, i2, i6, i4 });
-                result.Add(new[] { i1, i6, i5, i4 });
-                result.Add(new[] { i2, i6, i4, i3 });
-            }
-            else
-            {
-                result.Add(new[] { i1, i2, i5, i4 });
-                result.Add(new[] { i2, i3, i6, i4 });
-                result.Add(new[] { i2, i6, i5, i4 });
-            }
-        }
-        else
-        {
-            if (swap13)
-            {
-                if (swap16)
-                {
-                    result.Add(new[] { i1, i2, i6, i3 });
-                    result.Add(new[] { i1, i3, i5, i4 });
-                    result.Add(new[] { i1, i6, i5, i3 });
-                }
-                else
-                {
-                    result.Add(new[] { i1, i3, i5, i4 });
-                    result.Add(new[] { i2, i5, i1, i3 });
-                    result.Add(new[] { i2, i6, i5, i3 });
-                }
-            }
-            else
-            {
-                result.Add(new[] { i1, i2, i5, i4 });
-                result.Add(new[] { i2, i3, i5, i4 });
-                result.Add(new[] { i2, i6, i5, i3 });
-            }
-        }
-        
-        return result;
-    }
-    
-    // Fortran: splitoctointotets (lines 958-977)
-    private static List<int[]> SplitOctoIntoTets(int i1, int i2, int i3, int i4, int i5, int i6)
-    {
-        var result = new List<int[]>();
-        bool swap3546 = Math.Max(i3, i5) > Math.Max(i4, i6);
-        
-        if (swap3546)
-        {
-            result.Add(new int[] { i1, i3, i4, i5 });
-            result.Add(new int[] { i1, i3, i5, i6 });
-            result.Add(new int[] { i3, i4, i5, i2 });
-            result.Add(new int[] { i3, i5, i6, i2 });
-        }
-        else
-        {
-            result.Add(new int[] { i1, i4, i6, i3 });
-            result.Add(new int[] { i1, i6, i4, i5 });
-            result.Add(new int[] { i2, i4, i6, i5 });
-            result.Add(new int[] { i2, i6, i4, i3 });
-        }
-        
-        return result;
-    }
-    
-    #endregion
     
     #region Element Creation Helpers (with OriginalElement tracking)
     
@@ -1099,104 +508,30 @@ public static class MeshRefinement
         mesh.Set<Bar2, OriginalElement>(idx, new OriginalElement(origIdx));
     }
     
-    /// <summary>Adds a Tri3 element and sets its OriginalElement to the parent triangle index.</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void AddTri(SimplexMesh mesh, int origIdx, int n0, int n1, int n2)
+    /// <summary>Appends the triangle rows emitted by a template, each tagged with its parent triangle.</summary>
+    private static void AddTris(SimplexMesh mesh, int origIdx, List<int[]> rows)
     {
-        var idx = mesh.Add<Tri3, Node>(n0, n1, n2);
-        mesh.Set<Tri3, OriginalElement>(idx, new OriginalElement(origIdx));
+        foreach (var r in rows)
+        {
+            var idx = mesh.Add<Tri3, Node>(r[0], r[1], r[2]);
+            mesh.Set<Tri3, OriginalElement>(idx, new OriginalElement(origIdx));
+        }
     }
     
-    /// <summary>Adds a Tet4 element and sets its OriginalElement to the parent tetrahedron index.</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void AddTet(SimplexMesh mesh, int origIdx, int n0, int n1, int n2, int n3)
+    /// <summary>Appends the tetrahedron rows emitted by a template, each tagged with its parent tetrahedron.</summary>
+    private static void AddTets(SimplexMesh mesh, int origIdx, List<int[]> rows)
     {
-        var idx = mesh.Add<Tet4, Node>(n0, n1, n2, n3);
-        mesh.Set<Tet4, OriginalElement>(idx, new OriginalElement(origIdx));
+        foreach (var r in rows)
+        {
+            var idx = mesh.Add<Tet4, Node>(r[0], r[1], r[2], r[3]);
+            mesh.Set<Tet4, OriginalElement>(idx, new OriginalElement(origIdx));
+        }
     }
     
     #endregion
     
-    #region Triangle Splitting and Utilities
+    #region Closure and Midpoint Utilities
     
-    private static void SplitTriangle(SimplexMesh mesh, int origIdx, int v0, int v1, int v2, int m01, int m12, int m20)
-    {
-        // CASE 0: no marked edges — retain original triangle
-        if (m01 < 0 && m12 < 0 && m20 < 0)
-            AddTri(mesh, origIdx, v0, v1, v2);
-        
-        // CASE 1 (×3): one marked edge — split into 2 triangles
-        // Fortran splittria31 CASE(1): (start, mid, opposite), (mid, end, opposite)
-        else if (m01 >= 0 && m12 < 0 && m20 < 0)
-        {
-            AddTri(mesh, origIdx, v0, m01, v2);
-            AddTri(mesh, origIdx, m01, v1, v2);
-        }
-        else if (m01 < 0 && m12 >= 0 && m20 < 0)
-        {
-            AddTri(mesh, origIdx, v1, m12, v0);
-            AddTri(mesh, origIdx, m12, v2, v0);
-        }
-        else if (m01 < 0 && m12 < 0 && m20 >= 0)
-        {
-            AddTri(mesh, origIdx, v2, m20, v1);
-            AddTri(mesh, origIdx, m20, v0, v1);
-        }
-        
-        // CASE 2 (×3): two marked edges — split into 3 triangles
-        // Fortran splittria31 CASE(2): diagonal heuristic based on midpoint node indices
-        // SplitTri2Edges(nn1, mid1, nnMeet, mid2, nn5) where nnMeet is where both marked edges meet
-        else if (m01 >= 0 && m12 >= 0 && m20 < 0)
-            SplitTri2Edges(mesh, origIdx, v0, m01, v1, m12, v2);
-        else if (m01 >= 0 && m12 < 0 && m20 >= 0)
-            SplitTri2Edges(mesh, origIdx, v2, m20, v0, m01, v1);
-        else if (m01 < 0 && m12 >= 0 && m20 >= 0)
-            SplitTri2Edges(mesh, origIdx, v1, m12, v2, m20, v0);
-        
-        // CASE 3: three marked edges — split into 4 triangles
-        // Fortran splittria31 CASE(3): standard red refinement
-        else if (m01 >= 0 && m12 >= 0 && m20 >= 0)
-        {
-            AddTri(mesh, origIdx, v0, m01, m20);
-            AddTri(mesh, origIdx, m01, v1, m12);
-            AddTri(mesh, origIdx, m12, v2, m20);
-            AddTri(mesh, origIdx, m01, m12, m20);
-        }
-    }
-    
-    /// <summary>
-    /// Fortran splittria31 CASE(2): two marked edges meeting at a common node.
-    /// The quadrilateral formed by (nn1, mid1, mid2, nn5) is split along a diagonal
-    /// chosen by comparing midpoint node indices, ensuring conforming diagonals
-    /// across elements sharing the same edge.
-    /// </summary>
-    /// <param name="nn1">First vertex (node at start of first marked edge)</param>
-    /// <param name="mid1">Midpoint of first marked edge (between nn1 and nnMeet)</param>
-    /// <param name="nnMeet">Common vertex where both marked edges meet</param>
-    /// <param name="mid2">Midpoint of second marked edge (between nnMeet and nn5)</param>
-    /// <param name="nn5">Opposite vertex (node at end of second marked edge)</param>
-    private static void SplitTri2Edges(SimplexMesh mesh, int origIdx,
-        int nn1, int mid1, int nnMeet, int mid2, int nn5)
-    {
-        // Corner triangle at the meeting point — always the same
-        AddTri(mesh, origIdx, mid1, nnMeet, mid2);
-        
-        // Diagonal choice for quad (nn1, mid1, mid2, nn5)
-        // Fortran: IF (newnode2 > newnode4)
-        if (mid1 > mid2)
-        {
-            // Diagonal mid1—nn5
-            AddTri(mesh, origIdx, nn1, mid1, nn5);
-            AddTri(mesh, origIdx, mid1, mid2, nn5);
-        }
-        else
-        {
-            // Diagonal nn1—mid2
-            AddTri(mesh, origIdx, nn1, mid1, mid2);
-            AddTri(mesh, origIdx, nn1, mid2, nn5);
-        }
-    }
-
     private static void ComputeTetEdgeClosureFull(SimplexMesh mesh, HashSet<(int, int)> edgesToRefine, bool validateTopology)
     {
         var edgesToAdd = new HashSet<(int, int)>();

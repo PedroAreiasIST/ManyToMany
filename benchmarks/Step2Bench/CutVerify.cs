@@ -245,7 +245,7 @@ public static class CutVerify
                 var row = m.Row(e);
                 if (row.Length != 4) continue;
                 var c = 0;
-                foreach (var en in Templates.EdgeNodes)
+                foreach (var en in SubdivisionTemplates.EdgeNodes)
                     if (markSet.Contains(Cutter.Key(row[en[0]], row[en[1]])))
                         c++;
                 caseCount[c]++;
