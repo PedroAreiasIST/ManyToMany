@@ -1,13 +1,31 @@
 // PArray.cs — persistent chunked arrays with epoch-tagged copy-on-write.
 //
+// Copyright (C) 2026 Pedro Miguel de Almeida Areias
+//
+// This file is part of ManyToMany.
+//
+// ManyToMany is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// ManyToMany is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with ManyToMany. If not, see <https://www.gnu.org/licenses/>.
+//
+//
 // A PArray<T> is a two-level structure: a directory of chunk references and
 // fixed-size chunks of 2^shift entries. Every chunk, and the directory itself,
 // carries an owner tag. The writer works in the current epoch: an object whose
 // tag equals the epoch belongs to the working version and is written in place;
-// any other tag means the object is shared with a published version and is
-// copied before the first write (path copying, depth two). Publishing a version
+// any other tag means the object is shared with a committed version and is
+// copied before the first write (path copying, depth two). Committing a version
 // captures the directory references (a View) and advances the epoch, so the
-// published arrays are never written again. Reclamation of versions nobody holds
+// committed arrays are never written again. Reclamation of versions nobody holds
 // is left to the garbage collector.
 
 using System.Runtime.CompilerServices;
@@ -30,7 +48,7 @@ public sealed class Epoch
     public volatile bool Concurrent;
 }
 
-/// <summary>Immutable view of a <see cref="PArray{T}"/> as published in a version.</summary>
+/// <summary>Immutable view of a <see cref="PArray{T}"/> as committed in a version.</summary>
 public readonly struct PView<T>
 {
     internal readonly T[][] Chunks;
@@ -75,7 +93,7 @@ public sealed class PArray<T>
     private int _chunkCount;
     private int _length;
 
-    /// <summary>Chunks copied because they were shared with a published version.</summary>
+    /// <summary>Chunks copied because they were shared with a committed version.</summary>
     public long ChunkCopies;
 
     /// <summary>Directory copies (first write after a publication).</summary>
@@ -111,7 +129,7 @@ public sealed class PArray<T>
     {
         var c = i >> _shift;
         var e = _epoch.Value;
-        // acquire read: a chunk copied by another writer thread (concurrent mode) is published
+        // acquire read: a chunk copied by another writer thread (concurrent mode) is installed
         // before its tag, so the chunk reference read below is the copy
         if (_dirOwner == e && Volatile.Read(ref _owners[c]) == e)
         {
@@ -165,7 +183,7 @@ public sealed class PArray<T>
 
     /// <summary>
     ///     Copy-on-write under concurrent writers: the first thread to claim the owner tag of a
-    ///     shared chunk copies it and publishes the copy before the tag; the others wait for the
+    ///     shared chunk copies it and installs the copy before the tag; the others wait for the
     ///     tag. Writes only go to chunks owned by the epoch, so no write is lost to a copy.
     /// </summary>
     private T[] WritableChunkConcurrent(int c, int e)
@@ -246,7 +264,7 @@ public sealed class PArray<T>
     /// <summary>Captures the current contents; the caller must advance the epoch before writing again.</summary>
     public PView<T> Freeze() => new(_chunks, _owners, _shift, _length);
 
-    /// <summary>Makes a published view the working state again (rollback).</summary>
+    /// <summary>Makes a committed view the working state again (rollback).</summary>
     public void Restore(PView<T> view)
     {
         _chunks = view.Chunks;

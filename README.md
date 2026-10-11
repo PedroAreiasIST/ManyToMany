@@ -183,6 +183,7 @@ ManyToMany is a layered dependency stack: each module builds cleanly on the one 
 | `Relations` | `Topology` | `O2M`, `Topology<TTypes>`, `Symmetry` | Mesh topology & graph algorithms |
 | `Matrices` | `Matrices` | `Matrix`, `Vector`, `CSR`, `CliqueSystem` | Dense/sparse algebra, FE assembly |
 | `Meshing` | `Meshing` | `SimplexMesh`, `SimplexRemesher`, `MeshGeometry` | Mesh generation, refinement, fracture |
+| `Incremental` | `Step2.Core` | `IncrementalMesh`, `PArray`, `Snapshot`, `Cutter`, `ParallelCutter`, `CrackInserter`, `FlatBuild` | Incremental upkeep of the MM3 structures under local edits, persistent versions, local and concurrent cutting (namespace `Step2`; [README](src/Incremental/README.md)) |
 | `Nonlinear` | `Nonlinear` | `BatheTwoStageIntegrator`, `RootFinder` | Time integration, root finding |
 | `Postprocess` | `Postprocess` | `EnsightWriter` | Visualization export |
 

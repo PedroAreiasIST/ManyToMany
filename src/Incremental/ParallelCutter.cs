@@ -1,5 +1,23 @@
 // ParallelCutter.cs — concurrent cutting of independent groups of marked edges.
 //
+// Copyright (C) 2026 Pedro Miguel de Almeida Areias
+//
+// This file is part of ManyToMany.
+//
+// ManyToMany is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// ManyToMany is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with ManyToMany. If not, see <https://www.gnu.org/licenses/>.
+//
+//
 // Two groups are independent when no node lies in the elements both change: the
 // rows of the split parents, the endpoints and the new nodes. Every write of an edit
 // (transpose rows, positions behind an insertion, pattern rows, destinations, facet
@@ -10,8 +28,9 @@
 //   plan    (parallel, read-only): shells, children rows, point copies and touched
 //           nodes of each group; groups that share a node are merged (union-find) and
 //           applied by one thread, which keeps the result exact;
-//   reserve (sequential): new node labels in the order of the batch cutter (first
-//           appearance in the concatenated groups), one contiguous range of element
+//   reserve (sequential): a cut whose rows could exceed the row limit is rejected here,
+//           before any write; then the new nodes, whose labels follow the batch cutter
+//           (first appearance in the concatenated groups), one contiguous range of element
 //           indices per group, pattern slots bounded from the children rows, private
 //           directories (IncrementalMesh.BeginConcurrent);
 //   apply   (parallel): each group is cut as by Cut, its children going to its range.
@@ -53,6 +72,9 @@ public static partial class Cutter
         public Dictionary<int, int> Nodes = new();
         public int NewElements, First;
         public long Slots;
+
+        /// <summary>A row whose bound exceeds the row limit (-1: none) and that bound.</summary>
+        public int OverflowNode = -1, OverflowBound;
     }
 
     /// <summary>
@@ -60,8 +82,10 @@ public static partial class Cutter
     ///     <see cref="Cut"/> of the concatenated groups up to the indices of the appended
     ///     children. <see cref="ICutObserver.NodeCreated"/> is called sequentially, in label
     ///     order; <see cref="ICutObserver.ElementSplit"/> is called from the writer threads,
-    ///     for disjoint children. On an exception the working version is inconsistent and
-    ///     must be rolled back to a published version.
+    ///     for disjoint children. A cut that could give a pattern row more than
+    ///     <see cref="IncrementalMesh.MaxRowSlots"/> columns is rejected with
+    ///     <see cref="RowLimitException"/> before any write; on any other exception the working
+    ///     version is inconsistent and must be rolled back to a committed version.
     /// </summary>
     public static ParallelCutResult CutParallel(IncrementalMesh m, IReadOnlyList<IReadOnlyList<(int, int)>> groups,
         ICutObserver? obs = null, int threads = 0)
@@ -71,22 +95,25 @@ public static partial class Cutter
         var first = m.NodeCount;
         var e0 = m.ElementCount;
 
-        // ---- labels (sequential): order of first appearance in the concatenated groups
+        // ---- labels (sequential): order of first appearance in the concatenated groups; the
+        //      nodes are created after the checks
         var mid = new Dictionary<long, int>(EdgeKeyComparer.Instance);
         var plans = new GroupPlan[groups.Count];
+        var label = first;
         for (var gi = 0; gi < groups.Count; gi++)
         {
             plans[gi] = new GroupPlan { Index = gi };
             foreach (var (p, q) in groups[gi])
             {
                 if (p == q) throw new ArgumentException($"degenerate pair ({p},{p})");
+                if ((uint)p >= (uint)first || (uint)q >= (uint)first)
+                    throw new ArgumentOutOfRangeException(nameof(groups), $"pair ({p},{q}) is not a pair of existing nodes");
                 int a = Math.Min(p, q), b = Math.Max(p, q);
                 var key = Key(a, b);
                 if (mid.ContainsKey(key)) continue;
-                var c = m.AddNode();
+                var c = label++;
                 mid[key] = c;
                 plans[gi].Edges.Add((a, b, c));
-                obs?.NodeCreated(c, a, b);
             }
         }
 
@@ -141,6 +168,18 @@ public static partial class Cutter
         }
 
         Parallel.For(0, replan.Count, po, i => Plan(m, replan[i], mid));
+        foreach (var g in final)
+            if (g.OverflowNode >= 0)
+                throw new RowLimitException(g.OverflowNode, g.OverflowBound);
+
+        // ---- nodes (sequential, label order)
+        foreach (var pl in plans)
+        foreach (var (a, b, c) in pl.Edges)
+        {
+            if (m.AddNode() != c) throw new InvalidOperationException("node labels changed during the cut");
+            obs?.NodeCreated(c, a, b);
+        }
+
         var planMs = sw.Elapsed.TotalMilliseconds;
 
         // ---- reserve (sequential)
@@ -204,6 +243,7 @@ public static partial class Cutter
     {
         g.Points.Clear();
         g.Nodes.Clear();
+        g.OverflowNode = -1;
         var affected = new HashSet<int>();
         var shell = new List<int>();
         foreach (var (a, b, c) in g.Edges)
@@ -255,17 +295,26 @@ public static partial class Cutter
         foreach (var (_, c) in g.Points) AddColumns(c, [c]);
 
         // a row ends with at most its current columns and the distinct new columns not among them
+        // (the new nodes, labelled at or above the node count, have no row yet)
         long slots = 0;
         var distinct = new HashSet<int>();
+        var nodeCount = m.NodeCount;
         foreach (var (v, list) in columns)
         {
             g.Nodes.TryAdd(v, 0);
             distinct.Clear();
-            var cur = m.PatternColumns(v);
+            var cur = v < nodeCount ? m.PatternColumns(v) : ReadOnlySpan<int>.Empty;
             foreach (var c in list)
                 if (cur.IndexOf(c) < 0)
                     distinct.Add(c);
-            slots += m.SlotsToGrow(v, cur.Length + distinct.Count);
+            var bound = cur.Length + distinct.Count;
+            if (bound > IncrementalMesh.MaxRowSlots && (g.OverflowNode < 0 || v < g.OverflowNode))
+            {
+                g.OverflowNode = v;
+                g.OverflowBound = bound;
+            }
+
+            slots += m.SlotsToGrow(v, bound);
         }
 
         g.Slots = slots;

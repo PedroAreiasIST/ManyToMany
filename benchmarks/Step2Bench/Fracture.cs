@@ -1,5 +1,23 @@
 // Fracture.cs — stress intensity factors on the maintained structures: penny cracks and Paris-law growth.
 //
+// Copyright (C) 2026 Pedro Miguel de Almeida Areias
+//
+// This file is part of ManyToMany.
+//
+// ManyToMany is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// ManyToMany is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with ManyToMany. If not, see <https://www.gnu.org/licenses/>.
+//
+//
 //   penny n hmin_div beta_deg [a] [rq] [patch] [dump=<dir>] [u=<file>]
 //   growth n hmin_div a b steps damax m tolK rq
 //
@@ -15,7 +33,9 @@
 //              found by a walk from the previous front;
 //   crack      CrackInserter, region rho < R(psi) + hmin / 4;
 //   FE         P1 elasticity assembled through the destination table (3 x 3 blocks per pattern slot),
-//              block-Jacobi CG to 1e-10 ||f|| (warm start on stable node indices in growth);
+//              gathered row by row on all threads (bit-identical to the sequential element loop);
+//              block-Jacobi CG to 1e-10 ||f|| on the flat copy of the pattern (FlatPattern, refreshed
+//              per publication), warm start on stable node indices in growth;
 //   K          domain interaction integral, global form with V = q N (N the in-plane front normal at the
 //              foot point), Gosz-Moran auxiliary fields (2D gradient in the frame of the foot point,
 //              traction-free asymptotic stress) with the non-equilibrium and incompatibility terms.
@@ -25,33 +45,49 @@
 // crack is inserted and the solution must be the exact linear field; "dump" writes the mesh and the
 // solution (SimPlas cross-check, figures); "u" replaces the solution by another solver's.
 
+using System.Collections.Concurrent;
 using Step2;
 
 namespace Step2.Bench;
 
-public static class Fracture
+public static partial class Fracture
 {
     private const double E = 1.0, Nu = 0.3, Sigma = 1.0;
+
+    /// <summary>Elements per block of the interaction-integral sum (STEP2_KBLOCK); the contributing elements lie
+    ///     near one front point, so small blocks spread them over the threads.</summary>
+    private static readonly int KBlock = int.TryParse(Environment.GetEnvironmentVariable("STEP2_KBLOCK"), out var kb) ? kb : 64;
+    /// <summary>Fraction of the tube radius with q = 1 (STEP2_QPLATEAU, default 0: q falls linearly from the front).
+    ///     A plateau keeps the elements next to the front, where the finite element stress is least accurate, out of
+    ///     the gradient terms of the domain integral.</summary>
+    private static readonly double QPlateau = double.TryParse(Environment.GetEnvironmentVariable("STEP2_QPLATEAU"),
+        System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var qp0) ? qp0 : 0.0;
+
     private static readonly double Lambda = E * Nu / ((1 + Nu) * (1 - 2 * Nu)), Mu = E / (2 * (1 + Nu));
 
     /// <summary>
     ///     Crack plane n . x = offset: normal N and in-plane axes E1, E2 with E1 x E2 = N; Local gives the in-plane
     ///     coordinates (p, q) and the height h above the plane.
     /// </summary>
-    private sealed class Plane(double beta, double offset = 0)
+    private sealed class Plane(double beta, double offset = 0, double cx = 0, double cy = 0)
     {
         public readonly double[] N = [Math.Sin(beta), 0, Math.Cos(beta)];
         public readonly double[] E1 = [Math.Cos(beta), 0, -Math.Sin(beta)];
         public readonly double[] E2 = [0, 1, 0];
         public readonly double Offset = offset;
 
-        public (double P, double Q, double H) Local(double x, double y, double z) =>
-            (E1[0] * x + E1[1] * y + E1[2] * z, E2[0] * x + E2[1] * y + E2[2] * z,
+        // (cx, cy): global x and y of the in-plane origin (the centre of the front; on the face for a surface crack)
+        public (double P, double Q, double H) Local(double x, double y, double z)
+        {
+            x -= cx;
+            y -= cy;
+            return (E1[0] * x + E1[1] * y + E1[2] * z, E2[0] * x + E2[1] * y + E2[2] * z,
                 N[0] * x + N[1] * y + N[2] * z - Offset);
+        }
 
         /// <summary>Global point of the local coordinates.</summary>
         public (double X, double Y, double Z) Global(double p, double q, double h) =>
-            (p * E1[0] + q * E2[0] + (h + Offset) * N[0], p * E1[1] + q * E2[1] + (h + Offset) * N[1],
+            (p * E1[0] + q * E2[0] + (h + Offset) * N[0] + cx, p * E1[1] + q * E2[1] + (h + Offset) * N[1] + cy,
                 p * E1[2] + q * E2[2] + (h + Offset) * N[2]);
     }
 
@@ -82,7 +118,7 @@ public static class Fracture
     {
         var (rows, coords01, nN) = Kuhn.Box(n);
         var coords = coords01.Select(c => 2 * c - 1).ToList();
-        var flat = FlatBuild.Build(ElementSpec.Tetrahedron, nN, rows, parallel: true);
+        var flat = FlatBuild.Initial(ElementSpec.Tetrahedron, nN, rows);
         var m = new IncrementalMesh(flat, ElementSpec.Tetrahedron, persistent: true);
         var st = new MeshState(m, coords, null);
         var bis = new Bisection();
@@ -358,14 +394,19 @@ public static class Fracture
         var s = m.Commit();
         var nNodes = s.NodeCount;
         var (X, f, fixedDof) = Problem(s, ins, n);
+        var fp = new FlatPattern();
+        var tCopy = System.Diagnostics.Stopwatch.StartNew();
+        fp.Refresh(s);
+        tCopy.Stop();
         var tAsm = System.Diagnostics.Stopwatch.StartNew();
-        var vals = Assemble(s, X);
+        var vals = Assemble(s, fp, X);
         tAsm.Stop();
         var tSol = System.Diagnostics.Stopwatch.StartNew();
-        var (u, iters, rel) = Pcg(s, vals, f, fixedDof, 1e-10, 20000, null);
+        var (u, iters, rel) = Pcg(fp, vals, f, fixedDof, 1e-10, 20000, null);
         tSol.Stop();
-        Console.WriteLine($"  solve: {3 * nNodes} unknowns, assembly {tAsm.Elapsed.TotalSeconds:F2} s, CG {iters} iterations, " +
-                          $"relative residual {rel:E1}, {tSol.Elapsed.TotalSeconds:F1} s");
+        Console.WriteLine($"  solve: {3 * nNodes} unknowns, pattern copy {tCopy.Elapsed.TotalMilliseconds:F1} ms, assembly " +
+                          $"{tAsm.Elapsed.TotalSeconds:F2} s, CG {iters} iterations, relative residual {rel:E1}, " +
+                          $"{tSol.Elapsed.TotalSeconds:F1} s");
 
         if (patch)
         {
@@ -422,6 +463,7 @@ public static class Fracture
                 (int)Math.Round(beta * 180 / Math.PI), rq, tag)));
         w.WriteLine("theta_deg,KI,KII,KIII,KI_ref,KII_ref,KIII_ref,J,J_from_K");
         double errI = 0, errII = 0, errIII = 0;
+        var tK = System.Diagnostics.Stopwatch.StartNew();
         for (var k = 0; k < points; k++)
         {
             var th = 2 * Math.PI * k / points;
@@ -439,6 +481,7 @@ public static class Fracture
             errIII = Math.Max(errIII, Math.Abs(Math.Abs(kIII) - Math.Abs(refIII)) / kRef);
         }
 
+        Console.WriteLine($"  K at {points} points: {tK.Elapsed.TotalSeconds:F2} s");
         Console.WriteLine($"penny n={n} div={div} beta={beta * 180 / Math.PI:F0}{tag}: max |K - K_ref| / K0 = {errI:P2} (I), " +
                           $"{errII:P2} (|II|), {errIII:P2} (|III|); rq={rq:F4}, delta={delta * 180 / Math.PI:F1} deg, " +
                           $"{Live(m)} tetrahedra, {3 * nNodes} unknowns ({sw.Elapsed.TotalSeconds:F1} s)");
@@ -489,7 +532,7 @@ public static class Fracture
     ///     Fatigue growth of an elliptical crack (semi-axes a along x, b along y, plane z = 0): Irwin's K_I at the
     ///     first front, then Paris-law increments da_j = da (K_j / K_max)^m along the front normal, each a local
     ///     fit, crack increment, publication, warm-started solve and K evaluation. A step whose normalized K
-    ///     changes by more than tolK is rolled back to the published version before it and retried with da / 2.
+    ///     changes by more than tolK is rolled back to the committed version before it and retried with da / 2.
     ///
     ///   growth n div a b steps damax m tolK rq
     /// </summary>
@@ -536,7 +579,8 @@ public static class Fracture
         wk.WriteLine("step,theta_deg,KI,KII,KIII,KI_irwin");
         ws.WriteLine("step,attempt,da,accepted,err,t_fit_ms,t_insert_ms,t_publish_ms,t_rollback_ms,t_rebuild_ms," +
                      "t_assemble_ms,t_solve_ms,cg_iters,t_K_ms,elements,nodes,unknowns,moved,fit_cut,crack_edges," +
-                     "split_nodes,front_nodes,visited");
+                     "split_nodes,front_nodes,visited,t_copy_ms,chunks_copied,chunks_total");
+        var fp = new FlatPattern();
 
         var curve = FrontCurve.Ellipse(A0, B0, M);
         FrontCurve? oldCurve = null;
@@ -583,8 +627,11 @@ public static class Fracture
             rows = null;
 
             var (X, f, fixedDof) = Problem(s, ins, n);
+            var tCopy = System.Diagnostics.Stopwatch.StartNew();
+            fp.Refresh(s); // copies the chunks the step changed
+            tCopy.Stop();
             var tAsm = System.Diagnostics.Stopwatch.StartNew();
-            var vals = Assemble(s, X);
+            var vals = Assemble(s, fp, X);
             tAsm.Stop();
             // warm start on the stable node indices; new nodes from their parents
             double[]? u0 = null;
@@ -602,7 +649,7 @@ public static class Fracture
             }
 
             var tSol = System.Diagnostics.Stopwatch.StartNew();
-            var (u, iters, rel) = Pcg(s, vals, f, fixedDof, 1e-10, 40000, u0);
+            var (u, iters, rel) = Pcg(fp, vals, f, fixedDof, 1e-10, 40000, u0);
             tSol.Stop();
             if (!(rel <= 1e-8)) throw new Exception($"step {accepted}: CG did not converge ({iters} iterations, residual {rel:E2})");
             vals = null;
@@ -639,15 +686,17 @@ public static class Fracture
             }
 
             ws.WriteLine(string.Format(ci,
-                "{0},{1},{2:R},{3},{4:F5},{5:F3},{6:F3},{7:F4},{8:F4},{9:F2},{10:F2},{11:F1},{12},{13:F1},{14},{15},{16},{17},{18},{19},{20},{21},{22}",
+                "{0},{1},{2:R},{3},{4:F5},{5:F3},{6:F3},{7:F4},{8:F4},{9:F2},{10:F2},{11:F1},{12},{13:F1},{14},{15},{16},{17},{18},{19},{20},{21},{22},{23:F4},{24},{25}",
                 accepted, attempt, da, accept ? 1 : 0, err, tFit.Elapsed.TotalMilliseconds, tIns.Elapsed.TotalMilliseconds,
                 tPub.Elapsed.TotalMilliseconds, tRb, tReb.Elapsed.TotalMilliseconds, tAsm.Elapsed.TotalMilliseconds,
                 tSol.Elapsed.TotalMilliseconds, iters, tK.Elapsed.TotalMilliseconds, Live(m), s.NodeCount, 3 * s.NodeCount,
-                fit.Moved, fit.Cut, step.Edges.Length, step.Splits.Length, step.Front.Length, fit.Visited + step.VisitedTets));
+                fit.Moved, fit.Cut, step.Edges.Length, step.Splits.Length, step.Front.Length, fit.Visited + step.VisitedTets,
+                tCopy.Elapsed.TotalMilliseconds, fp.ChunksCopied, fp.ChunksTotal));
             ws.Flush();
             Console.WriteLine($"  step {accepted,2} attempt {attempt,2}: da {da:F4}, err {err:F4} -> {(accept ? "accepted" : "rolled back")}; " +
                               $"fit {tFit.Elapsed.TotalMilliseconds:F1} ms, insert {tIns.Elapsed.TotalMilliseconds:F1} ms, " +
-                              $"publish {tPub.Elapsed.TotalMilliseconds:F2} ms, rollback {tRb:F3} ms, rebuild {tReb.Elapsed.TotalMilliseconds:F0} ms, " +
+                              $"commit {tPub.Elapsed.TotalMilliseconds:F2} ms, rollback {tRb:F3} ms, rebuild {tReb.Elapsed.TotalMilliseconds:F0} ms, " +
+                              $"pattern copy {tCopy.Elapsed.TotalMilliseconds:F2} ms ({fp.ChunksCopied}/{fp.ChunksTotal} chunks), " +
                               $"assemble {tAsm.Elapsed.TotalMilliseconds:F0} ms, CG {iters} it {tSol.Elapsed.TotalSeconds:F1} s, K {tK.Elapsed.TotalSeconds:F1} s; " +
                               $"{Live(m)} tetrahedra, {step.Edges.Length} crack edges, {step.Splits.Length} split nodes, front {step.Front.Length}");
             if (!accept)
@@ -730,7 +779,9 @@ public static class Fracture
                Math.Pow(Math.Sin(phi) * Math.Sin(phi) + b * b / (a * a) * Math.Cos(phi) * Math.Cos(phi), 0.25);
     }
 
-    private static string DataDirOf() => Bench.DataDir;
+    private static string DataDirOf() =>
+        Environment.GetEnvironmentVariable("STEP2_DATA") ??
+        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../benchmarks/data"));
 
     private static int Live(IncrementalMesh m)
     {
@@ -783,80 +834,92 @@ public static class Fracture
         return Math.Abs(det) / 6.0;
     }
 
-    /// <summary>Stiffness into 3 x 3 blocks per pattern slot, addressed by the destination table.</summary>
-    private static double[] Assemble(Snapshot s, double[] X)
+    /// <summary>
+    ///     Stiffness into 3 x 3 blocks per pattern slot, addressed by the destination table and gathered row by
+    ///     row on all threads: row v sums the blocks of the pairs (e, a) of T(v) in element order, the order of a
+    ///     sequential loop over the elements, so every value equals that loop's bit for bit.
+    /// </summary>
+    private static double[] Assemble(Snapshot s, FlatPattern fp, double[] X)
     {
         if (9L * s.TotalSlots > Array.MaxLength)
             throw new InvalidOperationException($"{s.TotalSlots} pattern slots: 3 x 3 blocks exceed the array size");
         var vals = new double[9 * s.TotalSlots];
-        Span<double> g = stackalloc double[12];
-        for (var e = 0; e < s.ElementCount; e++)
+        var rowStart = fp.RowStart;
+        Parallel.ForEach(Partitioner.Create(0, s.NodeCount, 1024), r =>
         {
-            var row = s.Row(e);
-            if (row.Length != 4) continue;
-            var vol = Gradients(X, row, g);
-            var dest = s.Destinations(e);
-            for (var a = 0; a < 4; a++)
+            Span<double> g = stackalloc double[12];
+            for (var v = r.Item1; v < r.Item2; v++)
             {
-                var rs = s.PatternRowStart(row[a]);
-                for (var b = 0; b < 4; b++)
+                var tr = s.TransposePairs(v);
+                var rs = rowStart[v];
+                for (var q = 0; q < tr.Length; q += 2)
                 {
-                    var at = 9 * (rs + dest[4 * a + b]);
-                    var gg = g[3 * a] * g[3 * b] + g[3 * a + 1] * g[3 * b + 1] + g[3 * a + 2] * g[3 * b + 2];
-                    for (var i = 0; i < 3; i++)
-                    for (var jj = 0; jj < 3; jj++)
-                        vals[at + 3 * i + jj] += vol * (Lambda * g[3 * a + i] * g[3 * b + jj] +
-                                                        Mu * g[3 * a + jj] * g[3 * b + i] + (i == jj ? Mu * gg : 0));
+                    var e = tr[q];
+                    var row = s.Row(e);
+                    if (row.Length != 4) continue;
+                    var a = tr[q + 1];
+                    var vol = Gradients(X, row, g);
+                    var dest = s.Destinations(e);
+                    for (var b = 0; b < 4; b++)
+                    {
+                        var at = 9 * (rs + dest[4 * a + b]);
+                        var gg = g[3 * a] * g[3 * b] + g[3 * a + 1] * g[3 * b + 1] + g[3 * a + 2] * g[3 * b + 2];
+                        for (var i = 0; i < 3; i++)
+                        for (var jj = 0; jj < 3; jj++)
+                            vals[at + 3 * i + jj] += vol * (Lambda * g[3 * a + i] * g[3 * b + jj] +
+                                                            Mu * g[3 * a + jj] * g[3 * b + i] + (i == jj ? Mu * gg : 0));
+                    }
                 }
             }
-        }
+        });
 
         return vals;
     }
 
-    private static void Apply(Snapshot s, double[] vals, double[] x, double[] y, bool[] fixedDof)
+    private static void Apply(FlatPattern fp, double[] vals, double[] x, double[] y, bool[] fixedDof)
     {
-        Parallel.For(0, s.NodeCount, v =>
+        int[] rowStart = fp.RowStart, rowLen = fp.RowLen, col = fp.Col;
+        Parallel.ForEach(Partitioner.Create(0, fp.NodeCount, 1024), r =>
         {
-            var cols = s.PatternColumns(v);
-            double y0 = 0, y1 = 0, y2 = 0;
-            if (!cols.IsEmpty)
+            for (var v = r.Item1; v < r.Item2; v++)
             {
-                var rs = s.PatternRowStart(v);
-                for (var t = 0; t < cols.Length; t++)
-                {
-                    var at = 9 * (rs + t);
-                    var c = 3 * cols[t];
-                    double x0 = x[c], x1 = x[c + 1], x2 = x[c + 2];
-                    y0 += vals[at] * x0 + vals[at + 1] * x1 + vals[at + 2] * x2;
-                    y1 += vals[at + 3] * x0 + vals[at + 4] * x1 + vals[at + 5] * x2;
-                    y2 += vals[at + 6] * x0 + vals[at + 7] * x1 + vals[at + 8] * x2;
-                }
-            }
+                double y0 = 0, y1 = 0, y2 = 0;
+                var rs = rowStart[v];
+                if (rs >= 0)
+                    for (int t = rs, end = rs + rowLen[v]; t < end; t++)
+                    {
+                        var at = 9 * t;
+                        var c = 3 * col[t];
+                        double x0 = x[c], x1 = x[c + 1], x2 = x[c + 2];
+                        y0 += vals[at] * x0 + vals[at + 1] * x1 + vals[at + 2] * x2;
+                        y1 += vals[at + 3] * x0 + vals[at + 4] * x1 + vals[at + 5] * x2;
+                        y2 += vals[at + 6] * x0 + vals[at + 7] * x1 + vals[at + 8] * x2;
+                    }
 
-            y[3 * v] = fixedDof[3 * v] ? 0 : y0;
-            y[3 * v + 1] = fixedDof[3 * v + 1] ? 0 : y1;
-            y[3 * v + 2] = fixedDof[3 * v + 2] ? 0 : y2;
+                y[3 * v] = fixedDof[3 * v] ? 0 : y0;
+                y[3 * v + 1] = fixedDof[3 * v + 1] ? 0 : y1;
+                y[3 * v + 2] = fixedDof[3 * v + 2] ? 0 : y2;
+            }
         });
     }
 
     /// <summary>Block-Jacobi preconditioned CG on the free unknowns (prescribed values zero).</summary>
-    private static (double[] U, int Iters, double Rel) Pcg(Snapshot s, double[] vals, double[] f, bool[] fixedDof,
+    private static (double[] U, int Iters, double Rel) Pcg(FlatPattern fp, double[] vals, double[] f, bool[] fixedDof,
         double tol, int maxIt, double[]? x0)
     {
-        var nN = s.NodeCount;
+        var nN = fp.NodeCount;
         var nd = 3 * nN;
         // inverse diagonal blocks, fixed unknowns decoupled
         var minv = new double[9 * nN];
         for (var v = 0; v < nN; v++)
         {
             var d = new double[9];
-            var cols = s.PatternColumns(v);
-            var rs = s.PatternRowStart(v);
-            for (var t = 0; t < cols.Length; t++)
-                if (cols[t] == v)
-                    for (var q = 0; q < 9; q++)
-                        d[q] = vals[9 * (rs + t) + q];
+            var rs = fp.RowStart[v];
+            if (rs >= 0)
+                for (int t = rs, end = rs + fp.RowLen[v]; t < end; t++)
+                    if (fp.Col[t] == v)
+                        for (var q = 0; q < 9; q++)
+                            d[q] = vals[9 * t + q];
             for (var i = 0; i < 3; i++)
             {
                 if (!fixedDof[3 * v + i] && d[4 * i] != 0) continue;
@@ -883,7 +946,7 @@ public static class Fracture
             // warm start: r = f - A x0 on the free unknowns
             for (var i = 0; i < nd; i++) u[i] = fixedDof[i] ? 0 : x0[i];
             var ax = new double[nd];
-            Apply(s, vals, u, ax, fixedDof);
+            Apply(fp, vals, u, ax, fixedDof);
             for (var i = 0; i < nd; i++) r[i] -= ax[i];
         }
         var z = new double[nd];
@@ -915,7 +978,7 @@ public static class Fracture
         var rel = 1.0;
         for (; it < maxIt; it++)
         {
-            Apply(s, vals, p, q2, fixedDof);
+            Apply(fp, vals, p, q2, fixedDof);
             var alpha = rz / DotV(p, q2);
             for (var i = 0; i < nd; i++)
             {
@@ -1108,7 +1171,8 @@ public static class Fracture
     }
 
     private static (double KI, double KII, double KIII, double J) Interaction(Snapshot s, double[] X, double[] u,
-        Plane pl, FrontCurve curve, double th, double rq, double delta)
+        Plane pl, FrontCurve curve, double th, double rq, double delta, double psiLo = double.NegativeInfinity,
+        double psiHi = double.PositiveInfinity, bool freeSurface = false)
     {
         double[] nrm = pl.N;
 
@@ -1127,18 +1191,32 @@ public static class Fracture
             var (psi, dn) = curve.Project(p, q);
             var d = Math.Sqrt(dn * dn + h * h);
             var dpsi = Math.IEEERemainder(psi - th, 2 * Math.PI);
-            var qv = Math.Max(0, 1 - d / rq) * Math.Max(0, 1 - Math.Abs(dpsi) / delta);
+            var tube = QPlateau <= 0 ? Math.Max(0, 1 - d / rq)
+                : d <= QPlateau * rq ? 1.0 : Math.Max(0, 1 - (d - QPlateau * rq) / (rq - QPlateau * rq));
+            var qv = tube * Math.Max(0, 1 - Math.Abs(dpsi) / delta);
             if (qv <= 0) continue;
             any[v] = true;
             var (nx, ny, _) = curve.Normal(psi);
             for (var k = 0; k < 3; k++) vn[3 * v + k] = qv * (nx * pl.E1[k] + ny * pl.E2[k]);
         }
 
-        // 4-point rule (degree 2); elements in parallel, per-thread sums of (I_I, I_II, I_III, J)
+        // 4-point rule (degree 2); fixed blocks of elements in parallel, their sums of (I_I, I_II, I_III, J) added
+        // in block order, so the result does not depend on the thread schedule
         const double qa = 0.5854101966249685, qb = 0.1381966011250105;
+        var block = KBlock;
+        var partial = new double[(s.ElementCount + block - 1) / block][];
+        Parallel.For(0, partial.Length, b =>
+        {
+            var part = new double[4];
+            for (int e = b * block, hi = Math.Min(s.ElementCount, e + block); e < hi; e++) Term(e, part);
+            partial[b] = part;
+        });
         var sum = new double[4];
-        var gate = new object();
-        Parallel.For(0, s.ElementCount, () => new double[4], (e, _, part) =>
+        foreach (var part in partial)
+            for (var k = 0; k < 4; k++)
+                sum[k] += part[k];
+
+        void Term(int e, double[] part)
         {
             Span<double> g = stackalloc double[12];
             Span<double> G = stackalloc double[9];   // FE displacement gradient G[i, k] = du_i / dx_k
@@ -1149,10 +1227,10 @@ public static class Fracture
             Span<double> dH = stackalloc double[27];
             Span<double> Vq = stackalloc double[3];
             var row = s.Row(e);
-            if (row.Length != 4) return part;
+            if (row.Length != 4) return;
             var touched = false;
             foreach (var v in row) touched |= any[v];
-            if (!touched) return part;
+            if (!touched) return;
             var vol = Gradients(X, row, g);
             double cxs = 0, cys = 0, czs = 0;
             foreach (var v in row)
@@ -1236,16 +1314,113 @@ public static class Fracture
                 }
             }
 
-            return part;
-        }, part =>
+            return;
+        }
+
+        // Free surface inside the tube: the auxiliary field is not traction-free there, and the divergence theorem
+        // leaves the boundary term  B = int_{Sf} (sigma^aux_ij m_j u_i,k - W^int m_k) V_k dS  (sigma_ij m_j = 0 for the
+        // solution); the interaction integral is D - B. Faces of the crack (normal along the crack normal) and the
+        // loaded faces are not free surfaces of the front.
+        if (freeSurface) FreeSurfaceTerm(sum);
+
+        void FreeSurfaceTerm(double[] acc)
         {
-            lock (gate)
-                for (var k = 0; k < 4; k++)
-                    sum[k] += part[k];
-        });
+            Span<double> g = stackalloc double[12];
+            Span<double> G = stackalloc double[9];
+            Span<double> S = stackalloc double[9];
+            Span<double> H = stackalloc double[9];
+            Span<double> V = stackalloc double[3];
+            Span<int> t = stackalloc int[3];
+            var bsum = new double[3];
+            for (var i = 0; i < s.BoundaryCount; i++)
+            {
+                var id = s.BoundaryFacet(i);
+                int e = id / 4, fl = id % 4;
+                var row = s.Row(e);
+                if (row.Length != 4) continue;
+                var k0 = 0;
+                for (var p = 0; p < 4; p++)
+                    if (p != fl)
+                        t[k0++] = row[p];
+                if (!(any[t[0]] || any[t[1]] || any[t[2]])) continue;
+                // outward normal and area from the facet nodes, oriented away from the opposite node
+                double ux = X[3 * t[1]] - X[3 * t[0]], uy = X[3 * t[1] + 1] - X[3 * t[0] + 1], uz = X[3 * t[1] + 2] - X[3 * t[0] + 2];
+                double wx = X[3 * t[2]] - X[3 * t[0]], wy = X[3 * t[2] + 1] - X[3 * t[0] + 1], wz = X[3 * t[2] + 2] - X[3 * t[0] + 2];
+                double mx = uy * wz - uz * wy, my = uz * wx - ux * wz, mz = ux * wy - uy * wx;
+                var area = 0.5 * Math.Sqrt(mx * mx + my * my + mz * mz);
+                mx /= 2 * area;
+                my /= 2 * area;
+                mz /= 2 * area;
+                var opp = row[fl];
+                if (mx * (X[3 * opp] - X[3 * t[0]]) + my * (X[3 * opp + 1] - X[3 * t[0] + 1]) + mz * (X[3 * opp + 2] - X[3 * t[0] + 2]) > 0)
+                {
+                    mx = -mx;
+                    my = -my;
+                    mz = -mz;
+                }
+
+                var cn = Math.Abs(mx * pl.N[0] + my * pl.N[1] + mz * pl.N[2]);
+                if (cn > 0.5) continue; // a crack face or a loaded face
+                Gradients(X, row, g);
+                G.Clear();
+                for (var a = 0; a < 4; a++)
+                for (var ii = 0; ii < 3; ii++)
+                for (var j = 0; j < 3; j++)
+                    G[3 * ii + j] += u[3 * row[a] + ii] * g[3 * a + j];
+                var tr = G[0] + G[4] + G[8];
+                for (var ii = 0; ii < 3; ii++)
+                for (var j = 0; j < 3; j++)
+                    S[3 * ii + j] = Mu * (G[3 * ii + j] + G[3 * j + ii]) + (ii == j ? Lambda * tr : 0);
+                double cxs = 0, cys = 0, czs = 0;
+                foreach (var v in row)
+                {
+                    cxs += X[3 * v];
+                    cys += X[3 * v + 1];
+                    czs += X[3 * v + 2];
+                }
+
+                var side = pl.Local(cxs / 4, cys / 4, czs / 4).H >= 0 ? 1 : -1;
+                for (var qp = 0; qp < 3; qp++)
+                {
+                    double xx = 0, yy = 0, zz = 0;
+                    V.Clear();
+                    for (var a = 0; a < 3; a++)
+                    {
+                        var wa = a == qp ? 2.0 / 3 : 1.0 / 6;
+                        xx += wa * X[3 * t[a]];
+                        yy += wa * X[3 * t[a] + 1];
+                        zz += wa * X[3 * t[a] + 2];
+                        for (var k = 0; k < 3; k++) V[k] += wa * vn[3 * t[a] + k];
+                    }
+
+                    for (var mode = 0; mode < 3; mode++)
+                    {
+                        AuxH(mode, xx, yy, zz, pl, curve, side, H);
+                        var htr = H[0] + H[4] + H[8];
+                        double wint = 0, mv = mx * V[0] + my * V[1] + mz * V[2], b = 0;
+                        for (var ii = 0; ii < 3; ii++)
+                        {
+                            double sam = 0;
+                            for (var j = 0; j < 3; j++)
+                            {
+                                var sa = Mu * (H[3 * ii + j] + H[3 * j + ii]) + (ii == j ? Lambda * htr : 0);
+                                sam += sa * (j == 0 ? mx : j == 1 ? my : mz);
+                                wint += S[3 * ii + j] * 0.5 * (H[3 * ii + j] + H[3 * j + ii]);
+                            }
+
+                            for (var k = 0; k < 3; k++) b += sam * G[3 * ii + k] * V[k];
+                        }
+
+                        bsum[mode] += (b - wint * mv) * area / 3;
+                    }
+                }
+            }
+
+            for (var mode = 0; mode < 3; mode++) acc[mode] -= bsum[mode];
+        }
 
         // J(s) times the integral of q along the front (V . N = q on the front) = volume integral
-        var L = curve.HatLength(th, delta);
+        var L = curve.HatLength(th, delta, 400, psiLo, psiHi);
         var ep = E / (1 - Nu * Nu);
         return (ep / 2 * sum[0] / L, ep / 2 * sum[1] / L, Mu * sum[2] / L, sum[3] / L);
     }

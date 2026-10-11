@@ -1,0 +1,37 @@
+%
+% This is a preamble file for 'figtex2eps.sh'. You may edit things
+% here if necessary. Typically you might want to change the font
+% size, the font or add some more packages for your latex commands
+% in your figures. 
+%
+% If you make errors in here, rerun figtex2eps.sh with '-v' (verbose) and
+% check the error messages from latex, and then fix here.
+% You may also just delete this file if you are in trouble
+% and a new default one will be generated
+%
+\documentclass[12pt]{article}
+
+% Packages for most mathematical latex commands:
+\usepackage{amsfonts}
+\usepackage{eurosym}
+\usepackage{units}
+\usepackage{microtype}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{nicefrac}
+
+% \usepackage{ae}       % This is in case you also want to make pdf afterwards
+
+% You might want the palatino font instead, then uncomment the following
+% two lines, and do not use the ae package above
+%\usepackage{palatino}
+%\usepackage{palatcm} % Palatino math fonts 
+
+\usepackage[dvips]{color}
+\usepackage{epsfig}
+\usepackage{wasysym}
+% \usepackage{eucal}
+\usepackage{calrsfs}
+\newcommand{\bm}[1]{\boldsymbol{#1}}
+\newcommand{\dif}{\mathrm{d}}
+\newcommand{\bmd}[1]{\dot{\bm{#1}}}

@@ -1,9 +1,30 @@
 // Program.cs — verification and measurement driver for the step2 paper.
 //
+// Copyright (C) 2026 Pedro Miguel de Almeida Areias
+//
+// This file is part of ManyToMany.
+//
+// ManyToMany is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// ManyToMany is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with ManyToMany. If not, see <https://www.gnu.org/licenses/>.
+//
+//
 //   verify-fuzz  n batches batch seed   randomized edits, oracle after every batch,
 //                                       snapshot immutability and rollback checks
 //   verify-work  n                      crack / bisection / erosion with the oracle after
 //                                       every step and conformity checks for bisection
+//   verify-rowlimit n rounds            a cut that would overflow a pattern row is rejected
+//                                       before any write (RowLimitVerify.cs)
+//   verify-flatbuild n                  threaded tuned rebuild against the sequential one
 //   (measurement modes live in Bench.cs)
 
 using System.Diagnostics;
@@ -37,11 +58,23 @@ switch (mode)
     case "growth":
         Fracture.Growth(rest);
         break;
+    case "surface":
+        Fracture.Surface(rest);
+        break;
+    case "corner":
+        Fracture.Corner(rest);
+        break;
     case "interfaces":
         Interfaces.Run(rest);
         break;
     case "verify-cutpar":
         ParallelCutVerify.Run(Arg(0, 6), Arg(1, 8), Arg(2, 1), Arg(3, 8));
+        break;
+    case "verify-rowlimit":
+        RowLimitVerify.Run(Arg(0, 6), Arg(1, 20));
+        break;
+    case "verify-flatbuild":
+        FlatBuildVerify.Run(Arg(0, 30));
         break;
     default:
         Bench.Run(mode, rest);
@@ -58,6 +91,23 @@ internal static class Verify
         return new MeshState(mesh, coords, mirror ? new Mm3Mirror(rows) : null);
     }
 
+    /// <summary>Counts the live elements with the same row in both versions and checks that their destination blocks are equal.</summary>
+    private static long UnchangedDestinations(Snapshot before, Snapshot after)
+    {
+        long blocks = 0;
+        var m = Math.Min(before.ElementCount, after.ElementCount);
+        for (var e = 0; e < m; e++)
+        {
+            var row = before.Row(e);
+            if (row.Length == 0 || !row.SequenceEqual(after.Row(e))) continue;
+            if (!before.Destinations(e).SequenceEqual(after.Destinations(e)))
+                throw new Exception($"the destinations of the unedited element {e} changed");
+            blocks++;
+        }
+
+        return blocks;
+    }
+
     public static void Fuzz(int n, int batches, int batchSize, int seed)
     {
         var sw = Stopwatch.StartNew();
@@ -66,7 +116,8 @@ internal static class Verify
         var pick = new Random(seed + 1);
         Oracle.Verify(st.Mesh.Current);
         var history = new List<(Snapshot S, ulong H)>();
-        long edits = 0, rollbacks = 0, immutabilityChecks = 0;
+        long edits = 0, rollbacks = 0, immutabilityChecks = 0, destinationBlocks = 0;
+        var previous = st.Mesh.Current;
         for (var b = 0; b < batches; b++)
         {
             for (var i = 0; i < batchSize; i++)
@@ -77,10 +128,13 @@ internal static class Verify
 
             var snap = st.Mesh.Commit();
             Oracle.Verify(snap);
+            // Theorem on destination stability: an element whose row did not change keeps its destination block
+            destinationBlocks += UnchangedDestinations(previous, snap);
+            previous = snap;
             history.Add((snap, Oracle.Hash(snap) ^ AttrHash(st, snap)));
             if (history.Count > 64) history.RemoveAt(pick.Next(history.Count - 1));
 
-            // published versions never change
+            // committed versions never change
             var (old, oldHash) = history[pick.Next(history.Count)];
             if ((Oracle.Hash(old) ^ AttrHash(st, old)) != oldHash)
                 throw new Exception($"batch {b}: snapshot modified after publication");
@@ -93,6 +147,7 @@ internal static class Verify
                 // topology and attributes (coordinates, tags) are restored together
                 var (target, targetHash) = history[pick.Next(history.Count)];
                 st.Mesh.Rollback(target);
+                previous = target;
                 if ((Oracle.Hash(st.Mesh.Current) ^ AttrHash(st, st.Mesh.Current)) != targetHash)
                     throw new Exception("rollback changed the version");
                 // the working state after rollback reads the restored attributes
@@ -108,12 +163,13 @@ internal static class Verify
         st.Mesh.CompactPattern();
         Oracle.Verify(st.Mesh.Commit());
         Console.WriteLine($"verify-fuzz n={n}: {batches} batches, {edits} edits, {rollbacks} rollbacks, " +
-                          $"{immutabilityChecks} immutability checks, {st.Mesh.Relocations} relocations, " +
+                          $"{immutabilityChecks} immutability checks, {destinationBlocks} destination blocks of unedited elements unchanged, " +
+                          $"{st.Mesh.Relocations} relocations, " +
                           $"{st.Mesh.SlotReuses} slot reuses: all structures match the oracle " +
                           $"({sw.Elapsed.TotalSeconds:F1} s)");
     }
 
-    /// <summary>Hash of the coordinate and tag attributes as published in a version.</summary>
+    /// <summary>Hash of the coordinate and tag attributes as committed in a version.</summary>
     public static ulong AttrHash(MeshState st, Snapshot s)
     {
         ulong h = 0xcbf29ce484222325UL;

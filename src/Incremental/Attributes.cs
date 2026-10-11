@@ -1,5 +1,23 @@
 // Attributes.cs — per-element and per-node data versioned with the mesh.
 //
+// Copyright (C) 2026 Pedro Miguel de Almeida Areias
+//
+// This file is part of ManyToMany.
+//
+// ManyToMany is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// ManyToMany is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with ManyToMany. If not, see <https://www.gnu.org/licenses/>.
+//
+//
 // An attribute is a persistent array registered with an IncrementalMesh: it grows
 // with the element or node count, is captured by Commit and restored by Rollback,
 // so data such as refinement tags, coordinates or history variables cannot drift

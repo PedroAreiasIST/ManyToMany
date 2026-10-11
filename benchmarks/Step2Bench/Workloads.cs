@@ -1,5 +1,23 @@
 // Workloads.cs — topology-changing edit sequences on Kuhn meshes.
 //
+// Copyright (C) 2026 Pedro Miguel de Almeida Areias
+//
+// This file is part of ManyToMany.
+//
+// ManyToMany is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// ManyToMany is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with ManyToMany. If not, see <https://www.gnu.org/licenses/>.
+//
+//
 //   CrackPlane     a planar crack x = 1/2 advancing in +y: at each step the nodes of
 //                  one front row are duplicated and the elements on the + side take
 //                  the duplicates (node duplication, as in crack insertion).
@@ -70,7 +88,7 @@ public sealed class MeshState
 
         Tag = mesh.AddAttribute(AttributeKind.Element, 3);
         Level = mesh.AddAttribute(AttributeKind.Element, 0);
-        mesh.Commit(); // the first published version carries the attributes
+        mesh.Commit(); // the first committed version carries the attributes
     }
 
     public int AddNode(double x, double y, double z)

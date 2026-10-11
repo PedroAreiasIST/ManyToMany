@@ -1,5 +1,23 @@
 // ParallelCutVerify.cs — the concurrent cutter against the sequential cutter and the oracle.
 //
+// Copyright (C) 2026 Pedro Miguel de Almeida Areias
+//
+// This file is part of ManyToMany.
+//
+// ManyToMany is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// ManyToMany is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with ManyToMany. If not, see <https://www.gnu.org/licenses/>.
+//
+//
 //   verify-cutpar n rounds seed threads
 //
 // Two copies of the mixed box mesh are cut in successive rounds with the same groups of
@@ -10,7 +28,7 @@
 // whole box is added (everything merged). Each
 // round requires: the same node count and node parents, the same multiset of rows
 // together with the ancestor element recorded through ElementSplit, every derived
-// structure equal to the oracle, conformity, and unchanged published versions (content
+// structure equal to the oracle, conformity, and unchanged committed versions (content
 // hash of the previous version after the concurrent copy-on-write). Every third round
 // reverts the cut of one group with Uncut on its own record and the same edges on the
 // sequential record, and compares again; every fourth round rolls the parallel copy
@@ -148,7 +166,7 @@ public static class ParallelCutVerify
                 for (var d = 0; d < 3; d++)
                     x.Add(0.5 * (x[3 * a + d] + x[3 * b + d]));
 
-            if (Oracle.Hash(before) != beforeHash) throw new Exception($"round {r}: published version modified");
+            if (Oracle.Hash(before) != beforeHash) throw new Exception($"round {r}: committed version modified");
             Compare(sp, ss, op, os, res, recS, $"round {r}");
             edgesCut += recS.Edges.Length;
             groupsApplied += res.Groups.Length;

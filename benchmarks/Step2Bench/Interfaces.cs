@@ -1,5 +1,23 @@
 // Interfaces.cs — inclusion interfaces inserted by concurrent cutting.
 //
+// Copyright (C) 2026 Pedro Miguel de Almeida Areias
+//
+// This file is part of ManyToMany.
+//
+// ManyToMany is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// ManyToMany is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with ManyToMany. If not, see <https://www.gnu.org/licenses/>.
+//
+//
 //   interfaces n g threads out
 //
 // Kuhn box [-1,1]^3 of 6 n^3 tetrahedra; g^3 spheres of radius 0.35 (2/g) centered in the
@@ -61,7 +79,7 @@ public static class Interfaces
 
         IncrementalMesh NewMesh(out Attribute<double> X, out Attribute<double> Y, out Attribute<double> Z)
         {
-            var flat = FlatBuild.Build(ElementSpec.Tetrahedron, nN, rows, parallel: true);
+            var flat = FlatBuild.Initial(ElementSpec.Tetrahedron, nN, rows);
             var m = new IncrementalMesh(flat, ElementSpec.Tetrahedron, persistent: true);
             X = m.AddAttribute(AttributeKind.Node, 0.0);
             Y = m.AddAttribute(AttributeKind.Node, 0.0);

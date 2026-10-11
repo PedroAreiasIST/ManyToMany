@@ -1,0 +1,13 @@
+\documentclass[11pt]{article}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,graphicx}
+\usepackage[paperwidth=16cm,paperheight=19.3cm,margin=0pt]{geometry}
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\newcommand{\panel}[2]{\begin{minipage}[t]{0.495\textwidth}\centering
+  \includegraphics[width=\textwidth,trim=28pt 23pt 68pt 24pt,clip]{seam#1.pdf}\\[-1pt]
+  {\footnotesize #2}\end{minipage}}
+\begin{document}
+\noindent\panel{5}{(a) front 5, $a=0.255$}\hfill\panel{8}{(b) front 8, $a=0.469$}\\[6pt]
+\panel{10}{(c) front 10, $a=0.672$}\hfill\panel{12}{(d) front 12, $a=0.870$}
+\end{document}

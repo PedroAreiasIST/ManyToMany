@@ -1,5 +1,23 @@
 // Cutter.cs — local Steiner-point-free edge cutting on an IncrementalMesh.
 //
+// Copyright (C) 2026 Pedro Miguel de Almeida Areias
+//
+// This file is part of ManyToMany.
+//
+// ManyToMany is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// ManyToMany is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with ManyToMany. If not, see <https://www.gnu.org/licenses/>.
+//
+//
 // A cut takes a list of marked node pairs. Each distinct pair receives one new node,
 // labelled above every existing node in the order of first appearance in the list
 // (the order of the batch cutter). The elements containing a marked edge are the
@@ -7,7 +25,7 @@
 // Only these elements change: each is replaced by the children of its template
 // (Templates), the first child keeping the parent's index and the others appended,
 // and point elements at an endpoint of a marked edge are copied to its new node.
-// Every derived structure follows through the delta rules of IncrementalMesh, so a
+// Every derived structure follows through the update rules of IncrementalMesh, so a
 // cut costs time proportional to the shells, not to the mesh. Because a template
 // depends only on the row, the midpoint labels and their relative order, the cut
 // produces the same rows as the batch cutter applied to the whole mesh.
@@ -58,6 +76,15 @@ public sealed class EdgeKeyComparer : IEqualityComparer<long>
     public int GetHashCode(long x) => (int)(((ulong)x * 0x9E3779B97F4A7C15UL) >> 32);
 }
 
+/// <summary>A cut rejected before any write because a pattern row could exceed its chunk.</summary>
+public sealed class RowLimitException(int node, int bound)
+    : InvalidOperationException($"cut rejected: the pattern row of node {node} could reach {bound} columns " +
+                                $"(limit {IncrementalMesh.MaxRowSlots}); the mesh is unchanged")
+{
+    public int Node => node;
+    public int Bound => bound;
+}
+
 public static partial class Cutter
 {
     /// <summary>Elements (any length >= 2) containing both a and b, ascending.</summary>
@@ -80,24 +107,52 @@ public static partial class Cutter
     }
 
     /// <summary>
-    ///     Cuts the marked edges. Pairs are unordered; duplicates are ignored. A pair that is
-    ///     not an edge of the mesh still receives a node, as in the batch cutter.
+    ///     Cuts the marked edges. Pairs are unordered; duplicates are ignored. A pair of existing
+    ///     nodes that is not an edge of the mesh still receives a node, as in the batch cutter. A
+    ///     cut that could give a pattern row more than <see cref="IncrementalMesh.MaxRowSlots"/>
+    ///     columns is rejected with <see cref="RowLimitException"/> before any write.
     /// </summary>
     public static CutRecord Cut(IncrementalMesh m, IReadOnlyList<(int, int)> marked, ICutObserver? obs = null)
     {
         var first = m.NodeCount;
         var e0 = m.ElementCount;
+        // ---- labels: the next node labels in order of first appearance (nodes are created after the checks)
         var mid = new Dictionary<long, int>(marked.Count, EdgeKeyComparer.Instance);
         var edges = new List<(int, int, int)>(marked.Count);
         foreach (var (p, q) in marked)
         {
             if (p == q) throw new ArgumentException($"degenerate pair ({p},{p})");
+            if ((uint)p >= (uint)first || (uint)q >= (uint)first)
+                throw new ArgumentOutOfRangeException(nameof(marked), $"pair ({p},{q}) is not a pair of existing nodes");
             int a = Math.Min(p, q), b = Math.Max(p, q);
             var key = Key(a, b);
             if (mid.ContainsKey(key)) continue;
-            var c = m.AddNode();
+            var c = first + edges.Count;
             mid[key] = c;
             edges.Add((a, b, c));
+        }
+
+        // ---- shells of the marked edges (elements of length >= 2), each element once
+        var affected = new HashSet<int>();
+        var shell = new List<int>();
+        List<(int A, int B)>? wideShells = null;
+        foreach (var (a, b, _) in edges)
+        {
+            shell.Clear();
+            Shell(m, a, b, shell);
+            foreach (var g in shell)
+                if (m.Row(g).Length >= 2)
+                    affected.Add(g);
+            // the row of the new node holds at most the nodes and midpoints of its shell
+            if (10 * shell.Count > IncrementalMesh.MaxRowSlots) (wideShells ??= new()).Add((a, b));
+        }
+
+        CheckRowLimit(m, affected, mid, wideShells);
+
+        // ---- nodes
+        foreach (var (a, b, c) in edges)
+        {
+            if (m.AddNode() != c) throw new InvalidOperationException("node labels changed during the cut");
             obs?.NodeCreated(c, a, b);
         }
 
@@ -120,18 +175,6 @@ public static partial class Cutter
                     obs?.ElementSplit(pe, ne);
                 }
             }
-        }
-
-        // ---- shells of the marked edges (elements of length >= 2), each element once
-        var affected = new HashSet<int>();
-        var shell = new List<int>();
-        foreach (var (a, b, _) in edges)
-        {
-            shell.Clear();
-            Shell(m, a, b, shell);
-            foreach (var g in shell)
-                if (m.Row(g).Length >= 2)
-                    affected.Add(g);
         }
 
         var order = affected.ToArray();
@@ -249,6 +292,66 @@ public static partial class Cutter
             Points = points.ToArray(), FirstNewNode = rec.FirstNewNode, ElementsBefore = rec.ElementsBefore,
             ShellElements = splits.Count
         };
+    }
+
+    /// <summary>
+    ///     Rejects a cut whose rows could exceed <see cref="IncrementalMesh.MaxRowSlots"/> columns,
+    ///     before any write. A child row holds nodes of its parent and midpoints of its marked
+    ///     edges, so the row of an existing node v gains at most the midpoints of the parents
+    ///     containing v, at most 6 |T(v)|, and the row of a new node holds at most the nodes and
+    ///     midpoints of its shell. While the mesh-wide bounds of row length and degree keep the first
+    ///     bound below the limit, the check costs O(1); otherwise only the rows for which the bounds
+    ///     exceed the limit are counted exactly (current length plus distinct new columns, an upper
+    ///     bound of the final length).
+    /// </summary>
+    private static void CheckRowLimit(IncrementalMesh m, HashSet<int> parents, Dictionary<long, int> mid,
+        List<(int A, int B)>? wideShells)
+    {
+        const int max = IncrementalMesh.MaxRowSlots;
+        HashSet<int>? suspects = null;
+        if (m.RowLengthBound + 6 * m.DegreeBound > max)
+            foreach (var e in parents)
+                foreach (var v in m.Row(e))
+                    if (m.PatternRow(v).Length + 3 * m.TransposePairs(v).Length > max)
+                        (suspects ??= new()).Add(v);
+
+        var cols = new HashSet<int>();
+        if (suspects != null)
+            foreach (var v in suspects)
+            {
+                cols.Clear();
+                var tr = m.TransposePairs(v);
+                for (var q = 0; q < tr.Length; q += 2)
+                    if (parents.Contains(tr[q]))
+                        Midpoints(m.Row(tr[q]), mid, cols);
+                var bound = m.PatternRow(v).Length + cols.Count;
+                if (bound > max) throw new RowLimitException(v, bound);
+            }
+
+        if (wideShells == null) return;
+        var shell = new List<int>();
+        foreach (var (a, b) in wideShells)
+        {
+            shell.Clear();
+            Shell(m, a, b, shell);
+            cols.Clear();
+            foreach (var g in shell)
+            {
+                var row = m.Row(g);
+                foreach (var x in row) cols.Add(x);
+                Midpoints(row, mid, cols);
+            }
+
+            if (cols.Count > max) throw new RowLimitException(mid[Key(a, b)], cols.Count);
+        }
+    }
+
+    private static void Midpoints(ReadOnlySpan<int> row, Dictionary<long, int> mid, HashSet<int> cols)
+    {
+        for (var i = 0; i < row.Length; i++)
+        for (var j = i + 1; j < row.Length; j++)
+            if (mid.TryGetValue(Key(row[i], row[j]), out var c))
+                cols.Add(c);
     }
 
     /// <summary>Children of one row under the marked-edge map (new node labels).</summary>

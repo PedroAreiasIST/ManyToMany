@@ -38,3 +38,11 @@ BenchmarkDotNet.Artifacts/
 
 ## Step2Bench measurement output
 benchmarks/Step2Bench/data/
+
+## IDE state, private solver trees, archives and measurement output (step2, 2026-10-11)
+.idea/
+*.user
+SimPlas-*/
+*.tar.gz
+benchmarks/Step2/data*/
+benchmarks/Step2/logs*/

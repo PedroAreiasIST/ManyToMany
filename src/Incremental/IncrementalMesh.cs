@@ -1,4 +1,22 @@
-// IncrementalMesh.cs — delta maintenance of the MM3 derived connectivity structures.
+// IncrementalMesh.cs — incremental maintenance of the MM3 derived connectivity structures.
+//
+// Copyright (C) 2026 Pedro Miguel de Almeida Areias
+//
+// This file is part of ManyToMany.
+//
+// ManyToMany is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// ManyToMany is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with ManyToMany. If not, see <https://www.gnu.org/licenses/>.
+//
 //
 // State (all persistent, see PArray):
 //   A      element -> ordered node row (empty row = deleted element)
@@ -33,6 +51,9 @@ public sealed class IncrementalMesh
     private const int IntShift = 10;  // 1024 ints per chunk
     private const int IntChunk = 1 << IntShift;
 
+    /// <summary>Largest pattern row (columns, the node itself included): one chunk.</summary>
+    public const int MaxRowSlots = IntChunk;
+
     public readonly ElementSpec Spec;
     private readonly int K, KK, Nf;
     private readonly int[][] _facetLocal;
@@ -59,6 +80,11 @@ public sealed class IncrementalMesh
 
     private int _nE, _nN, _total, _bCount, _colorCount;
     private long _garbage;
+
+    // upper bounds of the longest pattern row and of the largest node degree; they never decrease
+    // (rollbacks keep them), so they stay bounds of every version, and the row-limit check of a cut
+    // costs O(1) while they are far from the limit
+    private int _rowLengthBound, _degreeBound;
     private Snapshot? _current;
 
     private readonly List<IAttribute> _attributes = new();
@@ -200,6 +226,12 @@ public sealed class IncrementalMesh
 
         _total = total;
         _garbage = garbage;
+        for (var v = 0; v < _nN; v++)
+        {
+            _rowLengthBound = Math.Max(_rowLengthBound, rowLen[v]);
+            _degreeBound = Math.Max(_degreeBound, s.TPtr[v + 1] - s.TPtr[v]);
+        }
+
         _RowStart = PArray<int>.FromFlat(_epoch, IntShift, -1, rowStart, _nN);
         _RowLen = PArray<int>.FromFlat(_epoch, IntShift, 0, rowLen, _nN);
         _RowCap = PArray<int>.FromFlat(_epoch, IntShift, 0, rowCap, _nN);
@@ -242,18 +274,39 @@ public sealed class IncrementalMesh
     public int TotalSlots => _total;
     public long GarbageSlots => _garbage;
 
+    /// <summary>At least the longest pattern row of any version (columns); never decreases.</summary>
+    public int RowLengthBound => Volatile.Read(ref _rowLengthBound);
+
+    /// <summary>At least the largest number of elements at a node in any version; never decreases.</summary>
+    public int DegreeBound => Volatile.Read(ref _degreeBound);
+
+    private void Raise(ref int bound, int value)
+    {
+        if (value <= Volatile.Read(ref bound)) return;
+        if (!Concurrent)
+        {
+            bound = value;
+            return;
+        }
+
+        int cur;
+        while ((cur = Volatile.Read(ref bound)) < value && Interlocked.CompareExchange(ref bound, value, cur) != cur)
+        {
+        }
+    }
+
     public (int Start, int Length) PatternRow(int v) => (_RowStart[v], _RowLen[v]);
     public ReadOnlySpan<int> PatternColumns(int v) =>
         _RowStart[v] < 0 ? ReadOnlySpan<int>.Empty : _Col.Segment(_RowStart[v], _RowLen[v]);
     public ReadOnlySpan<int> PatternCounts(int v) =>
         _RowStart[v] < 0 ? ReadOnlySpan<int>.Empty : _Cnt.Segment(_RowStart[v], _RowLen[v]);
 
-    /// <summary>Last published version (lock-free read).</summary>
+    /// <summary>Last committed version (lock-free read).</summary>
     public Snapshot Current => Volatile.Read(ref _current)!;
 
     /// <summary>
     ///     Registers a per-element or per-node array versioned with the mesh. Register before
-    ///     publishing the versions it must belong to: a rollback to a version published before
+    ///     committing the versions it must belong to: a rollback to a version committed before
     ///     the registration leaves the attribute unchanged.
     /// </summary>
     public Attribute<T> AddAttribute<T>(AttributeKind kind, T fill)
@@ -377,7 +430,7 @@ public sealed class IncrementalMesh
     public int SlotsToGrow(int v, int finalLength)
     {
         int cap, total = 0;
-        if (_RowStart[v] < 0)
+        if (v >= _nN || _RowStart[v] < 0) // a node not yet created (concurrent cut plan) or without a row
         {
             if (finalLength == 0) return 0;
             cap = CapacityFor(8);
@@ -587,6 +640,7 @@ public sealed class IncrementalMesh
         nr[2 * ins + 1] = p;
         Array.Copy(row, 2 * ins, nr, 2 * ins + 2, row.Length - 2 * ins);
         _T.Set(v, nr);
+        Raise(ref _degreeBound, n + 1);
         _EP.Set(e * K + p, ins);
         for (var q = ins + 1; q <= n; q++) _EP.Set(nr[2 * q] * K + nr[2 * q + 1], q);
         Count(CShifts, n - ins);
@@ -653,6 +707,7 @@ public sealed class IncrementalMesh
         _Col.Set(rs + len, m);
         _Cnt.Set(rs + len, 0);
         _RowLen.Set(v, len + 1);
+        Raise(ref _rowLengthBound, len + 1);
         return len;
     }
 
@@ -981,13 +1036,13 @@ public sealed class IncrementalMesh
     // ================================================================ versions
 
     /// <summary>
-    ///     Publishes the working state as an immutable version (persistent mode) and returns it.
+    ///     Commits the working state as an immutable version (persistent mode) and returns it.
     ///     In transient mode the returned snapshot aliases the working arrays and is valid
     ///     only until the next edit.
     /// </summary>
     public Snapshot Commit()
     {
-        var snap = new Snapshot(K, Nf, _nE, _nN, _total, _bCount, _colorCount, _garbage, _epoch.Value,
+        var snap = new Snapshot(K, Nf, _nE, _nN, _total, _bCount, _colorCount, _garbage, _epoch.Value, _persistent,
             _A.Freeze(), _T.Freeze(), _EP.Freeze(), _Dest.Freeze(), _FA.Freeze(), _Color.Freeze(),
             _RowStart.Freeze(), _RowLen.Freeze(), _RowCap.Freeze(), _Col.Freeze(), _Cnt.Freeze(),
             _BList.Freeze(), _BPos.Freeze(), _attributes.Select(a => a.Freeze()).ToArray());
@@ -996,7 +1051,7 @@ public sealed class IncrementalMesh
         return snap;
     }
 
-    /// <summary>Makes a published version the working state again; O(1) in the mesh size.</summary>
+    /// <summary>Makes a committed version the working state again; O(1) in the mesh size.</summary>
     public void Rollback(Snapshot s)
     {
         if (!_persistent) throw new InvalidOperationException("rollback requires persistent mode");

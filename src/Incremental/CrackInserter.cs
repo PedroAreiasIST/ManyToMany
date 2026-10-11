@@ -1,5 +1,23 @@
 // CrackInserter.cs — local insertion and growth of a crack given by two level sets.
 //
+// Copyright (C) 2026 Pedro Miguel de Almeida Areias
+//
+// This file is part of ManyToMany.
+//
+// ManyToMany is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// ManyToMany is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with ManyToMany. If not, see <https://www.gnu.org/licenses/>.
+//
+//
 // A crack increment is defined by a surface function phi_s and a region function
 // phi_r (the crack occupies phi_s = 0, phi_r < 0). Nodes carry a sign: 0 for nodes on
 // the surface (created by earlier increments, or joined to it), otherwise the sign of
@@ -372,7 +390,7 @@ public sealed class CrackInserter : ICutObserver
 
             return hasPlus && hasMinus ? FrontNode : Interior;
         }
-        if (roots.Count > 2)
+        if (roots.Count > 8)
         {
             var sb = new System.Text.StringBuilder();
             foreach (var g in _star)
@@ -387,8 +405,11 @@ public sealed class CrackInserter : ICutObserver
         // sides: every node of nonzero sign in a component must lie on one side; a component
         // holding both signs wraps around the extension of the surface beyond the front (a front
         // node on the domain boundary), and the node is not split
-        var plusRoot = -1;
-        var minusRoots = 0;
+        // A node whose star falls into more than two components is split into one node per component: the first component
+        // on the minus side keeps v, every other component receives a new node (with two components this is the
+        // + component, as before). Such a star arises where an earlier increment left an unsplit node between split ones.
+        var plusRoots = new List<int>();
+        var minusList = new List<int>();
         foreach (var r in roots)
         {
             int plusN = 0, minusN = 0;
@@ -405,37 +426,48 @@ public sealed class CrackInserter : ICutObserver
 
             if (plusN > 0 && minusN > 0) return FrontNode;
             if (plusN == 0 && minusN == 0) throw new InvalidOperationException($"node {v}: component without a signed node");
-            if (plusN > 0) plusRoot = r;
-            else minusRoots++;
+            if (plusN > 0) plusRoots.Add(r);
+            else minusList.Add(r);
         }
 
-        if (plusRoot < 0 || minusRoots != 1)
+        if (plusRoots.Count == 0 || minusList.Count == 0)
             throw new InvalidOperationException($"node {v}: components on the same side of the surface");
+        plusRoots.Sort();
+        minusList.Sort();
+        var others = plusRoots.Concat(minusList.Skip(1)).ToList();
+        var copies = new List<int>();
+        foreach (var root in others)
+        {
+            var c = _m.AddNode();
+            X.Set(c, X[v]);
+            Y.Set(c, Y[v]);
+            Z.Set(c, Z[v]);
+            OnSurface.Set(c, 1);
+            Parent1.Set(c, v);
+            Parent2.Set(c, v);
+            Weight.Set(c, 0);
+            foreach (var u in _fields) u.Set(c, u[v]);
+            foreach (var g in _star.Where(g => Find(g) == root).ToArray()) Relabel(g, v, c);
+            copies.Add(c);
+        }
 
-        var c = _m.AddNode();
-        X.Set(c, X[v]);
-        Y.Set(c, Y[v]);
-        Z.Set(c, Z[v]);
-        OnSurface.Set(c, 1);
-        Parent1.Set(c, v);
-        Parent2.Set(c, v);
-        Weight.Set(c, 0);
-        foreach (var u in _fields) u.Set(c, u[v]);
-
-        var plus = _star.Where(g => Find(g) == plusRoot).ToArray();
+        var cPlus = copies[0]; // the copy of the first + component
         // lower-dimensional elements at v: by the sign of their other nodes; points are copied
         var lower = new List<int>();
         for (var q = 0; q < tr.Length; q += 2)
             if (_m.Row(tr[q]).Length < 4)
                 lower.Add(tr[q]);
-        foreach (var g in plus) Relabel(g, v, c);
         foreach (var g in lower)
         {
             var row = _m.Row(g);
             if (row.Length == 1)
             {
-                var pe = _m.AddElement([c]);
-                Origin.Set(pe, Origin[g]);
+                foreach (var c in copies)
+                {
+                    var pe = _m.AddElement([c]);
+                    Origin.Set(pe, Origin[g]);
+                }
+
                 continue;
             }
 
@@ -443,10 +475,10 @@ public sealed class CrackInserter : ICutObserver
             foreach (var w in row)
                 if (w != v && (side = Sign(w, phiS)) != 0)
                     break;
-            if (side > 0) Relabel(g, v, c);
+            if (side > 0) Relabel(g, v, cPlus);
         }
 
-        return c;
+        return cPlus;
     }
 
     private void Relabel(int g, int v, int c)

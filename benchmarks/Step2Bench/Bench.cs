@@ -1,5 +1,23 @@
 // Bench.cs — measurement modes for the step2 paper.
 //
+// Copyright (C) 2026 Pedro Miguel de Almeida Areias
+//
+// This file is part of ManyToMany.
+//
+// ManyToMany is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// ManyToMany is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with ManyToMany. If not, see <https://www.gnu.org/licenses/>.
+//
+//
 // Every timing follows the protocol of the released MM3 harness: Release build,
 // tiered compilation off, server GC, threads pinned to the performance cores by
 // run-maxperf.sh, a full blocking collection before each timed region, and the
@@ -28,12 +46,9 @@ internal static partial class Bench
 {
     private static readonly ElementSpec Tet = ElementSpec.Tetrahedron;
 
-    // Output directory: $STEP2_DATA, else ./data under the working directory (the paper's
-    // own copy resolved step2/benchmarks/data relative to its bin folder, which does not
-    // exist in this repository).
-    internal static string DataDir =>
-        Directory.CreateDirectory(Environment.GetEnvironmentVariable("STEP2_DATA") ??
-                                  Path.Combine(Environment.CurrentDirectory, "data")).FullName;
+    private static string DataDir =>
+        Environment.GetEnvironmentVariable("STEP2_DATA") ??
+        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../benchmarks/data"));
 
     public static void Run(string mode, string[] a)
     {
@@ -57,9 +72,13 @@ internal static partial class Bench
             case "endtoend": EndToEnd(I(0, 55), I(1, 100)); break;
             case "cutpar": CutParallelBench(I(0, 55), I(1, 4), a.Length > 2 ? a[2] : "1,2,4,8,16", I(3, 5)); break;
             case "batchcut": BatchCutBench(I(0, 55), I(1, 4), I(2, 3)); break;
+            case "cutgc": CutGcBench(I(0, 55), I(1, 4), I(2, 5)); break;
             case "profile": ProfileRun(a.Length > 0 ? a[0] : "crack", I(1, 55), I(2, 1) == 1); break;
             default: throw new ArgumentException($"unknown mode {mode}");
         }
+
+        Console.WriteLine($"# collections inside timed regions: {_gcRegions} of {_timedRegions} regions, " +
+                          $"{_gcPauseTotal:F0} ms of pauses");
     }
 
     // ================================================================ helpers
@@ -91,8 +110,20 @@ internal static partial class Bench
                 GC.KeepAlive(st.Mirror!.Rebuild());
                 GC.KeepAlive(FlatBuild.Build(Tet, st.Mesh.NodeCount, CurrentRows(st.Mesh), false));
                 GC.KeepAlive(FlatBuild.Build(Tet, st.Mesh.NodeCount, CurrentRows(st.Mesh), true));
+                // a mesh above the thresholds of the threaded rebuild (chunked transpose, two colouring blocks)
+                var (rows24, _, nN24) = Kuhn.Box(24);
+                GC.KeepAlive(FlatBuild.Build(Tet, nN24, rows24, true, true));
+                GC.KeepAlive(FlatBuild.Build(Tet, nN24, rows24, true, false));
+                var fp = new FlatPattern();
+                fp.Refresh(snap);
                 var vals = new double[snap.TotalSlots];
-                AssembleGapped(snap, st, vals);
+                AssembleGapped(snap, fp, st, vals);
+                AssembleGather(snap, fp, st, vals);
+                AssembleColour(snap, fp, st, vals);
+                var xv = new double[snap.NodeCount];
+                var yv = new double[snap.NodeCount];
+                SpmvFlat(fp, vals, xv, yv);
+                SpmvGapped(snap, vals, xv, yv);
             }
         }
         finally
@@ -101,12 +132,58 @@ internal static partial class Bench
         }
     }
 
+    // Collector accounting of every timed region (server GC, blocking collections): the number of collections and the
+    // stop-the-world pause time inside the region. The pauses depend on what else the process holds, so a timing that
+    // contained a collection is read together with them (see GcSamples).
+    private static int _timedRegions, _gcRegions;
+    private static double _gcPauseTotal;
+    private static int LastGcCount;
+    private static double LastGcPauseMs;
+
     private static double TimeMs(Action a)
     {
+        var c0 = GC.CollectionCount(0);
+        var p0 = GC.GetTotalPauseDuration();
         var sw = Stopwatch.StartNew();
         a();
         sw.Stop();
+        LastGcCount = GC.CollectionCount(0) - c0;
+        LastGcPauseMs = (GC.GetTotalPauseDuration() - p0).TotalMilliseconds;
+        _timedRegions++;
+        if (LastGcCount > 0)
+        {
+            _gcRegions++;
+            _gcPauseTotal += LastGcPauseMs;
+        }
+
         return sw.Elapsed.TotalMilliseconds;
+    }
+
+    /// <summary>Wall times of repeated samples with the collector pause of each: the minimum and median of the wall
+    /// time, and of the time without the pauses (the time of the code itself, which does not depend on the collector).</summary>
+    private sealed class GcSamples
+    {
+        private readonly List<double> _wall = new(), _pause = new(), _free = new();
+        private readonly List<int> _count = new();
+
+        public void Add(double wall)
+        {
+            _wall.Add(wall);
+            _pause.Add(LastGcPauseMs);
+            _free.Add(wall - LastGcPauseMs);
+            _count.Add(LastGcCount);
+        }
+
+        private int At => _wall.IndexOf(_wall.Min());
+        public double Min => _wall.Min();
+        public double Median => Bench.Median(_wall);
+        public double FreeMin => _free.Min();
+        public double FreeMedian => Bench.Median(_free);
+        public double PauseAtMin => _pause[At];
+        public int CountAtMin => _count[At];
+        public string Text => $"gc {CountAtMin}x {PauseAtMin:F0} ms at the minimum; without pauses min {FreeMin:F2} ms, median {FreeMedian:F2} ms";
+        public string CsvTail => $"{PauseAtMin:F2},{CountAtMin},{FreeMin:F4},{FreeMedian:F4}";
+        public const string CsvHead = "gc_ms_at_min,gc_count_at_min,nogc_ms_min,nogc_ms_median";
     }
 
     private static void FullGC()
@@ -156,7 +233,7 @@ internal static partial class Bench
     private static MeshState Build(int n, bool persistent, bool mirror)
     {
         var (rows, coords, nN) = Kuhn.Box(n);
-        var flat = FlatBuild.Build(Tet, nN, rows, parallel: true);
+        var flat = FlatBuild.Initial(Tet, nN, rows);
         var mesh = new IncrementalMesh(flat, Tet, persistent);
         var st = new MeshState(mesh, coords, mirror ? new Mm3Mirror(rows) : null);
         FullGC();
@@ -182,7 +259,8 @@ internal static partial class Bench
     /// </summary>
     private static void Mm3Reference()
     {
-        using var w = Csv("mm3ref.csv", "elements,transpose_ms_min,transpose_ms_median,positions_ms_min,positions_ms_median");
+        using var w = Csv("mm3ref.csv", "elements,transpose_ms_min,transpose_ms_median,positions_ms_min,positions_ms_median," +
+                                        "transpose_nogc_ms_min,positions_nogc_ms_min,transpose_gc_ms_at_min,positions_gc_ms_at_min");
         Console.WriteLine($"{"elements",10} {"transpose (ms)",15} {"+positions (ms)",16}");
         foreach (var target in new[] { 10_000, 100_000, 1_000_000 })
         {
@@ -197,6 +275,7 @@ internal static partial class Bench
             }
 
             var extra = new List<int> { 0, 1, 2, 3 };
+            var gS = new GcSamples();
             var tS = Samples(() =>
             {
                 var p = new O2M(cells.Length);
@@ -204,8 +283,11 @@ internal static partial class Bench
                 using var m = new M2M(p);
                 m.GetElementsForNode(0);
                 m.AppendElements(extra);
-                return TimeMs(() => m.GetElementsForNode(0));
+                var ms = TimeMs(() => m.GetElementsForNode(0));
+                gS.Add(ms);
+                return ms;
             }, 7);
+            var gP = new GcSamples();
             var tP = Samples(() =>
             {
                 var p = new O2M(cells.Length);
@@ -213,14 +295,17 @@ internal static partial class Bench
                 using var m = new M2M(p);
                 m.EnsurePositionCaches();
                 m.AppendElements(extra);
-                return TimeMs(() =>
+                var ms = TimeMs(() =>
                 {
                     m.GetElementsForNode(0);
                     m.EnsurePositionCaches();
                 });
+                gP.Add(ms);
+                return ms;
             }, 7);
-            Console.WriteLine($"{target,10:N0} {tS[0],15:F2} {tP[0],16:F2}   (medians {tS[3]:F2} / {tP[3]:F2})");
-            w.WriteLine($"{target},{tS[0]:F4},{tS[3]:F4},{tP[0]:F4},{tP[3]:F4}");
+            Console.WriteLine($"{target,10:N0} {tS[0],15:F2} {tP[0],16:F2}   (medians {tS[3]:F2} / {tP[3]:F2}); without pauses {gS.FreeMin:F2} / {gP.FreeMin:F2}, " +
+                              $"pauses at the minimum {gS.PauseAtMin:F0} / {gP.PauseAtMin:F0} ms");
+            w.WriteLine($"{target},{tS[0]:F4},{tS[3]:F4},{tP[0]:F4},{tP[3]:F4},{gS.FreeMin:F4},{gP.FreeMin:F4},{gS.PauseAtMin:F2},{gP.PauseAtMin:F2}");
         }
     }
 

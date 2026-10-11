@@ -39,3 +39,15 @@ preferred-citation:
     name: Elsevier
   license: CC-BY-4.0
   url: "https://doi.org/10.1016/j.advengsoft.2026.104296"
+references:` (or replace preferred-citation when the paper is accepted)
+references:
+  - type: article
+    title: "Incremental, persistent and concurrent finite element connectivity for mesh cutting and crack growth"
+    authors:
+      - family-names: Areias
+        given-names: Pedro
+        orcid: "https://orcid.org/0000-0001-6865-1326"
+      - family-names: Silvestre
+        given-names: Nuno
+    year: 2026
+    status: preprint

@@ -1,5 +1,23 @@
 // FrontCurve.cs — a star-shaped planar crack front rho = R(psi), periodic cubic spline.
 //
+// Copyright (C) 2026 Pedro Miguel de Almeida Areias
+//
+// This file is part of ManyToMany.
+//
+// ManyToMany is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// ManyToMany is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with ManyToMany. If not, see <https://www.gnu.org/licenses/>.
+//
+//
 // The front lies in the crack plane (in-plane coordinates p, q; polar rho, psi). R is
 // interpolated through M equally spaced angles by a periodic cubic spline, so the
 // curve, its unit tangent and outward normal and its curvature are continuous. A point
@@ -112,16 +130,20 @@ public sealed class FrontCurve
     }
 
     /// <summary>Integral of a hat of half-width delta centered at psi0 along the curve (arc length).</summary>
-    public double HatLength(double psi0, double delta, int n = 400)
+    public double HatLength(double psi0, double delta, int n = 400, double psiLo = double.NegativeInfinity,
+        double psiHi = double.PositiveInfinity)
     {
+        // the part of the hat inside [psiLo, psiHi] (a front that ends on a free surface); unclipped: the whole hat
+        double xa = Math.Max(-delta, psiLo - psi0), xb = Math.Min(delta, psiHi - psi0);
+        if (xb <= xa) return 0;
         double sum = 0;
         for (var i = 0; i <= n; i++)
         {
-            var x = -delta + 2 * delta * i / n;
+            var x = xa + (xb - xa) * i / n;
             var w = i == 0 || i == n ? 0.5 : 1.0;
             sum += w * (1 - Math.Abs(x) / delta) * Normal(psi0 + x).Speed;
         }
 
-        return sum * 2 * delta / n;
+        return sum * (xb - xa) / n;
     }
 }

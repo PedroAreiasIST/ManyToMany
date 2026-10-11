@@ -1,4 +1,22 @@
 // Bench2.cs — crossover, interleaved, reads, concurrency, persistence, memory, end-to-end.
+//
+// Copyright (C) 2026 Pedro Miguel de Almeida Areias
+//
+// This file is part of ManyToMany.
+//
+// ManyToMany is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// ManyToMany is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with ManyToMany. If not, see <https://www.gnu.org/licenses/>.
+//
 
 using System.Diagnostics;
 using Numerical;
@@ -157,7 +175,8 @@ internal static partial class Bench
         }
 
         using var w = Csv("interleaved.csv",
-            "n,elements,marked,bisections,t_inc_ms,t_mm3_ms,us_per_bisection_inc,us_per_bisection_mm3,identical");
+            "n,elements,marked,bisections,t_inc_ms,t_mm3_ms,us_per_bisection_inc,us_per_bisection_mm3,identical," +
+            "gc_inc_ms,gc_mm3_ms,nogc_us_per_bisection_inc,nogc_us_per_bisection_mm3");
         foreach (var n in sizes.Split(',').Select(int.Parse))
         {
             // incremental
@@ -170,6 +189,7 @@ internal static partial class Bench
                 foreach (var e in marked) bis.Bisect(st, e);
                 st.Mesh.Commit();
             });
+            var pInc = LastGcPauseMs;
 
             // MM3 with lazy transpose rebuild
             var (rows, coords, _) = Kuhn.Box(n);
@@ -182,6 +202,7 @@ internal static partial class Bench
             {
                 foreach (var e in marked) mb.Bisect(e);
             });
+            var pMm3 = LastGcPauseMs;
 
             // both runs take identical decisions: compare the final element rows
             var identical = m.Count == st.Mesh.ElementCount;
@@ -190,9 +211,11 @@ internal static partial class Bench
 
             Console.WriteLine($"interleaved n={n}: {rows.Length:N0} el., {bis.Bisections:N0} bisections; " +
                               $"incremental {tInc:F1} ms ({1000 * tInc / bis.Bisections:F2} us/bisection), " +
-                              $"MM3 {tMm3:F1} ms ({1000 * tMm3 / mb.Bisections:F1} us/bisection); identical={identical}");
+                              $"MM3 {tMm3:F1} ms ({1000 * tMm3 / mb.Bisections:F1} us/bisection); identical={identical}; " +
+                              $"pauses {pInc:F0} and {pMm3:F0} ms, without pauses {1000 * (tInc - pInc) / bis.Bisections:F2} and {1000 * (tMm3 - pMm3) / mb.Bisections:F1} us/bisection");
             w.WriteLine($"{n},{rows.Length},{marked.Count},{bis.Bisections},{tInc:F3},{tMm3:F3}," +
-                        $"{1000 * tInc / bis.Bisections:F4},{1000 * tMm3 / mb.Bisections:F4},{identical}");
+                        $"{1000 * tInc / bis.Bisections:F4},{1000 * tMm3 / mb.Bisections:F4},{identical}," +
+                        $"{pInc:F2},{pMm3:F2},{1000 * (tInc - pInc) / bis.Bisections:F4},{1000 * (tMm3 - pMm3) / mb.Bisections:F4}");
         }
     }
 
@@ -319,6 +342,17 @@ internal static partial class Bench
         }
     }
 
+    [System.Runtime.InteropServices.DllImport("libc", SetLastError = true)]
+    private static extern int sched_setaffinity(int pid, nint cpusetsize, ref ulong mask);
+
+    /// <summary>Control of the reader scaling (STEP2_PINTHREADS=1): the calling thread runs on one CPU of the process set.</summary>
+    private static void PinCurrentThread(int cpu)
+    {
+        var mask = 1UL << cpu;
+        if (sched_setaffinity(0, sizeof(ulong), ref mask) != 0)
+            Console.Error.WriteLine($"  sched_setaffinity({cpu}) failed");
+    }
+
     private static void ConcurrentStep2(int n, int seconds, int readers, StreamWriter w)
     {
         var st = Build(n, persistent: true, mirror: false);
@@ -330,11 +364,14 @@ internal static partial class Bench
         var stop = 0;
         var counts = new long[readers];
         var threads = new Thread[readers];
+        var pin = Environment.GetEnvironmentVariable("STEP2_PINTHREADS") == "1"; // control: writer on CPU 0, reader i on CPU i + 1
+        if (pin) PinCurrentThread(0);
         for (var r = 0; r < readers; r++)
         {
             var id = r;
             threads[r] = new Thread(() =>
             {
+                if (pin) PinCurrentThread(1 + id);
                 var rng = new Random(100 + id);
                 long acc = 0, ops = 0;
                 while (Volatile.Read(ref stop) == 0)
@@ -356,10 +393,27 @@ internal static partial class Bench
 
         FullGC();
         var steps = new List<double>();
+        var noWriter = Environment.GetEnvironmentVariable("STEP2_NOWRITER") == "1"; // control: readers of a version that is not edited
+        var commitOnly = Environment.GetEnvironmentVariable("STEP2_COMMITONLY") == "1"; // control: a commit every 1 ms without edits
         var sw = Stopwatch.StartNew();
         foreach (var t in threads) t.Start();
         while (sw.Elapsed.TotalSeconds < seconds)
         {
+            if (noWriter)
+            {
+                Thread.Sleep(1);
+                continue;
+            }
+
+            if (commitOnly)
+            {
+                var c0 = sw.Elapsed.TotalMilliseconds;
+                mesh.Commit();
+                steps.Add(sw.Elapsed.TotalMilliseconds - c0);
+                Thread.Sleep(1);
+                continue;
+            }
+
             if (crack.Row >= crack.Steps)
             {
                 mesh.Rollback(baseSnap);
@@ -376,6 +430,13 @@ internal static partial class Bench
         foreach (var t in threads) t.Join();
         var elapsed = sw.Elapsed.TotalSeconds;
         var rate = counts.Sum() / elapsed;
+        if (steps.Count == 0)
+        {
+            Console.WriteLine($"  step2   readers={readers,2}: {rate / 1e6,9:F1} M reads/s over {elapsed:F2} s; no writer");
+            w.WriteLine($"step2,{readers},{rate:F0},{elapsed:F3},0,,");
+            return;
+        }
+
         Console.WriteLine($"  step2   readers={readers,2}: {rate / 1e6,9:F1} M reads/s over {elapsed:F2} s; " +
                           $"writer {steps.Count} steps, median {Median(steps):F2} ms, p90 {Quantile(steps, 0.9):F2} ms");
         w.WriteLine($"step2,{readers},{rate:F0},{elapsed:F3},{steps.Count},{Median(steps):F4},{Quantile(steps, 0.9):F4}");
@@ -487,7 +548,7 @@ internal static partial class Bench
         {
             for (var i = 0; i < 10_000; i++) mesh.Rollback(baseSnap);
         }), 5)[0] * 1000.0 / 10_000;
-        Out("rollback to a published version", rollbackUs, "us");
+        Out("rollback to a committed version", rollbackUs, "us");
 
         // first edit after a publication (directory and chunk copies) vs a transient mesh
         var gen = new RandomEdits(5);
@@ -553,7 +614,7 @@ internal static partial class Bench
         Console.WriteLine($"memory n={n}: {nE:N0} elements, {nN:N0} nodes");
         Out("element rows (int[][]), input", mRows - m0, nE);
 
-        var flat = FlatBuild.Build(Tet, nN, rows, true);
+        var flat = FlatBuild.Initial(Tet, nN, rows);
         FullGC();
         var mFlat = GC.GetTotalMemory(true);
         Out("flat derived structures (rebuild output)", mFlat - mRows, nE);

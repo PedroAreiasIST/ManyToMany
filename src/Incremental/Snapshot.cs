@@ -1,4 +1,22 @@
-// Snapshot.cs — an immutable published version of an IncrementalMesh.
+// Snapshot.cs — an immutable committed version of an IncrementalMesh.
+//
+// Copyright (C) 2026 Pedro Miguel de Almeida Areias
+//
+// This file is part of ManyToMany.
+//
+// ManyToMany is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// ManyToMany is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with ManyToMany. If not, see <https://www.gnu.org/licenses/>.
+//
 //
 // A snapshot holds the directory references of every array at publication time.
 // In persistent mode the writer never writes to those directories or chunks again,
@@ -20,12 +38,15 @@ public sealed class Snapshot
     public readonly long GarbageSlots;
     public readonly int Epoch;
 
+    /// <summary>False for a transient snapshot, which aliases the working arrays.</summary>
+    public readonly bool Persistent;
+
     internal readonly PView<int[]> A, T;
     internal readonly PView<int> EP, Dest, FA, ColorView, RowStart, RowLen, RowCap, Col, Cnt, BList, BPos;
     internal readonly object[] AttributeViews;
 
     internal Snapshot(int k, int nf, int nE, int nN, int total, int bCount, int colorCount, long garbage, int epoch,
-        PView<int[]> a, PView<int[]> t, PView<int> ep, PView<int> dest, PView<int> fa, PView<int> color,
+        bool persistent, PView<int[]> a, PView<int[]> t, PView<int> ep, PView<int> dest, PView<int> fa, PView<int> color,
         PView<int> rowStart, PView<int> rowLen, PView<int> rowCap, PView<int> col, PView<int> cnt,
         PView<int> bList, PView<int> bPos, object[] attributeViews)
     {
@@ -40,6 +61,7 @@ public sealed class Snapshot
         ColorCount = colorCount;
         GarbageSlots = garbage;
         Epoch = epoch;
+        Persistent = persistent;
         A = a;
         T = t;
         EP = ep;
@@ -92,6 +114,6 @@ public sealed class Snapshot
 
     public int BoundaryFacet(int i) => BList[i];
 
-    /// <summary>The attribute as published in this version.</summary>
+    /// <summary>The attribute as committed in this version.</summary>
     public PView<T> View<T>(Attribute<T> a) => (PView<T>)AttributeViews[a.Index];
 }

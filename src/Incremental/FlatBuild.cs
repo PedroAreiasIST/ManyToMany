@@ -1,5 +1,23 @@
 // FlatBuild.cs — from-scratch evaluation of every derived structure into flat arrays.
 //
+// Copyright (C) 2026 Pedro Miguel de Almeida Areias
+//
+// This file is part of ManyToMany.
+//
+// ManyToMany is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// ManyToMany is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with ManyToMany. If not, see <https://www.gnu.org/licenses/>.
+//
+//
 // This is the tuned rebuild: counting-sort transpose with node positions, element
 // positions, the node-node pattern with pair counts, assembly destinations, facet
 // adjacency, the boundary-facet list and a greedy colouring, each in one or two
@@ -125,12 +143,20 @@ public static class FlatBuild
         Build(spec, nNodes, rows, parallel, facetsAndColours: true);
 
     /// <summary>
+    ///     The initial state of an incremental mesh: every phase threaded except the colouring, which is
+    ///     the greedy colouring in element order, the rule the edits maintain (the threaded block colouring
+    ///     uses more colours, and the colour repairs of later edits cost more on it).
+    /// </summary>
+    public static FlatStructures Initial(ElementSpec spec, int nNodes, IReadOnlyList<int[]> rows) =>
+        Build(spec, nNodes, rows, parallel: true, facetsAndColours: true, greedyColouring: true);
+
+    /// <summary>
     ///     From-scratch evaluation. With <paramref name="facetsAndColours"/> false only the
     ///     structures MM3 also derives are built: transpose with node positions, element
     ///     positions, the node-node pattern and the destinations.
     /// </summary>
     public static FlatStructures Build(ElementSpec spec, int nNodes, IReadOnlyList<int[]> rows, bool parallel,
-        bool facetsAndColours)
+        bool facetsAndColours, bool greedyColouring = false)
     {
         int K = spec.K, KK = K * K, Nf = spec.Nf;
         var nE = rows.Count;
@@ -139,22 +165,27 @@ public static class FlatBuild
         var par = parallel && nE >= ParallelThreshold;
 
         // ---- 1. transpose by counting sort; ascending element order gives sorted rows
-        var tptr = new int[nNodes + 1];
-        for (var e = 0; e < nE; e++)
-            foreach (var v in A[e])
-                tptr[v + 1]++;
-        for (var v = 0; v < nNodes; v++) tptr[v + 1] += tptr[v];
-        var tpairs = new int[2 * tptr[nNodes]];
-        var fill = new int[nNodes];
-        Array.Copy(tptr, fill, nNodes);
-        for (var e = 0; e < nE; e++)
+        int[] tptr, tpairs;
+        if (par) (tptr, tpairs) = TransposeChunked(A, nE, nNodes);
+        else
         {
-            var row = A[e];
-            for (var p = 0; p < row.Length; p++)
+            tptr = new int[nNodes + 1];
+            for (var e = 0; e < nE; e++)
+                foreach (var v in A[e])
+                    tptr[v + 1]++;
+            for (var v = 0; v < nNodes; v++) tptr[v + 1] += tptr[v];
+            tpairs = new int[2 * tptr[nNodes]];
+            var fill = new int[nNodes];
+            Array.Copy(tptr, fill, nNodes);
+            for (var e = 0; e < nE; e++)
             {
-                var q = fill[row[p]]++;
-                tpairs[2 * q] = e;
-                tpairs[2 * q + 1] = p;
+                var row = A[e];
+                for (var p = 0; p < row.Length; p++)
+                {
+                    var q = fill[row[p]]++;
+                    tpairs[2 * q] = e;
+                    tpairs[2 * q + 1] = p;
+                }
             }
         }
 
@@ -271,20 +302,52 @@ public static class FlatBuild
                 Fa(e);
         s.FA = fa;
 
-        // ---- 5. boundary facets
-        var boundary = new List<int>();
-        for (var e = 0; e < nE; e++)
+        // ---- 5. boundary facets, in element order (per block, concatenated)
+        void Boundary(int lo, int hi, List<int> list)
         {
-            if (A[e].Length == 0) continue;
-            var nfe = spec.Mixed ? spec.FacetCount(A[e].Length) : Nf;
-            for (var f = 0; f < nfe; f++)
-                if (fa[e * Nf + f] < 0)
-                    boundary.Add(e * Nf + f);
+            for (var e = lo; e < hi; e++)
+            {
+                if (A[e].Length == 0) continue;
+                var nfe = spec.Mixed ? spec.FacetCount(A[e].Length) : Nf;
+                for (var f = 0; f < nfe; f++)
+                    if (fa[e * Nf + f] < 0)
+                        list.Add(e * Nf + f);
+            }
         }
 
-        s.Boundary = boundary.ToArray();
+        if (par)
+        {
+            var nb = Math.Max(1, Math.Min(64, nE / 4096));
+            var parts = new List<int>[nb];
+            Parallel.For(0, nb, b =>
+            {
+                parts[b] = new List<int>();
+                Boundary((int)((long)nE * b / nb), (int)((long)nE * (b + 1) / nb), parts[b]);
+            });
+            var boundary = new int[parts.Sum(l => l.Count)];
+            var at = 0;
+            foreach (var l in parts)
+            {
+                l.CopyTo(boundary, at);
+                at += l.Count;
+            }
 
-        // ---- 6. greedy colouring over the vertex-adjacency graph
+            s.Boundary = boundary;
+        }
+        else
+        {
+            var boundary = new List<int>();
+            Boundary(0, nE, boundary);
+            s.Boundary = boundary.ToArray();
+        }
+
+        // ---- 6. colouring over the vertex-adjacency graph
+        if (par && !greedyColouring)
+        {
+            (s.Color, s.ColorCount) = ColourParallel(A, nE, tptr, tpairs);
+            return s;
+        }
+
         var color = new int[nE];
         Array.Fill(color, -1);
         var used = new int[64];
@@ -301,6 +364,218 @@ public static class FlatBuild
         s.Color = color;
         s.ColorCount = colorCount;
         return s;
+    }
+
+    /// <summary>
+    ///     Transpose by a chunked counting sort: each of p contiguous element chunks counts its
+    ///     incidences per node and gives them chunk-local ranks; an exclusive scan over the chunks
+    ///     turns the ranks into positions. Chunk c precedes chunk c + 1 in every row, so the rows
+    ///     are sorted by element, as in the sequential sort.
+    /// </summary>
+    private static (int[] Ptr, int[] Pairs) TransposeChunked(int[][] A, int nE, int nNodes)
+    {
+        var chunks = Math.Max(1, Math.Min(Environment.ProcessorCount, nE / 4096));
+        chunks = (int)Math.Max(1, Math.Min(chunks, (512L << 20) / (4L * Math.Max(1, nNodes))));
+        var size = (nE + chunks - 1) / chunks;
+        var counts = new int[chunks][];
+        Parallel.For(0, chunks, c =>
+        {
+            var local = new int[nNodes];
+            for (int e = c * size, hi = Math.Min(nE, e + size); e < hi; e++)
+                foreach (var v in A[e])
+                    local[v]++;
+            counts[c] = local;
+        });
+
+        var tptr = new int[nNodes + 1];
+        Parallel.ForEach(System.Collections.Concurrent.Partitioner.Create(0, nNodes, 1 << 14), r =>
+        {
+            for (var v = r.Item1; v < r.Item2; v++)
+            {
+                var run = 0;
+                for (var c = 0; c < chunks; c++)
+                {
+                    var here = counts[c][v];
+                    counts[c][v] = run;
+                    run += here;
+                }
+
+                tptr[v + 1] = run;
+            }
+        });
+        for (var v = 0; v < nNodes; v++) tptr[v + 1] += tptr[v];
+
+        var tpairs = new int[2 * tptr[nNodes]];
+        Parallel.For(0, chunks, c =>
+        {
+            var next = counts[c];
+            for (int e = c * size, hi = Math.Min(nE, e + size); e < hi; e++)
+            {
+                var row = A[e];
+                for (var p = 0; p < row.Length; p++)
+                {
+                    var v = row[p];
+                    var q = tptr[v] + next[v]++;
+                    tpairs[2 * q] = e;
+                    tpairs[2 * q + 1] = p;
+                }
+            }
+        });
+        return (tptr, tpairs);
+    }
+
+    /// <summary>
+    ///     Deterministic parallel greedy colouring. The elements are split into contiguous blocks
+    ///     (their number depends on the element count only); each block is coloured greedily in
+    ///     element order against its own elements. An element that then has the colour of a smaller
+    ///     neighbour in another block is uncoloured, and the uncoloured elements are recoloured in
+    ///     rounds: an element is coloured once its uncoloured smaller neighbours are, with the
+    ///     smallest colour unused by its coloured neighbours. Every colour depends on the colours
+    ///     of earlier elements only, so the result does not depend on the thread schedule.
+    /// </summary>
+    private static (int[] Color, int Count) ColourParallel(int[][] A, int nE, int[] tptr, int[] tpairs)
+    {
+        var color = new int[nE];
+        Array.Fill(color, -1);
+        var nb = Math.Max(1, Math.Min(16, nE / 32768));
+        int Lo(int b) => (int)((long)nE * b / nb);
+        var block = new int[nE];
+        Parallel.For(0, nb, b =>
+        {
+            for (int e = Lo(b), hi = Lo(b + 1); e < hi; e++) block[e] = b;
+        });
+
+        // ---- 1. greedy per block; cross[e]: e has a neighbour in another block
+        var cross = new bool[nE];
+        Parallel.For(0, nb, b =>
+        {
+            var used = new int[64];
+            var stamp = 0;
+            for (int e = Lo(b), hi = Lo(b + 1); e < hi; e++)
+            {
+                var row = A[e];
+                if (row.Length == 0) continue;
+                stamp++;
+                var x = false;
+                foreach (var v in row)
+                    for (var q = tptr[v]; q < tptr[v + 1]; q++)
+                    {
+                        var g = tpairs[2 * q];
+                        if (g == e) continue;
+                        if (block[g] != b)
+                        {
+                            x = true;
+                            continue;
+                        }
+
+                        var c = color[g];
+                        if (c < 0) continue;
+                        if (c >= used.Length) Array.Resize(ref used, Math.Max(c + 1, 2 * used.Length));
+                        used[c] = stamp;
+                    }
+
+                var k = 0;
+                while (k < used.Length && used[k] == stamp) k++;
+                if (k == used.Length) Array.Resize(ref used, 2 * used.Length);
+                color[e] = k;
+                cross[e] = x;
+            }
+        });
+
+        // ---- 2. conflicts across blocks: the larger element of a pair with equal colours
+        var redo = new bool[nE];
+        Parallel.ForEach(System.Collections.Concurrent.Partitioner.Create(0, nE, 1 << 14), r =>
+        {
+            for (var e = r.Item1; e < r.Item2; e++)
+            {
+                if (!cross[e]) continue;
+                var ce = color[e];
+                var conflict = false;
+                foreach (var v in A[e])
+                {
+                    for (var q = tptr[v]; q < tptr[v + 1]; q++)
+                    {
+                        var g = tpairs[2 * q];
+                        if (g < e && block[g] != block[e] && color[g] == ce)
+                        {
+                            conflict = true;
+                            break;
+                        }
+                    }
+
+                    if (conflict) break;
+                }
+
+                redo[e] = conflict;
+            }
+        });
+        var pending = new List<int>();
+        for (var e = 0; e < nE; e++)
+            if (redo[e])
+            {
+                color[e] = -1;
+                pending.Add(e);
+            }
+
+        // ---- 3. recolouring in rounds (the smallest pending element is always ready)
+        var done = new bool[nE];
+        while (pending.Count > 0)
+        {
+            var list = pending.ToArray();
+            Parallel.ForEach(System.Collections.Concurrent.Partitioner.Create(0, list.Length, 256),
+                () => (Used: new int[64], Stamp: 0), (r, _, st) =>
+                {
+                    for (var i = r.Item1; i < r.Item2; i++)
+                    {
+                        var e = list[i];
+                        st.Stamp++;
+                        var ready = true;
+                        foreach (var v in A[e])
+                        {
+                            for (var q = tptr[v]; q < tptr[v + 1]; q++)
+                            {
+                                var g = tpairs[2 * q];
+                                if (g == e) continue;
+                                var c = Volatile.Read(ref color[g]);
+                                if (c < 0)
+                                {
+                                    if (redo[g] && g < e)
+                                    {
+                                        ready = false;
+                                        break;
+                                    }
+
+                                    continue;
+                                }
+
+                                if (c >= st.Used.Length) Array.Resize(ref st.Used, Math.Max(c + 1, 2 * st.Used.Length));
+                                st.Used[c] = st.Stamp;
+                            }
+
+                            if (!ready) break;
+                        }
+
+                        if (!ready) continue;
+                        var k = 0;
+                        while (k < st.Used.Length && st.Used[k] == st.Stamp) k++;
+                        if (k == st.Used.Length) Array.Resize(ref st.Used, 2 * st.Used.Length);
+                        Volatile.Write(ref color[e], k);
+                        done[e] = true;
+                    }
+
+                    return st;
+                }, _ => { });
+            pending.Clear();
+            foreach (var e in list)
+                if (!done[e])
+                    pending.Add(e);
+        }
+
+        var count = 0;
+        foreach (var c in color)
+            if (c + 1 > count)
+                count = c + 1;
+        return (color, count);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

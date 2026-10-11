@@ -1,5 +1,7 @@
-% P. Areias simple C# -- Numerical & Scientific Computing Edition -- traditional Main, no ref/in/out teaching examples
-% pdflatex csharp_perfect.tex (run twice for stable layout)
+% P. Areias simple C# -- Numerical & Scientific Computing Edition
+% Targets C# 14 / .NET 10. Design stance: explicit Main; 'out' is shown only
+% for READING the BCL Try-pattern, never as an API design recommendation.
+% Build: pdflatex p_areias_simple_csharp_final.tex  (run twice for stable layout)
 \documentclass[9pt,a4paper]{extarticle}
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
@@ -48,7 +50,7 @@
     checked,class,const,continue,decimal,default,delegate,do,double,
     else,enum,event,explicit,extension,extern,false,field,file,
     finally,fixed,float,for,foreach,goto,if,implicit,in,init,int,
-    interface,internal,is,lock,long,namespace,new,not,null,object,
+    interface,internal,is,lock,long,namespace,new,not,null,object,out,
     operator,override,params,partial,private,protected,public,
     readonly,record,ref,return,sbyte,sealed,short,sizeof,stackalloc,
     static,string,struct,switch,this,throw,true,try,typeof,uint,ulong,
@@ -82,7 +84,13 @@
     OperationCanceledException,Enum,SortedDictionary,SortedSet,
     ArraySegment,MemoryExtensions,HttpClient,EventHandler,
     StringSplitOptions,FileNotFoundException,IOException,
-    ArithmeticException,ObjectDisposedException},
+    ArithmeticException,ObjectDisposedException,Exception,
+    ArgumentException,OverflowException,InvalidCastException,
+    DivideByZeroException,IndexOutOfRangeException,NotSupportedException,
+    JsonException,IEnumerator,StringComparison,Convert,Debug,Trace,
+    Conditional,Assert,Stream,Comparer,EqualityComparer,BitConverter,
+    Half,Int128,UInt128,Fact,Theory,InlineData,AttributeTargets,
+    MidpointRounding,ValueType},
   morekeywords=[3]{Abs,Acos,Add,AddRange,AddScaled,
     AllocateUninitializedArray,AllocateArray,All,Any,Asin,AsBytes,
     AsMemory,AsPointer,AsRef,AsSpan,Atan,Atan2,Average,Cancel,
@@ -115,12 +123,13 @@
     WriteAllTextAsync,WriteAsync,WriteUnaligned,
     WriteDoubleLittleEndian,WriteLine,Zip,CreateDirectory,
     GetExtension,GetField,GetFileNameWithoutExtension,GetFullPath,
-    StartActivity,StartNew,Stop,Trim,TrimStart,TrimEnd,Compare,
+    StartActivity,StartNew,Stop,Trim,TrimStart,TrimEnd,Compare,Exists,
     OfType,LastOrDefault,Single,SingleOrDefault,ElementAt,Distinct,
-    OrderByDescending,Aggregate,IsNullOrEmpty,IsNullOrWhiteSpace,
+    Aggregate,IsNullOrEmpty,IsNullOrWhiteSpace,
     Join,Substring,StartsWith,EndsWith,ToLower,ToUpper,LoadAsync,
-    Process,Compute,Run,SuppressFinalize,Step,Solve,Work,
-    Exists,GetLength,FromDateTime},
+    Process,Compute,Run,Step,Solve,Work,
+    GetLength,FromDateTime,Clone,Throws,IsBoundary,Refine,
+    Stress,Energy,Of,ToRadians,Residual,Assemble,Norm2},
   morecomment=[l]{//},
   morecomment=[s]{/*}{*/},
   morestring=[b]",
@@ -164,11 +173,15 @@
     boxrule=0.4pt,
     borderline west={3pt}{0pt}{#1},
     arc=2pt, before skip=0pt, after skip=1.6mm,
-    breakable,
+    breakable, toprule at break=0pt, bottomrule at break=0pt,
   ]}{\end{tcolorbox}}
 
 \usepackage{multicol}
 \setlength{\columnsep}{2.6mm}
+% A breakable tcolorbox that splits at a PAGE boundary makes multicol skip
+% the rest of that page's second column, leaving it blank. The \columnbreak
+% commands in the body prevent that. If you add or resize cards, rebuild and
+% check that no second column comes up short; move the breaks if one does.
 
 \newcommand{\sectionbanner}[1]{%
   \vspace{0.4mm}%
@@ -183,8 +196,17 @@
   \vspace{0.5pt}}
 
 \newcommand{\code}[1]{{\ttfamily\bfseries #1}}
-\newcommand{\trap}[1]{{\fontsize{5.6pt}{6.8pt}\selectfont\color{trap}\bfseries TRAP:\,#1}}
-\newcommand{\note}[1]{{\fontsize{5.6pt}{6.8pt}\selectfont\itshape #1}}
+% Traps and notes are set in an unbreakable minipage. A tcolorbox column
+% break inside one would silently drop its colour and weight mid-sentence;
+% this keeps each one whole and moves it intact to the next column.
+\newcommand{\trap}[1]{\par\noindent
+  \begin{minipage}{\linewidth}%
+  {\fontsize{5.6pt}{6.8pt}\selectfont\color{trap}\bfseries TRAP:\,#1}%
+  \end{minipage}\par}
+\newcommand{\note}[1]{\par\noindent
+  \begin{minipage}{\linewidth}%
+  {\fontsize{5.6pt}{6.8pt}\selectfont\itshape #1}%
+  \end{minipage}\par}
 
 \usepackage{booktabs,array,colortbl,enumitem}
 \setlist[itemize]{leftmargin=3.5mm,itemsep=0.5pt,topsep=1pt,
@@ -200,6 +222,156 @@
 {\fontsize{6.4pt}{7.6pt}\selectfont\color{gray}
   \MakeUppercase{Numerical \& Scientific Computing Edition}}\par\vspace{0.8mm}
 {\color{secBg}\rule{\linewidth}{1pt}}\par\vspace{1.5mm}}
+
+% =====================================================================
+\sectionbanner{Orientation --- Read This First}
+\begin{multicols}{2}
+
+\begin{card}[acNavy]{bgNavy}{How to Use This Sheet}
+{\fontsize{6.0pt}{7.6pt}\selectfont
+Read in this order; each step is self-contained and takes minutes, not hours.
+\begin{enumerate}[leftmargin=4.2mm,itemsep=0.4pt,topsep=1pt,parsep=0pt]
+\item \textbf{Value vs Reference} (next card) --- the one model that, if
+  wrong, produces bugs you cannot debug.
+\item \textbf{From Fortran / C++ / Python} --- translate what you already know.
+\item \textbf{Program Structure} $\rightarrow$ \textbf{Control Flow} $\rightarrow$
+  \textbf{Arrays \& Ranges}. You can now write a solver.
+\item \textbf{Class}, \textbf{Records}, \textbf{Inheritance \& Interfaces} ---
+  how to organise it.
+\item \textbf{Testing} --- before you optimise anything.
+\item \textbf{Span} $\rightarrow$ \textbf{TensorPrimitives} $\rightarrow$
+  \textbf{Generic Math}. Only now think about speed.
+\item Keep \textbf{Numerical Correctness Traps} (last page) at your elbow
+  permanently.
+\end{enumerate}
+\vspace{1pt}
+Steps 1--5 are the language and its discipline. Everything after is
+\emph{performance}, which is worth nothing until the answer is right.}
+\sub{Minimum viable toolchain}
+\begin{lstlisting}[style=cs]
+// $ dotnet new console -n Solver && cd Solver
+// $ dotnet run                     // debug, slow, checked
+// $ dotnet run -c Release          // ALWAYS benchmark this one
+// $ dotnet new xunit -n Solver.Tests && dotnet test
+// $ dotnet format                  // canonical layout
+\end{lstlisting}
+\trap{Timing a Debug build is the most common benchmarking mistake. Measure
+with \code{-c Release}, or the number means nothing.}
+\end{card}
+
+\begin{card}[acRed]{bgRed}{Value vs Reference --- Get This Right First}
+\begin{lstlisting}[style=cs]
+// class = REFERENCE type: the variable holds a reference to a heap object
+public sealed class Node { public double X; }
+
+var n1 = new Node { X = 1 };
+var n2 = n1;  n2.X = 9;    // n1.X == 9   both names reach ONE object
+
+// double, int, bool = VALUE types: the variable holds the data itself
+double d1 = 1.0;
+double d2 = d1;  d2 = 9.0; // d1 == 1.0   assignment COPIED the value
+
+// Arrays are reference types, whatever they hold.
+double[] a = new double[3];
+double[] b = a;            b[0] = 7;  // a[0] == 7: alias, no copy
+double[] c = a.AsSpan().ToArray();    // explicit copy (no LINQ)
+
+// Arguments: the REFERENCE is passed by value.
+static void Fill (double[] v) { v[0] = 1; }          // caller SEES this
+static void Reset(double[] v) { v = new double[3]; } // caller sees NOTHING
+\end{lstlisting}
+\sub{Default equality is not the same}
+{\fontsize{6.0pt}{7.5pt}\selectfont
+\begin{tabular}{@{}p{20mm}p{62mm}@{}}
+\rowcolor{bgHdr}\textbf{Kind} & \textbf{\code{a.Equals(b)} / \code{a == b} out of the box}\\
+\code{class}  & reference identity --- two equal meshes compare unequal\\
+\code{record} & value equality, generated, \code{==} included\\
+\code{double}, \code{int} & the value itself\\
+\code{double[]} & reference identity --- \emph{not} the contents\\
+\end{tabular}}
+\sub{Which do I write?}
+{\fontsize{6.0pt}{7.5pt}\selectfont
+\code{sealed class} for anything with identity, ownership, or state ---
+a mesh, a solver, a material model. \code{record} when the object is defined
+entirely by its values and you want equality, \code{with}, and
+deconstruction generated for you. When unsure: \code{sealed class}.}
+\trap{Two arrays with identical contents are \emph{not} equal: \code{a == b}
+compares references, so it is \code{false} for distinct arrays and is almost
+never the test you wanted. Compare contents with
+\code{a.AsSpan().SequenceEqual(b)}.}
+\end{card}
+
+\columnbreak
+
+\begin{card}[acTeal]{bgTeal}{From Fortran / C++ / Python}
+\fontsize{5.9pt}{7.3pt}\selectfont
+\begin{tabular}{@{}p{37mm}@{\;}p{45mm}@{}}
+\rowcolor{bgHdr}\textbf{What you write today} & \textbf{C\#}\\
+\code{do i = 1, n} & \code{for (int i = 0; i < n; i++)} --- 0-based, always\\
+\code{a(i,j)}, column-major & \code{m[i,j]}, \textbf{row-major}; last index is contiguous\\
+\code{real(8) :: x} / \code{double x} & \code{double x} --- and \code{1.0} is already \code{double}\\
+\code{1.0d0} & \code{1.0} (use \code{1.0f} to \emph{force} \code{float})\\
+\code{allocate(a(n))} & \code{double[] a = new double[n];} --- zero-filled\\
+\code{deallocate} / \code{delete[]} & nothing: the GC owns managed memory\\
+\code{module} / \code{\#include} & \code{namespace} + \code{using} (names, not files)\\
+\code{intent(in) :: x(:)} & \code{ReadOnlySpan<double> x} --- no copy, no write\\
+\code{pointer}, \code{T*} & a reference type; \code{T*} only inside \code{unsafe}\\
+\code{nullptr} / \code{None} & \code{null}; the type \code{T?} says it may be\\
+\code{size(a)} / \code{len(a)} & \code{a.Length}\\
+\code{write(*,*) x} / \code{print(x)} & \code{Console.WriteLine(\$"\{x:G17\}")}\\
+NumPy \code{a[2:8]} (a view) & \code{a.AsSpan(2, 6)}; \code{a[2..8]} \textbf{copies}\\
+NumPy \code{a * b} & \code{TensorPrimitives.Multiply(a, b, y)}\\
+\code{dot\_product(a,b)} & \code{TensorPrimitives.Dot<double>(a, b)}\\
+\code{matmul} / \code{a @ b} & not in the BCL --- write it or take a dependency\\
+free function \code{def f(x)} & must be a \code{static} method inside a type\\
+\code{stop 1} / \code{exit(1)} & \code{return 1;} from \code{Main}\\
+\end{tabular}
+\trap{Row-major versus column-major is the costliest porting mistake: a loop
+nest transcribed literally from Fortran strides the wrong way through cache.
+Iterate so the \emph{last} index varies fastest.}
+\end{card}
+
+\begin{card}[acGreen]{bgGreen}{Visibility, Lifetime \& \texttt{static}}
+\fontsize{6.0pt}{7.5pt}\selectfont
+\begin{tabular}{@{}p{22mm}p{60mm}@{}}
+\rowcolor{bgHdr}\textbf{Modifier} & \textbf{Visible to}\\
+\code{public}    & everyone, including other assemblies\\
+\code{internal}  & this assembly only --- \emph{default for top-level types}\\
+\code{protected} & this type and anything deriving from it\\
+\code{private}   & this type only --- \emph{the default for members}\\
+\code{protected internal} & this assembly \emph{or} any derived type\\
+\code{private protected} & derived types \emph{within} this assembly\\
+\code{file}      & this source file only (source generators)\\
+\end{tabular}
+\begin{lstlisting}[style=cs]
+public sealed class Solver
+{
+  // const: compile-time literal, baked into every call site
+  public const double Tol = 1e-10;
+
+  // static readonly: one per type, set once, any expression
+  public static readonly double Sqrt2 = Math.Sqrt(2.0);
+
+  // readonly: one per instance, set in ctor or initializer only
+  private readonly double[] _k;
+
+  // static: belongs to the TYPE, not to any instance
+  public static int InstanceCount;
+
+  public Solver(int n) { _k = new double[n]; InstanceCount++; }
+}
+// A static class cannot be instantiated or inherited:
+public static class Constants { public const double G = 9.80665; }
+\end{lstlisting}
+\trap{Changing a \code{public const} in a library and recompiling only that
+library does \emph{not} update consumers --- the old literal is already inlined
+into their IL. For any value that might change, use \code{static readonly}.}
+\note{Mutable \code{static} state is shared by every thread in the process.
+Either make it immutable, or protect it with a \code{Lock}. Static fields are
+the usual reason a parallel run gives a different answer each time.}
+\end{card}
+
+\end{multicols}
 
 % =====================================================================
 \sectionbanner{Language Fundamentals}
@@ -225,6 +397,13 @@ public static class Program
         Console.WriteLine($"norm = {Norm(x):G17}");
         return 0;
     }
+    // Awaiting at the entry point? Change the signature, nothing else:
+    //   public static async Task<int> Main(string[] args)
+
+    // Tutorials usually drop Program/Main entirely ("top-level statements":
+    // just write the statements in Program.cs). Identical semantics -- the
+    // compiler synthesises this exact shape. Kept explicit here so the
+    // structure of a program stays visible.
 
     private static double Norm(ReadOnlySpan<double> x)
     {
@@ -309,14 +488,15 @@ const double UnitRoundoff = 1.1102230246251565e-16; // eps/2
 bool ok = double.IsFinite(x);   // not NaN, not Infinity
 bool sub = double.IsSubnormal(x);
 \end{lstlisting}
-\trap{\code{x == double.NaN} is always \code{false}; use \code{double.IsNaN(x)}.}
-\trap{\code{double.NaN.CompareTo(1.0)} returns $-1$ (NaN sorts as least);
-  but \code{NaN < 1.0} is \code{false}. Sort and compare disagree.}
+\trap{NaN breaks both equality and ordering. \code{x == double.NaN} is always
+\code{false} --- test with \code{double.IsNaN(x)}. And
+\code{double.NaN.CompareTo(1.0)} returns $-1$ (NaN sorts as least) while
+\code{NaN < 1.0} is \code{false}: sorting and comparison disagree.}
 \end{card}
 
 \begin{card}[acOrange]{bgOrange}{System.Math, double \& Numeric Constants}
 \fontsize{6.05pt}{7.5pt}\selectfont
-\begin{tabular}{@{}p{24mm}p{24mm}@{}}
+\begin{tabular}{@{}p{30mm}p{26mm}@{}}
 \rowcolor{bgHdr}\textbf{Method} & \textbf{Notes}\\
 \code{Sin Cos Tan} & radians\\
 \code{Asin Acos Atan} & inverses\\
@@ -519,7 +699,7 @@ object invariants require it. Equal objects must hash equal, and hash values
 must remain stable while used as dictionary keys.}
 \end{card}
 
-\begin{card}[acTeal]{bgTeal}{Records \& Record Structs (Vec3)}
+\begin{card}[acTeal]{bgTeal}{Records \& Operator Overloading}
 \begin{lstlisting}[style=cs]
 // record class: reference type, value-based equality
 // Compiler synthesises Equals, GetHashCode, ToString,
@@ -531,9 +711,10 @@ Point a = new(1, 2);
 Point b = a with { Y = 5 };       // non-destructive copy
 var (x, y) = a;                   // deconstruct
 
-// readonly record struct: value type; no separate heap object
-// unless boxed/captured. Good for tiny vectors in inner loops
-public readonly record struct Vec3(double X, double Y, double Z)
+// A record carries operators like any other type. Seal it unless
+// you mean to inherit: record equality compares the RUNTIME type,
+// so a derived record never equals its base, even field-for-field.
+public sealed record Vec3(double X, double Y, double Z)
 {
   public double Norm  => Math.Sqrt(X*X + Y*Y + Z*Z);
   public Vec3   Unit  => this / Norm;
@@ -557,16 +738,87 @@ public readonly record struct Vec3(double X, double Y, double Z)
       a.X*b.Y - a.Y*b.X);
 }
 \end{lstlisting}
-\note{Mark structs \code{readonly} when possible: this avoids defensive
-copies on member access through \code{in} parameters. Value types are not
-``always stack allocated''; they may live inline in arrays or objects.}
+\note{Operators must be \code{static}, and should be pure --- one that
+mutates an operand will surprise every reader. \code{Vec3} here is a
+reference type, so each one is a heap object: fine for geometry and API
+boundaries, wasteful per element in a hot loop. For bulk arithmetic keep the
+data in \code{Span<double>} and use \code{TensorPrimitives}.}
 \end{card}
 
-\begin{card}[acPurple]{bgPurple}{Generics, INumber\textlangle T\textrangle\ \& Constraints}
+\columnbreak
+
+\begin{card}[acNavy]{bgNavy}{Inheritance, Interfaces \& Polymorphism}
 \begin{lstlisting}[style=cs]
-// where T : class | struct | unmanaged | new()
+// INTERFACE = a contract, no state. Prefer it to a base class.
+public interface IMaterial
+{
+  double Density { get; }
+  void Stress(ReadOnlySpan<double> strain, Span<double> sigma);
+  // Default body: optional to override, keeps the contract additive
+  double Energy(ReadOnlySpan<double> strain) => double.NaN;
+}
+
+// ABSTRACT CLASS = shared state + partial behaviour. Cannot be new'd.
+public abstract class Material(double rho) : IMaterial
+{
+  public double Density { get; } = rho;        // implements IMaterial
+  public abstract void Stress(                 // MUST be overridden
+      ReadOnlySpan<double> e, Span<double> s);
+  public virtual double Energy(                // MAY be overridden
+      ReadOnlySpan<double> e) => double.NaN;
+  public override string ToString() =>         // overrides object
+      $"{GetType().Name}(rho={Density:G6})";
+}
+
+public sealed class Hooke(double rho, double E, double nu) : Material(rho)
+{
+  public override void Stress(ReadOnlySpan<double> e, Span<double> s)
+  {
+    double mu = E / (2 * (1 + nu)), tr = e[0] + e[1] + e[2];
+    double lam = E * nu / ((1 + nu) * (1 - 2 * nu));
+    for (int i = 0; i < 3; i++) s[i] = lam * tr + 2 * mu * e[i];
+    for (int i = 3; i < 6; i++) s[i] = mu * e[i];
+  }
+  // base.X() calls the version this override replaced
+  public override string ToString() => base.ToString() + $" E={E:G3}";
+}
+
+// Virtual dispatch: the RUNTIME type decides which body runs
+IMaterial m = new Hooke(7800, 210e9, 0.3);
+m.Stress(strain, sigma);              // executes Hooke.Stress
+
+// EXPLICIT implementation: reachable ONLY through the interface
+public sealed class Rigid : IMaterial {
+  public double Density => 0.0;
+  void IMaterial.Stress(ReadOnlySpan<double> e, Span<double> s)
+      => s.Clear();                   // not visible on Rigid itself
+}
+\end{lstlisting}
+\sub{The four words, in one line each}
+{\fontsize{6.0pt}{7.5pt}\selectfont
+\begin{tabular}{@{}p{21mm}p{61mm}@{}}
+\code{abstract} & no body here; every concrete child \emph{must} supply one\\
+\code{virtual}  & there is a body; a child \emph{may} replace it\\
+\code{override} & this replaces the parent's body\\
+\code{sealed override} & replaces it, and blocks any further override\\
+\end{tabular}}
+\trap{Omitting \code{override} \emph{hides} instead of overriding.
+\code{class D : B \{ public double F() ... \}} warns (CS0114), and
+\code{B b = new D(); b.F();} then runs \code{B.F}. Write \code{override}, or
+\code{new} if the hiding is deliberate.}
+\trap{Virtual dispatch is an indirect call and blocks inlining. In an inner
+loop, call through the concrete \code{sealed} type rather than the interface
+--- the JIT can devirtualise and inline that; it cannot inline through
+\code{IMaterial}.}
+\note{One base class, any number of interfaces. Seal by default --- leaving a
+class open promises its internals stay stable forever.}
+\end{card}
+
+\begin{card}[acPurple]{bgPurple}{Generics, INumber\ensuremath{\langle}T\ensuremath{\rangle}\ \& Constraints}
+\begin{lstlisting}[style=cs]
+// where T : class | notnull | unmanaged | new()
 //       | IComparable<T> | INumber<T> | IFloatingPointIeee754<T>
-//       | allows ref struct  -- accepts Span<T> etc.
+//       | allows ref struct  -- lets T be Span<T> and friends
 
 // INumberBase<T> static surface (numeric primitives expose):
 //   T.Zero, T.One, T.AdditiveIdentity, T.MultiplicativeIdentity
@@ -592,7 +844,7 @@ public static T Norm<T>(ReadOnlySpan<T> x)
 }
 
 // Generic class with ref-returning indexer
-public sealed class DenseMatrix<T> where T : struct, INumber<T>
+public sealed class DenseMatrix<T> where T : INumber<T>
 {
   private readonly T[] _d;
   public int Rows { get; }
@@ -606,6 +858,65 @@ public sealed class DenseMatrix<T> where T : struct, INumber<T>
   public Span<T> AsFlat() => _d.AsSpan();
 }
 \end{lstlisting}
+\end{card}
+
+\begin{card}[acAmber]{bgAmber}{Conversions, Casting \& Boxing}
+\begin{lstlisting}[style=cs]
+// IMPLICIT: value-preserving, no cast written
+int i = 42;  long l = i;  double d = i;      // widening
+
+// EXPLICIT: information may be lost, so C# makes you say so
+double x = 3.9;
+int a = (int)x;                 //  3  TRUNCATES toward zero, never rounds
+int b = (int)(-3.9);            // -3  toward zero, NOT toward -infinity
+int c = (int)Math.Round(3.5);   //  4  banker's rounding
+int e = (int)Math.Round(2.5);   //  2  ... yes, really
+int f = Convert.ToInt32(3.9);   //  4  Convert ROUNDS; a cast TRUNCATES
+
+// Integer division stays integer
+double bad  = 1 / 2;            // 0.0   the classic first-day bug
+double good = 1.0 / 2;          // 0.5
+
+// Narrowing wraps silently unless you ask it not to
+long big = 1L << 40;
+int w = (int)big;               // 0, no diagnostic
+int s = checked((int)big);      // OverflowException
+
+// Generic math: name the out-of-range policy
+T p = T.CreateChecked(x);       // throws outside range
+T q = T.CreateSaturating(x);    // clamps to T.MinValue / T.MaxValue
+T r = T.CreateTruncating(x);    // wraps (modular)
+
+// Reference conversions
+object o  = mesh;               // upcast: always safe
+Mesh? m1  = o as Mesh;          // null if it is not a Mesh
+if (o is Mesh m2) Use(m2);      // test + bind -- prefer this form
+Mesh m3   = (Mesh)o;            // InvalidCastException if it is not
+
+// USER-DEFINED: implicit only when it can neither fail nor surprise
+public sealed record Metres(double Value) {
+  public static implicit operator double(Metres m) => m.Value;
+  public static explicit operator Metres(double v) => new(v);
+}
+double len = new Metres(2.5);   // implicit, silent
+var  two   = (Metres)2.0;       // explicit, deliberate
+
+// BOXING: a value type viewed through object or a non-generic interface
+object boxed = 3.14;            // ALLOCATES on the heap, and copies
+double back  = (double)boxed;   // unboxes (copies again)
+IComparable ic = 5;             // ALLOCATES
+\end{lstlisting}
+\trap{\code{(int)3.9} is \code{3} but \code{Convert.ToInt32(3.9)} is \code{4}.
+Two spellings that look interchangeable give different answers; pick one
+convention per code base and write it down.}
+\trap{Boxing is invisible in the source. It hides in \code{List<object>},
+non-generic comparers, \code{string.Format} taking \code{object}, and any
+value type reached through an interface variable. Constrain a generic
+(\code{where T : INumber<T>}) and the boxing disappears.}
+\note{\code{as} works only for reference types and \code{T?}; everywhere else
+use \code{is T v}. \code{(T)x} on a reference type is a checked cast that
+throws --- it is not a reinterpretation. To reinterpret \emph{bits}, use
+\code{BitConverter} or \code{MemoryMarshal}.}
 \end{card}
 
 \begin{card}[acOrange]{bgOrange}{Extension Members \& Lambdas}
@@ -634,7 +945,7 @@ public static class SpanExt
   }
   // Static extension: adds a static factory to Span<T>
   extension<T>(Span<T>) {
-    public static Span<T> Empty => default;
+    public static Span<T> Of(T[] a) => a.AsSpan();
   }
   // Static extension on a numeric type
   extension(double) {
@@ -759,19 +1070,19 @@ public sealed class NativeBuffer : IDisposable
     if (_p is null) return;
     NativeMemory.AlignedFree(_p);
     _p = null;
-    GC.SuppressFinalize(this);
-  }
+  }   // sealed, no finalizer => no GC.SuppressFinalize needed
 }
 using var buf = new NativeBuffer(8192);
 
 // Async cleanup
-public sealed class AsyncWriter : IAsyncDisposable {
+public sealed class AsyncWriter(Stream s) : IAsyncDisposable {
+  private readonly Stream _stream = s;
   public async ValueTask DisposeAsync() {
     await _stream.FlushAsync();
     _stream.Dispose();
   }
 }
-await using var w = new AsyncWriter();
+await using var w = new AsyncWriter(File.Create("o.bin"));
 
 // Modern lock primitive -- prefer over lock(object)
 private readonly Lock _gate = new();
@@ -803,7 +1114,14 @@ Span<int> rawNodes = CollectionsMarshal.AsSpan(nodes); // no List resize while u
 var w = new Dictionary<int, double>(capacity: 256);
 w[id] = value;                       // add or overwrite
 w.TryAdd(id, value);                 // false on duplicate
-if (w.ContainsKey(id)) { double v = w[id]; } // two lookups, clear API
+
+// The BCL Try-pattern: bool result + 'out' for the value. You will
+// READ this constantly, even if you never design an API around it.
+if (w.TryGetValue(id, out double v))  // ONE lookup; v declared inline
+    Use(v);                           // ... and still in scope here
+double.TryParse(s, out double t);     // never throws; t = 0 on failure
+w.Remove(id, out double gone);        // hands back what was removed
+if (w.TryGetValue(id, out _)) { }     // '_' discards the value
 
 // CollectionsMarshal.AsSpan(List<T>) is fast but invalidated by resize.
 // For dictionaries, prefer ordinary APIs unless profiling demands otherwise.
@@ -860,6 +1178,45 @@ q.Enqueue(42);
 \end{card}
 
 
+\begin{card}[acGreen]{bgGreen}{Iterators, \texttt{yield} \& Deferred Execution}
+\begin{lstlisting}[style=cs]
+// 'yield return' builds an IEnumerable<T> lazily: no list is materialised,
+// and the method resumes where it left off on each MoveNext.
+public static IEnumerable<int> BoundaryNodes(Mesh m) {
+  for (int i = 0; i < m.Count; i++)
+    if (m.IsBoundary(i)) yield return i;
+}
+foreach (int i in BoundaryNodes(mesh)) Assemble(i);
+
+// 'yield break' ends the sequence early
+public static IEnumerable<double> Residuals(double r0, double tol) {
+  double r = r0;
+  while (true) { yield return r; if (r < tol) yield break; r *= 0.1; }
+}
+
+// DEFERRED: calling the method runs NOTHING. The body advances only
+// while you enumerate -- so it sees the state at enumeration time.
+var q = BoundaryNodes(mesh);   // no work happens on this line
+mesh.Refine();                 // q will observe the REFINED mesh
+int[] snap = BoundaryNodes(mesh).ToArray();   // force it now
+
+// Enumerating twice re-runs the whole body twice.
+foreach (var i in q) { }   // pass 1
+foreach (var i in q) { }   // pass 2 -- recomputed from scratch
+\end{lstlisting}
+\trap{Deferred execution plus mutation is a genuine source of wrong results:
+build the sequence, mutate the mesh, then enumerate, and you silently get the
+new mesh. If the caller may mutate, materialise with \code{ToArray()} at the
+boundary.}
+\trap{An iterator method may not take \code{ref}/\code{out} parameters, and
+may not hold a \code{Span<T>} across a \code{yield}. Return counts and fill a
+caller-supplied \code{Span<T>} instead.}
+\note{Every \code{foreach} over an \code{IEnumerable<T>} allocates an
+enumerator and dispatches each \code{MoveNext} virtually. Excellent for setup
+and traversal; in an inner kernel return a \code{ReadOnlySpan<T>} or an
+index range and loop with \code{for}.}
+\end{card}
+
 \begin{card}[acPurple]{bgPurple}{LINQ: Useful, But Know the Cost}
 \begin{lstlisting}[style=cs]
 // Declarative and clear; often fine outside kernels
@@ -888,7 +1245,7 @@ low-level numerical kernels and parsers.}
 
 \begin{card}[acAmber]{bgAmber}{Span, Memory \& stackalloc}
 \begin{lstlisting}[style=cs]
-// Span<T>: stack-only ref-struct; zero-copy view; sync only
+// Span<T>: a stack-only view; zero-copy; synchronous only
 // CANNOT: be a class field, be boxed, cross await.
 double[] arr = new double[1024];
 Span<double> row = arr.AsSpan(off, len);   // no allocation
@@ -924,11 +1281,9 @@ static double Max(params ReadOnlySpan<double> values) {
   return m;
 }
 \end{lstlisting}
-\trap{\code{a[2..8]} on a \code{T[]} allocates a new array.
-Inside loops, ALWAYS use \code{a.AsSpan(2, 6)}.}
 \end{card}
 
-\begin{card}[acRed]{bgRed}{ref Returns, ref Locals \& ref struct}
+\begin{card}[acRed]{bgRed}{ref Returns \& ref Locals}
 \begin{lstlisting}[style=cs]
 // ref return + ref local: writes flow back to the source array
 static ref double At(double[] a, int i) => ref a[i];
@@ -947,19 +1302,14 @@ static double ParseStrict(string s) =>
 
 // BCL Try* APIs use out; consume them when needed,
 // but avoid designing your own numerical APIs around out parameters.
-
-// ref struct (Span<T>, ReadOnlySpan<T>, custom): stack-only
-public ref struct StackBuf {
-  private Span<double> _data;
-  public StackBuf(Span<double> d) => _data = d;
-  public ref double this[int i] => ref _data[i];
-}
 \end{lstlisting}
 \trap{Avoid \code{ref} parameters in public numerical APIs unless a measured
 interop or ABI constraint forces them. \code{ref} returns and short-lived
 \code{ref} locals are useful for indexed storage views; do not let such
 aliases outlive the storage operation that produced them.}
 \end{card}
+
+\columnbreak
 
 \begin{card}[acOrange]{bgOrange}{ArrayPool, NativeMemory, GC Control}
 \begin{lstlisting}[style=cs]
@@ -1021,8 +1371,7 @@ unsafe {
   fixed (double* p = dbl) { /* call native(p, ...) */ }
 }
 
-// Endian-aware binary I/O
-using System.Buffers.Binary;
+// Endian-aware binary I/O -- needs using System.Buffers.Binary;
 Span<byte> bytes = stackalloc byte[8];
 BinaryPrimitives.WriteDoubleLittleEndian(bytes, 3.14);
 double back = BinaryPrimitives.ReadDoubleLittleEndian(bytes);
@@ -1034,7 +1383,6 @@ ref double headRef = ref MemoryMarshal.GetArrayDataReference(arr);
 \begin{itemize}
 \item Capturing lambdas/delegates allocate or extend lifetimes; non-capturing delegates may be cached.
 \item Boxing via \code{object} or non-generic interfaces.
-\item Property access on large mutable structs (defensive copy).
 \item \code{string.Split} on huge inputs; use \code{SearchValues<char>}.
 \end{itemize}
 \sub{Closure capture trap}
@@ -1087,8 +1435,8 @@ array layout, ownership, and lifetime explicitly.}
 // NuGet/package may be needed depending on TFM.
 using System.Numerics.Tensors;
 
-ReadOnlySpan<double> a = ..., b = ..., c = ...;
-Span<double> y = ...;
+ReadOnlySpan<double> a = xs, b = ys, c = zs;  // inputs
+Span<double> y = dest;                        // len(y) == len(a)
 
 // Element-wise: y = a + b   (NOT matmul!)
 TensorPrimitives.Add(a, b, y);
@@ -1124,7 +1472,7 @@ ordinary multiply-plus-add API; use \code{FusedMultiplyAdd} for one-rounding
 FMA semantics when available for the element type.}
 \end{card}
 
-\begin{card}[acAmber]{bgAmber}{Portable SIMD: Vector\textlangle T\textrangle}
+\begin{card}[acAmber]{bgAmber}{Portable SIMD: Vector\ensuremath{\langle}T\ensuremath{\rangle}}
 \begin{lstlisting}[style=cs]
 using System.Numerics;
 // Vector<T> picks the widest hardware width at runtime
@@ -1182,7 +1530,7 @@ public static void Axpy<T>(T alpha, ReadOnlySpan<T> x, Span<T> y)
     y[i] += alpha * x[i];
 }
 
-// Kahan compensated sum: good when cancellation is moderate
+// Kahan compensated sum: recovers the rounding lost each step
 public static T SumKahan<T>(ReadOnlySpan<T> x)
     where T : IFloatingPointIeee754<T>
 {
@@ -1220,8 +1568,8 @@ public static T SumPairwise<T>(ReadOnlySpan<T> x) where T : INumber<T>
 public static T Hypot<T>(T x, T y)
     where T : IFloatingPointIeee754<T> => T.Hypot(x, y);
 \end{lstlisting}
-\trap{Generic math can inhibit some specialization and inlining decisions.
-For small dense kernels over \code{double}, keep specialized overloads and
+\trap{Generic math can inhibit some specialisation and inlining decisions.
+For small dense kernels over \code{double}, keep specialised overloads and
 profile against the generic version.}
 \end{card}
 
@@ -1252,14 +1600,13 @@ double[][] both = await Task.WhenAll(t1, t2);
 // Cancellation: pass token everywhere; check periodically
 var cts = new CancellationTokenSource();
 cts.CancelAfter(TimeSpan.FromSeconds(30));
-ct.ThrowIfCancellationRequested();
+cts.Token.ThrowIfCancellationRequested();
 
 // ValueTask: avoids heap alloc when synchronously cached
-public ValueTask<double> CachedAsync(int key) {
-  if (_cache.ContainsKey(key))
-    return ValueTask.FromResult(_cache[key]);
-  return new ValueTask<double>(LoadFromDiskAsync(key));
-}
+public ValueTask<double> CachedAsync(int key) =>
+  _cache.TryGetValue(key, out double hit)   // ONE lookup
+    ? ValueTask.FromResult(hit)
+    : new ValueTask<double>(LoadFromDiskAsync(key));
 \end{lstlisting}
 \trap{Do NOT \code{await} the same \code{ValueTask} twice. Convert
 to \code{Task} via \code{.AsTask()} if you need to.}
@@ -1291,8 +1638,8 @@ Parallel.For<double>(0, n,
 int p = Environment.ProcessorCount;
 double[] partial = new double[p];
 Parallel.For(0, p, t => {
-  int lo = (long)t * n / p;
-  int hi = (long)(t + 1) * n / p;
+  int lo = (int)((long)t * n / p);       // widen, then narrow
+  int hi = (int)((long)(t + 1) * n / p); // avoids t*n overflow
   double s = 0.0;
   for (int i = lo; i < hi; i++) s += values[i] * values[i];
   partial[t] = s;
@@ -1358,14 +1705,11 @@ string s = $"x = {x:F6}, n = {n:D6}";       // interpolation
 string p = @"C:\data\file.txt";             // verbatim
 string j = """{"x":3.14}""";                // raw
 
-// Numeric format specifiers (most useful for science)
-$"{v:G}"    // shortest round-trippable
-$"{v:G15}"  // 15 sig digits  (good default for double)
-$"{v:G17}"  // 17 sig digits  (full double precision)
-$"{v:E6}"   // 1.234568E+003
-$"{v:F4}"   // 1.2346
-$"{i:D6}"   // zero-padded: 000042
-$"{i:X8}"   // hex: 0000002A
+// Numeric format specifiers, as used inside $"{v:__}"
+//   G    shortest round-trippable    E6   1.234568E+003
+//   G15  15 sig digits               F4   1.2346
+//   G17  full double precision       D6   zero-padded 000042
+//   R    legacy round-trip           X8   hex 0000002A
 
 // ALWAYS use InvariantCulture for persisted numeric data
 double v = double.Parse(token, CultureInfo.InvariantCulture);
@@ -1379,9 +1723,15 @@ double x = double.Parse(tok, NumberStyles.Float,
 string txt = v.ToString("G17", CultureInfo.InvariantCulture);
 writer.Write(txt);
 
+// Ordinal vs culture -- these are DIFFERENT operations
+bool eq = a.Equals(b, StringComparison.Ordinal);       // code-unit-wise
+bool ci = a.Equals(b, StringComparison.OrdinalIgnoreCase);
+string.Compare("a", "B", StringComparison.Ordinal);          // +31 ('a'>'B')
+string.Compare("a", "B", StringComparison.InvariantCulture); //  -1 (a<B)
+
 // Multi-character search at SIMD speed
 SearchValues<char> delims = SearchValues.Create(",;\t ");
-int pos = line.IndexOfAny(delims);
+int pos = line.AsSpan().IndexOfAny(delims);  // .AsSpan() required
 
 // StringBuilder: avoids O(n^2) concatenation
 var sb = new StringBuilder(capacity: 1024);
@@ -1391,6 +1741,10 @@ sb.Append("Hello").AppendLine()
 \note{\code{G17} for double is round-trip exact (\code{G9} for float).
 \code{R} is the historical round-trip specifier; use \code{G17}
 in new code.}
+\trap{Culture-sensitive comparison depends on the machine's locale. Use
+\code{StringComparison.Ordinal} for keywords, file formats, dictionary keys,
+and anything a program parses; reserve culture-sensitive comparison for text
+shown to a person.}
 \end{card}
 
 \begin{card}[acPurple]{bgPurple}{Regex --- Source-Generated}
@@ -1555,6 +1909,97 @@ EventCounters expose GC stats, allocation rate, exceptions/sec.}
 \end{multicols}
 
 % =====================================================================
+\sectionbanner{Testing, Assertions \& Reproducibility}
+\begin{multicols}{2}
+
+\begin{card}[acGreen]{bgGreen}{Unit Tests for Numerical Code}
+\begin{lstlisting}[style=cs]
+// $ dotnet new xunit -n Solver.Tests
+// $ dotnet add Solver.Tests reference Solver
+// $ dotnet test                     // -c Release if timing matters
+using Xunit;
+
+public class NormTests
+{
+  [Fact]                                  // one fixed case
+  public void Norm_OfUnitAxis_IsOne() =>
+      Assert.Equal(1.0, Norm([1.0, 0.0, 0.0]), tolerance: 1e-15);
+
+  [Theory]                                // table-driven: 1 row = 1 test
+  [InlineData(3.0, 4.0, 5.0)]
+  [InlineData(0.0, 0.0, 0.0)]
+  [InlineData(1e200, 1e200, 1.414213562373095e200)]  // must not overflow
+  public void Hypot_IsOverflowSafe(double x, double y, double want) =>
+      Assert.Equal(want, double.Hypot(x, y),
+                   tolerance: 1e-12 * Math.Abs(want));
+
+  [Fact]
+  public void Solve_RejectsSingular() =>
+      Assert.Throws<ArithmeticException>(() => Solve(singular, rhs));
+}
+
+// Compare with RELATIVE tolerance; a bare absolute tolerance is a
+// unit trap -- it passes in metres and fails in millimetres.
+static bool Close(double a, double b,
+                  double rtol = 1e-12, double atol = 0.0) =>
+    Math.Abs(a - b) <=
+    Math.Max(atol, rtol * Math.Max(Math.Abs(a), Math.Abs(b)));
+\end{lstlisting}
+\sub{Assertions that cost nothing in Release}
+\begin{lstlisting}[style=cs]
+Debug.Assert(k.Rows == k.Cols, "stiffness must be square");
+
+[Conditional("DEBUG")]     // CALL SITES vanish unless DEBUG is defined
+static void CheckSymmetry(DenseMatrix<double> k) { /* O(n^2) check */ }
+
+#if DEBUG
+  Console.Error.WriteLine($"residual = {r:G17}");
+#endif
+\end{lstlisting}
+\trap{\code{Debug.Assert} disappears in Release. Use it for programmer
+errors you want caught during development; use a thrown exception for
+anything a \emph{user} of the API can trigger.}
+\end{card}
+
+\begin{card}[acRed]{bgRed}{What to Test in a Solver}
+\begin{itemize}
+\item \textbf{Convergence rate, not one number.} Refine $h$ and check the
+  observed slope of $\log e$ against $\log h$. A bug that merely halves
+  accuracy sails through any single-value test.
+\item \textbf{Invariants} are cheap and catch real defects: symmetry and
+  positive-definiteness of $\mathbf{K}$, zero strain energy for every
+  rigid-body mode, partition of unity of the shape functions, and the
+  patch test.
+\item \textbf{Manufactured solutions.} Choose $u$, substitute to obtain the
+  body force, then verify that the full pipeline recovers $u$. This is the
+  only test that exercises assembly, boundary conditions, and the solver
+  together.
+\item \textbf{Analytic special cases} pin absolute correctness where a
+  closed form exists; convergence studies cover the rest.
+\item \textbf{Assert on the residual}, not on the iteration count ---
+  iteration counts change with any tolerance or preconditioner edit.
+\item \textbf{Seed every generator.} \code{new Random(42)}, never
+  \code{Random.Shared}, in anything a test compares against.
+\item \textbf{Golden files:} write with \code{G17}, read back, and compare
+  the \emph{parsed doubles} within a tolerance. Never diff formatted
+  numeric text.
+\end{itemize}
+\sub{Reproducibility checklist}
+{\fontsize{6.0pt}{7.5pt}\selectfont
+Pin \code{<LangVersion>} and the target framework; record the runtime version
+(\code{Environment.Version}) and CPU in the output header; seed every RNG;
+avoid shared floating-point accumulators in parallel reductions, whose
+summation order varies run to run; and remember that different SIMD widths
+change the grouping of a reduction and therefore its last bits.}
+\trap{A parallel reduction that passes today and fails on a wider machine is
+not flaky --- it is order-dependent. Fix the partitioning (see
+\emph{Parallel \& Thread Safety}), do not loosen the tolerance until the
+test stops failing.}
+\end{card}
+
+\end{multicols}
+
+% =====================================================================
 \sectionbanner{Numerical Best Practices \& Reference}
 \begin{multicols}{2}
 
@@ -1580,15 +2025,13 @@ EventCounters expose GC stats, allocation rate, exceptions/sec.}
 \item Use \code{T.FusedMultiplyAdd(a, b, c)} or \code{Math.FusedMultiplyAdd}
   when one-rounding semantics improve robustness; measure throughput on target hardware.
 \item Reach for \code{TensorPrimitives} before writing manual SIMD: it handles
-  tails and uses optimized implementations when available.
+  tails and uses optimised implementations when available.
 \item Pre-size collections; \code{List<T>} resize copies are silent killers.
 \item Inside hot loops: indexed \code{for}, \code{ReadOnlySpan<T>}
   parameters, no closures, no \code{string.Split}.
 \item Pin allocations \emph{outside} loops; rent from \code{ArrayPool}
   for large transients; use native aligned memory when exact SIMD alignment
   is required for interop or kernels.
-\item \code{readonly struct} for tiny vectors -- prevents costly
-  defensive copies at \code{in} parameter sites.
 \item Use \code{checked\{\}} where overflow indicates a bug;
   \code{unchecked\{\}} only when wraparound is intended.
 \item Always pass \code{CancellationToken} through async chains.
@@ -1606,7 +2049,7 @@ EventCounters expose GC stats, allocation rate, exceptions/sec.}
 
 \begin{card}[acBlue]{bgBlue}{Key Interfaces \& Selection Rules}
 \fontsize{5.95pt}{7.6pt}\selectfont
-\begin{tabular}{@{}p{27mm}@{\;}p{26mm}@{}}
+\begin{tabular}{@{}p{31mm}@{\;}p{28mm}@{}}
 \rowcolor{bgHdr}\textbf{Interface} & \textbf{Use}\\
 \code{IEquatable<T>}        & typed Equals; pair with \code{GetHashCode}\\
 \code{IComparable<T>}        & natural total order; enables \code{Sort}\\
@@ -1653,10 +2096,10 @@ explicitly want modular arithmetic.}
   (\emph{catastrophic cancellation}). Reformulate:
   $\sqrt{x^2 + y^2}$ as \code{double.Hypot(x, y)};
   $1 - \cos x$ as $2\sin^2(x/2)$.
-\item For sums of many terms: prefer pairwise or
-  Kahan summation. error bounds depend on conditioning, but naive summation can grow like
-  $O(n\,\epsilon)$ while pairwise and compensated schemes usually reduce
-  accumulation error substantially.
+\item Naive summation accumulates rounding error that can grow like
+  $O(n\,\epsilon)$; pairwise summation reduces this to $O(\epsilon \log n)$
+  and compensated (Kahan/Neumaier) schemes to roughly $O(\epsilon)$.
+  The constants depend on conditioning.
 \item \code{Math.FusedMultiplyAdd(a, b, c)} is specified as one rounding;
   \code{a * b + c} is normally rounded after multiply and again after add.
 \item Integer overflow is silent by default. Wrap risky arithmetic
