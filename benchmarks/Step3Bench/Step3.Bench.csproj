@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Driver of the step3 examples (classical fracture-mechanics references for the
+       crack-growth and crack-intersection algorithms of Step3.Core) and of their
+       verification gates. Measurement configuration as in Step2.Bench. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Step3.Bench</RootNamespace>
+    <NoWarn>$(NoWarn);CA2252</NoWarn>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <Optimize>true</Optimize>
+    <TieredCompilation>false</TieredCompilation>
+    <TieredCompilationQuickJit>false</TieredCompilationQuickJit>
+    <TieredCompilationQuickJitForLoops>false</TieredCompilationQuickJitForLoops>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <RetainVMGarbageCollection>true</RetainVMGarbageCollection>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Step3\Step3.Core.csproj" />
+    <ProjectReference Include="..\..\src\Incremental\Step2.Core.csproj" />
+    <ProjectReference Include="..\..\src\Relations\Relations.csproj" />
+    <ProjectReference Include="..\..\src\Meshing\Meshing.csproj" />
+    <ProjectReference Include="..\Step2Bench\Step2.Bench.csproj" />
+  </ItemGroup>
+
+</Project>

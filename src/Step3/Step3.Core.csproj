@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Step3.Core: crack growth and crack intersection on the maintained structures of
+       Step2.Core. Crack facets and fronts are recovered from the mesh by counting
+       (twin boundary facets, canonical edge counts), several cracks are inserted
+       through a per-node crack mask, and the growth driver evaluates stress intensity
+       factors by the domain interaction integral with free-surface and crack-face terms.
+       Shared settings come from the root Directory.Build.props. -->
+  <PropertyGroup>
+    <RootNamespace>Step3</RootNamespace>
+    <NoWarn>$(NoWarn);CA2252</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Incremental\Step2.Core.csproj" />
+    <ProjectReference Include="..\Meshing\Meshing.csproj" />
+    <ProjectReference Include="..\Relations\Relations.csproj" />
+  </ItemGroup>
+
+</Project>
