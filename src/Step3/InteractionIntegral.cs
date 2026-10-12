@@ -54,7 +54,7 @@ public sealed class SifOptions
     ///     cut of the auxiliary field lies on the actual faces of a kinked or curved crack, as in the curvilinear
     ///     formulation of Gosz and Moran. The planar frame of the nearest front point is used when false.
     /// </summary>
-    public bool SurfaceFollowing = true;
+    public bool SurfaceFollowing = false; // experimental: the planar frame with the crack-face term reproduces Cotterell-Rice at a kink
 
     /// <summary>Length of the surface extension ahead of the front, in tube radii.</summary>
     public double ExtensionRq = 1.5;
@@ -73,6 +73,7 @@ public sealed class SifResult
 public sealed class InteractionIntegral
 {
     private readonly Snapshot _s;
+    private double _dbgS0;
     private readonly double[] _X, _u;
     private readonly Material _m;
     private readonly FrontCurve3 _fr;
@@ -207,6 +208,29 @@ public sealed class InteractionIntegral
         _elemHint = hint.ToArray();
         _elemSMin = smin.ToArray();
         _elemSMax = smax.ToArray();
+        if (Environment.GetEnvironmentVariable("STEP3_DEBUG") == "5")
+        {
+            // mesh quality of the tube and a comparison of the planar and surface-following maps at tube nodes
+            double qmin = 1, qsum = 0;
+            foreach (var e in _elements)
+            {
+                var row = s.Row(e);
+                var q = MeshQuality.RadiusRatio(V3.Of(X, row[0]), V3.Of(X, row[1]), V3.Of(X, row[2]), V3.Of(X, row[3]));
+                qmin = Math.Min(qmin, q);
+                qsum += q;
+            }
+
+            Console.WriteLine($"    tube quality: min radius ratio {qmin:F3} mean {qsum / _elements.Length:F3} over {_elements.Length} elements");
+            var rngDbg = new Random(3);
+            for (var k = 0; k < 12 && _nodes.Length > 0; k++)
+            {
+                var v = _nodes[rngDbg.Next(_nodes.Length)];
+                var p = V3.Of(X, v);
+                var ft = fr.Foot(p);
+                var mp = Map(p, ft.K);
+                Console.WriteLine($"    node {v} planar r1 {ft.R1:G4} r2 {ft.R2:G4} N {ft.N} B {ft.B} | map r1 {mp.R1:G4} r2 {mp.R2:G4} N {mp.N} B {mp.B}");
+            }
+        }
         var tri = new int[3];
         for (var i = 0; i < s.BoundaryCount; i++)
         {
@@ -234,21 +258,24 @@ public sealed class InteractionIntegral
         if (tri < 0) return new LocalFrame(ft.R1, ft.R2, ft.N, ft.B, ft.Tg, ft.K);
         var nrm = _surf.Normal(tri);
         var r2 = V3.Dot(x - cp, nrm);
-        var ahead = _surf.Tag(tri) == ExtTag;
-        // foot of the surface point on the front: distance along the surface (chord) and the in-surface direction
+        // foot of the surface point on the front: r1 is the chord distance from the front, signed by the side of the front
+        // the surface point lies on (ahead over the extension, behind on the crack); the in-surface direction N points
+        // from the surface point toward the front behind it and away from it ahead
         var fc = _fr.Foot(cp, ft.K);
-        var d = (cp - fc.F).Norm;
-        if (d < 1e-9)
-        {
-            // on the front: the front frame with the surface normal
-            var n0 = ft.N.Perp(nrm).Unit();
-            return new LocalFrame(ahead ? d : -d, r2, n0, nrm, V3.Cross(n0, nrm), fc.K);
-        }
-
-        var nDir = (ahead ? cp - fc.F : fc.F - cp).Perp(nrm).Unit();
+        var rel = cp - fc.F;
+        var d = rel.Norm;
         var bDir = nrm;
         if (V3.Dot(bDir, fc.B) < 0) { bDir = -bDir; r2 = -r2; }
-        return new LocalFrame(ahead ? d : -d, r2, nDir, bDir, V3.Cross(nDir, bDir), fc.K);
+        if (d < 0.05 * Math.Abs(r2) + 1e-12)
+        {
+            // the surface point is at the front edge: planar coordinates of the front frame, with the surface normal
+            var n0 = fc.N.Perp(bDir).Unit();
+            return new LocalFrame(V3.Dot(x - fc.F, n0), r2, n0, bDir, V3.Cross(n0, bDir), fc.K);
+        }
+
+        var sgn = V3.Dot(rel, fc.N) >= 0 ? 1.0 : -1.0;
+        var nDir = (sgn * rel).Perp(bDir).Unit();
+        return new LocalFrame(sgn * d, r2, nDir, bDir, V3.Cross(nDir, bDir), fc.K);
     }
 
     /// <summary>Factors at every knot of the front.</summary>
@@ -311,7 +338,10 @@ public sealed class InteractionIntegral
                 sum[k] += part[k];
 
         var res = new SifResult { S = s0, Elements = counted };
+        _dbgS0 = s0;
         if (_opt.FreeSurfaceTerm || _opt.CrackFaceTerm) SurfaceTerms(vn, any, res);
+        if (Environment.GetEnvironmentVariable("STEP3_DEBUG") == "4")
+            Console.WriteLine($"    s {s0:G4}: domain ({sum[0]:G4},{sum[1]:G4},{sum[2]:G4},{sum[3]:G4}) crack ({res.CrackTerm[0]:G4},{res.CrackTerm[1]:G4},{res.CrackTerm[2]:G4},{res.CrackTerm[3]:G4}) free ({res.FreeTerm[0]:G4},{res.FreeTerm[1]:G4},{res.FreeTerm[2]:G4},{res.FreeTerm[3]:G4}) elements {counted}");
         for (var k = 0; k < 3; k++) sum[k] -= res.FreeTerm[k] + res.CrackTerm[k];
         if (_opt.JSurfaceTerm) sum[3] -= res.FreeTerm[3] + res.CrackTerm[3];
         var l = _fr.HatLength(s0, delta);
@@ -417,7 +447,20 @@ public sealed class InteractionIntegral
     /// <summary>Surface terms on the free outer facets and on the crack facets touching the hat.</summary>
     private void SurfaceTerms(V3[] vn, bool[] any, SifResult res)
     {
-        var dbg = Environment.GetEnvironmentVariable("STEP3_DEBUG") == "4" ? new System.Text.StringBuilder() : null;
+        // STEP3_DEBUG=4 with STEP3_DEBUG_S=lo:hi dumps the crack facets of the knots whose s lies in the window
+        System.Text.StringBuilder dbg = null;
+        if (Environment.GetEnvironmentVariable("STEP3_DEBUG") == "4")
+        {
+            var win = Environment.GetEnvironmentVariable("STEP3_DEBUG_S");
+            if (win != null)
+            {
+                var pr = win.Split(':');
+                if (pr.Length == 2 && double.TryParse(pr[0], System.Globalization.CultureInfo.InvariantCulture, out var lo) &&
+                    double.TryParse(pr[1], System.Globalization.CultureInfo.InvariantCulture, out var hi) && _dbgS0 >= lo && _dbgS0 <= hi)
+                    dbg = new System.Text.StringBuilder();
+            }
+        }
+
         Span<double> g = stackalloc double[12];
         Span<double> G = stackalloc double[9];
         Span<double> S = stackalloc double[9];
@@ -509,8 +552,8 @@ public sealed class InteractionIntegral
 
         if (dbg != null)
         {
-            Console.Write(dbg.ToString().Split('\n').Take(12).Aggregate("", (a, b) => a + b + "\n"));
-            Console.WriteLine($"    crack-face term {crack[0]:G4} free term {free[0]:G4} (mode I sums)");
+            Console.WriteLine($"    ---- knot s {_dbgS0:G4}: crack facets");
+            Console.Write(dbg.ToString().Split('\n').Take(60).Aggregate("", (a, b) => a + b + "\n"));
         }
 
         res.FreeTerm = free;

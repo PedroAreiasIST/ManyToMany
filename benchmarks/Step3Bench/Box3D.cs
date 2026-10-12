@@ -82,7 +82,11 @@ public static class Box3D
             KnotSpacingElements = a.D("knot", 2), MinKnots = a.I("knots", 16), Paris = new ParisLaw { M = a.D("m", 3), C = a.D("C", 0) },
             Dct = !a.Flag("nodct"), SolverTol = a.D("stol", 1e-10), Fit = !a.Flag("nofit"), Through = a.Flag("through")
         };
-        opt.Sif.SurfaceFollowing = !a.Flag("planar");
+        opt.Sif.SurfaceFollowing = a.Flag("surf");
+        opt.RejectDefects = !a.Flag("nodefect");
+        opt.GrowBits = a.I("growbits", 0); // growbits=1: only crack 1 grows
+        opt.Timing = a.Flag("timing"); // time the from-scratch recomputation after every committed increment
+        opt.Advance.HermiteStrip = a.Flag("hermite");
         opt.Sif.Plateau = a.D("plateau", 0.5);
         opt.Sif.FreeSurfaceTerm = !a.Flag("nofs");
         opt.Sif.CrackFaceTerm = !a.Flag("nocf");
@@ -92,7 +96,7 @@ public static class Box3D
             _ => DirectionCriterion.MaximumTangentialStress
         };
         opt.Advance.KinkMax = a.D("kinkmax", 45) * Math.PI / 180;
-        opt.Advance.CurvatureElements = a.D("curv", 12);
+        opt.Advance.CurvatureElements = a.D("curv", 0);
         opt.Advance.SnapElements = a.D("snap", 1.0);
         opt.Advance.OvershootElements = a.D("over", 0.6);
         opt.Advance.SmoothKink = a.I("smooth", 3);

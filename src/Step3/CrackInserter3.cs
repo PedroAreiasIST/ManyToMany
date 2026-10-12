@@ -50,6 +50,7 @@ public sealed class IncrementResult
     public required int[] Promoted;
     public int VisitedTets;
     public int SameSideSplits;
+    public int Pushed;
 }
 
 public sealed class CrackInserter3
@@ -59,6 +60,23 @@ public sealed class CrackInserter3
 
     /// <summary>Promotion tolerance (edge parameter).</summary>
     public double Tau = 0.05;
+
+    /// <summary>
+    ///     A node within Tau of a root that cannot join the surface (a tetrahedron of its star would have its four nodes on
+    ///     the crack) is pushed off the surface by this fraction of its edge length, away from the surface and within the
+    ///     outer boundary, so that the cuts on its edges are not slivers (0 = no push).
+    /// </summary>
+    public double PushElements = 0.1;
+
+    /// <summary>Forbids the promotion of a node when a tetrahedron of its star would get four crack nodes (the earlier rule).</summary>
+    public bool ForbidFourOnCrack = true;
+
+    /// <summary>
+    ///     Components of a star all on one side of the surface reject the increment (the driver retries with the schedule);
+    ///     false leaves the node unsplit instead.
+    /// </summary>
+    public bool RejectSameSide = true;
+    public readonly HashSet<int> LastPushed = new();
 
     /// <summary>Accept splits whose components lie on the same side of the surface (folds, junction wrap-around).</summary>
     public bool AllowSameSide;
@@ -71,6 +89,16 @@ public sealed class CrackInserter3
     ///     better than the fit itself; the region margin can then be small.
     /// </summary>
     public HashSet<int>? OnWall;
+
+    /// <summary>
+    ///     Extra region margin for crack edges that touch no wall node: where the fit could not place a node on the wall,
+    ///     the root nearest to the wall lies up to this distance beyond it and is still cut (an outward bulge of the
+    ///     front, as in Step2, instead of a notch). Edges with a wall node keep the small margin of the region function.
+    /// </summary>
+    public double NonWallMargin;
+
+    /// <summary>Candidates the fit could not place on the wall; the extra margin applies to their crack edges only.</summary>
+    public HashSet<int>? NearWall;
 
     /// <summary>
     ///     A node of another crack within this distance of the surface phi_s = 0 (and inside the region) joins crack c:
@@ -86,11 +114,14 @@ public sealed class CrackInserter3
     public double FaceTolerance = double.PositiveInfinity;
 
     // A crack face of increment c is an interior face whose three nodes carry bit c and none of which lies BEHIND the
-    // previous front: an old node of crack c that is neither a seed (a node of the front chain, including its mouth and
-    // junction ends), nor promoted, nor created now. A face across the kink between the old surface and the new strip
-    // always contains such a node, while every face of the new strip has only new nodes, promoted nodes and front nodes.
+    // previous front. A node of crack c is behind the front when it was split by an earlier increment (its canonical
+    // label has several nodes) and it is neither a seed (a node of the front chain, including its mouth and junction
+    // ends, which may be split by other cracks), nor promoted, nor created now. An unsplit old node of crack c lies at
+    // the front (a chain node or a pinch node the previous increment left unsplit next to its wall). A face across the
+    // kink between the old surface and the new strip always contains a split node.
     private HashSet<int> _seeds = new();
     private HashSet<int> _promoted = new();
+    private HashSet<int> _oldSplit = new();
     private int _firstNew;
 
     public CrackInserter3(CrackMesh cm) => _cm = cm;
@@ -153,7 +184,16 @@ public sealed class CrackInserter3
         if (a > b) (a, b) = (b, a);
         if (Sign(a, bit, phiS) * Sign(b, bit, phiS) != -1) return false;
         t = Root(a, b, phiS);
-        if (OnWall != null && OnWall.Contains(a) && OnWall.Contains(b)) return true;
+        if (OnWall != null)
+        {
+            // nodes on the wall and candidates within the move tolerance of it that could not be moved count alike: an
+            // edge joining two of them has its root within a fraction of the move tolerance of the wall and is cut (the
+            // front bulges by that fraction there instead of lagging by an element)
+            bool wa = OnWall.Contains(a) || (NearWall?.Contains(a) ?? false), wb = OnWall.Contains(b) || (NearWall?.Contains(b) ?? false);
+            if (wa && wb) return true;
+            return phiR(V3.Lerp(_cm.P(a), _cm.P(b), t)) - NonWallMargin < 0;
+        }
+
         return phiR(V3.Lerp(_cm.P(a), _cm.P(b), t)) < 0;
     }
 
@@ -192,6 +232,9 @@ public sealed class CrackInserter3
         }
 
         var found = new HashSet<long>(EdgeKeyComparer.Instance);
+        // each edge is tested once: the test is a deterministic function of the two nodes (no node moves during the walk),
+        // and an edge is reached from every tetrahedron around it (2026-10-12: the walk took seconds on 4e5 tetrahedra)
+        var tested = new Dictionary<long, double>(EdgeKeyComparer.Instance);
         var list = new List<(int, int)>();
         visited = 0;
         var row = new int[4];
@@ -204,12 +247,26 @@ public sealed class CrackInserter3
             foreach (var en in SubdivisionTemplates.EdgeNodes)
             {
                 int a = Math.Min(row[en[0]], row[en[1]]), b = Math.Max(row[en[0]], row[en[1]]);
-                if (!CrackEdge(a, b, bit, phiS, phiR, out var t)) continue;
+                var key = Cutter.Key(a, b);
+                if (tested.TryGetValue(key, out var seenT))
+                {
+                    if (double.IsNaN(seenT)) continue;
+                    active = true;
+                    continue;
+                }
+
+                if (!CrackEdge(a, b, bit, phiS, phiR, out var t))
+                {
+                    tested[key] = double.NaN;
+                    continue;
+                }
+
+                tested[key] = t;
                 active = true;
-                if (found.Add(Cutter.Key(a, b)))
+                if (found.Add(key))
                 {
                     list.Add((a, b));
-                    roots[Cutter.Key(a, b)] = t;
+                    roots[key] = t;
                 }
             }
 
@@ -237,17 +294,31 @@ public sealed class CrackInserter3
         var roots = new Dictionary<long, double>(EdgeKeyComparer.Instance);
         var visited = 0;
         _coincident.Clear();
+        var dbg = Environment.GetEnvironmentVariable("STEP3_TIMING_DEBUG") == "1";
+        var pw = System.Diagnostics.Stopwatch.StartNew();
+        void Mark(string what) { if (dbg) { Console.WriteLine($"    inserter {what}: {pw.Elapsed.TotalMilliseconds:F1} ms"); pw.Restart(); } }
         var crossing = global || seeds.Count == 0
             ? ScanAll(bit, phiS, phiR, roots)
             : Walk(seeds, bit, phiS, phiR, roots, out visited);
+        Mark($"crossing ({crossing.Count} edges, {visited} visited)");
         var (edges, promoted) = Promote(crossing, roots, Tau, (v, set) => Promotable(v, bit, set));
+        Mark("promote");
+        LastPushed.Clear();
+        var pushed = PushElements > 0 ? PushBlocked(crossing, roots, promoted, bit, phiS, edges) : 0;
         // nodes of other cracks lying on this surface inside the region join it
         foreach (var v in _coincident.OrderBy(x => x))
             if (phiR(_cm.P(v)) < 0 && (_cm.Mask[v] & bit) == 0 && Promotable(v, bit, new HashSet<int>(promoted)))
                 promoted.Add(v);
+        Mark("push + coincident");
         foreach (var v in promoted) _cm.Mask.Set(v, _cm.Mask[v] | bit);
         _seeds = new HashSet<int>(seeds);
         _promoted = new HashSet<int>(promoted);
+        _oldSplit = new HashSet<int>();
+        var seenLabel = new HashSet<int>();
+        for (var v = 0; v < M.NodeCount; v++)
+            if ((_cm.Mask[v] & bit) != 0 && !seenLabel.Add(_cm.Canon[v]))
+                _oldSplit.Add(_cm.Canon[v]);
+        Mark("old-split scan");
         _firstNew = M.NodeCount;
         _cm.PendingRoots = roots;
         _cm.PendingMask = bit;
@@ -270,17 +341,18 @@ public sealed class CrackInserter3
         var splits = new List<(int, int)>();
         var front = new List<int>();
         var sameSide = 0;
+        Mark("edge cut + candidates");
         foreach (var v in cand)
         {
             var r = SplitNode(v, bit, phiS, splits, ref sameSide);
             if (r == FrontNode) front.Add(v);
         }
 
+        Mark($"split ({splits.Count} splits)");
         return new IncrementResult
         {
             Edges = edges.ToArray(), Cut = cut, Splits = splits.ToArray(), FrontNodes = front.ToArray(),
-            Promoted = promoted.ToArray(), VisitedTets = visited, SameSideSplits = sameSide
-        };
+            Promoted = promoted.ToArray(), VisitedTets = visited, SameSideSplits = sameSide, Pushed = pushed };
     }
 
     public static (List<(int, int)> Cut, List<int> Promoted) Promote(List<(int, int)> crossing,
@@ -307,9 +379,140 @@ public sealed class CrackInserter3
         return (cut, list);
     }
 
-    /// <summary>A node joins the surface of crack c unless a tetrahedron of its star would then have four c-nodes.</summary>
+    /// <summary>
+    ///     Pushes the nodes within Tau of a root that were not promoted (see <see cref="PushElements"/>) and re-roots their
+    ///     crossing edges; an edge that no longer crosses is dropped. Returns the number of nodes moved.
+    /// </summary>
+    private int PushBlocked(List<(int, int)> crossing, Dictionary<long, double> roots, List<int> promoted, int bit, Field3 phiS, List<(int, int)> edges)
+    {
+        var prom = new HashSet<int>(promoted);
+        var blocked = new SortedSet<int>();
+        foreach (var (a, b) in crossing)
+        {
+            var t = roots[Cutter.Key(a, b)];
+            if (t <= Tau && !prom.Contains(a) && _cm.Mask[a] == 0) blocked.Add(a);
+            if (t >= 1 - Tau && !prom.Contains(b) && _cm.Mask[b] == 0) blocked.Add(b);
+        }
+
+        var pushed = 0;
+        foreach (var v in blocked)
+        {
+            var p = _cm.P(v);
+            var tr = M.TransposePairs(v);
+            double lsum = 0;
+            var lcnt = 0;
+            var bn = new List<V3>();
+            for (var q = 0; q < tr.Length; q += 2)
+            {
+                var e = tr[q];
+                var row = M.Row(e);
+                if (row.Length != 4) continue;
+                var pv = row.IndexOf(v);
+                for (var k = 0; k < 4; k++)
+                    if (k != pv)
+                    {
+                        lsum += (_cm.P(row[k]) - p).Norm;
+                        lcnt++;
+                    }
+
+                for (var f = 0; f < 4; f++)
+                {
+                    if (f == pv || M.FacetNeighbour(e, f) >= 0) continue;
+                    var o = _cm.P(row[f]);
+                    var fp = new V3[3];
+                    var c = 0;
+                    for (var k = 0; k < 4; k++)
+                        if (k != f)
+                            fp[c++] = _cm.P(row[k]);
+                    var nrm = V3.Cross(fp[1] - fp[0], fp[2] - fp[0]);
+                    if (nrm.Norm < 1e-300) continue;
+                    nrm = nrm.Unit();
+                    if (V3.Dot(nrm, (fp[0] + fp[1] + fp[2]) / 3 - o) < 0) nrm = -nrm;
+                    bn.Add(nrm);
+                }
+            }
+
+            if (lcnt == 0) continue;
+            var h = lsum / lcnt;
+            var f0 = phiS(p);
+            var d = 1e-3 * h;
+            var g = new V3((phiS(p + new V3(d, 0, 0)) - phiS(p - new V3(d, 0, 0))) / (2 * d),
+                (phiS(p + new V3(0, d, 0)) - phiS(p - new V3(0, d, 0))) / (2 * d),
+                (phiS(p + new V3(0, 0, d)) - phiS(p - new V3(0, 0, d))) / (2 * d));
+            if (g.Norm < 0.5) continue;
+            var dir = (f0 >= 0 ? 1 : -1) * g.Unit();
+            V3? n1 = null;
+            foreach (var n in bn)
+            {
+                if (n1 == null)
+                {
+                    n1 = n;
+                    dir -= V3.Dot(dir, n) * n;
+                    continue;
+                }
+
+                if (Math.Abs(V3.Dot(n, n1.Value)) > 0.99) continue;
+                var n2 = (n - V3.Dot(n, n1.Value) * n1.Value).Unit();
+                dir -= V3.Dot(dir, n2) * n2;
+            }
+
+            if (dir.Norm < 0.3) continue;
+            dir = dir.Unit();
+            var moved = false;
+            for (var push = PushElements * h; push > 0.02 * h && !moved; push *= 0.5)
+            {
+                var target = p + push * dir;
+                if (Math.Abs(phiS(target)) <= Math.Abs(f0)) break;
+                var ok = true;
+                for (var q = 0; q < tr.Length && ok; q += 2)
+                {
+                    var row = M.Row(tr[q]);
+                    if (row.Length != 4) continue;
+                    V3[] pts = [_cm.P(row[0]), _cm.P(row[1]), _cm.P(row[2]), _cm.P(row[3])];
+                    var before = Geo.Volume6(pts[0], pts[1], pts[2], pts[3]);
+                    pts[row.IndexOf(v)] = target;
+                    var after = Geo.Volume6(pts[0], pts[1], pts[2], pts[3]);
+                    if (Math.Sign(after) != Math.Sign(before) || Math.Abs(after) < 0.2 * Math.Abs(before)) ok = false;
+                }
+
+                if (!ok) continue;
+                _cm.X.Set(v, target.X);
+                _cm.Y.Set(v, target.Y);
+                _cm.Z.Set(v, target.Z);
+                moved = true;
+            }
+
+            if (!moved) continue;
+            pushed++;
+            if (Environment.GetEnvironmentVariable("STEP3_DEBUG") == "3")
+                Console.WriteLine($"    pushed node {v} from {p} to {_cm.P(v)} (|phi| {Math.Abs(f0):G3} -> {Math.Abs(phiS(_cm.P(v))):G3}, h {h:G3}, boundary normals {bn.Count})");
+            LastPushed.Add(v);
+            for (var i = edges.Count - 1; i >= 0; i--)
+            {
+                var (a, b) = edges[i];
+                if (a != v && b != v) continue;
+                if (Sign(a, bit, phiS) * Sign(b, bit, phiS) != -1)
+                {
+                    edges.RemoveAt(i);
+                    continue;
+                }
+
+                roots[Cutter.Key(a, b)] = Root(a, b, phiS);
+            }
+        }
+
+        return pushed;
+    }
+
+    /// <summary>
+    ///     A node within Tau of a root joins the surface of crack c. A tetrahedron of its star may then have its four
+    ///     nodes on the crack (it lies in a fold of the surface, or flat on it); the split classifies the faces of such a
+    ///     tetrahedron by the sides of the two tetrahedra at the face, see <see cref="SideOf"/>; a component left without a signed node
+    ///     rejects the increment, which the driver retries with a shifted surface.
+    /// </summary>
     private bool Promotable(int v, int bit, IReadOnlySet<int> promoted)
     {
+        if (!ForbidFourOnCrack) return true;
         var tr = M.TransposePairs(v);
         for (var q = 0; q < tr.Length; q += 2)
         {
@@ -323,6 +526,30 @@ public sealed class CrackInserter3
         }
 
         return true;
+    }
+
+    private bool FourOnCrack(ReadOnlySpan<int> row, int bit)
+    {
+        if (row.Length != 4) return false;
+        foreach (var w in row)
+            if ((_cm.Mask[w] & bit) == 0)
+                return false;
+        return true;
+    }
+
+    /// <summary>Side of a tetrahedron: that of its first signed node, or of its centroid when all its nodes are on the crack.</summary>
+    private int SideOf(int t, int bit, Field3 phiS)
+    {
+        var row = M.Row(t);
+        foreach (var w in row)
+        {
+            var sg = Sign(w, bit, phiS);
+            if (sg != 0) return sg;
+        }
+
+        var cen = V3.Zero;
+        foreach (var w in row) cen += _cm.P(w) / row.Length;
+        return phiS(cen) >= 0 ? 1 : -1;
     }
 
     public const int FrontNode = -1, Interior = -2, Split = -3;
@@ -366,7 +593,15 @@ public sealed class CrackInserter3
                     if (p == f) continue;
                     var w = row[p];
                     if ((_cm.Mask[w] & bit) == 0) crackFace = false;
-                    else if (w < _firstNew && !_promoted.Contains(w) && _seeds.Count > 0 && !_seeds.Contains(w)) crackFace = false;
+                    else if (w < _firstNew && !_promoted.Contains(w) && _seeds.Count > 0 && !_seeds.Contains(w) && _oldSplit.Contains(_cm.Canon[w])) crackFace = false;
+                }
+
+                if (crackFace && !ForbidFourOnCrack && (FourOnCrack(row, bit) || FourOnCrack(M.Row(nb), bit)))
+                {
+                    // a tetrahedron with its four nodes on the crack lies in a fold of the surface (two nodes on each
+                    // sheet): it belongs to the side of its centroid, and its face is a crack face only toward a
+                    // tetrahedron of the other side
+                    crackFace = SideOf(g, bit, phiS) != SideOf(nb, bit, phiS);
                 }
 
                 if (crackFace && !double.IsPositiveInfinity(FaceTolerance))
@@ -423,20 +658,98 @@ public sealed class CrackInserter3
             }
         }
 
+        // a component without a signed node (tetrahedra with their four nodes on the crack, flat on it or in a fold)
+        // joins the neighbouring component across its largest shared face; a component that has no neighbour rejects
+        for (var guard = 0; guard < 8; guard++)
+        {
+            var unsigned = roots.FirstOrDefault(r => plusCount[r] == 0 && minusCount[r] == 0, -1);
+            if (unsigned < 0) break;
+            var bestArea = -1.0;
+            var bestOther = -1;
+            foreach (var g in _star)
+            {
+                if (Find(g) != unsigned) continue;
+                var row = M.Row(g);
+                var pv = row.IndexOf(v);
+                for (var f = 0; f < 4; f++)
+                {
+                    if (f == pv) continue;
+                    var nb = M.FacetNeighbour(g, f);
+                    if (nb < 0 || !_comp.ContainsKey(nb) || Find(nb) == unsigned) continue;
+                    V3 a0 = _cm.P(row[(f + 1) % 4]), a1 = _cm.P(row[(f + 2) % 4]), a2 = _cm.P(row[(f + 3) % 4]);
+                    var area = V3.Cross(a1 - a0, a2 - a0).Norm;
+                    if (area > bestArea)
+                    {
+                        bestArea = area;
+                        bestOther = Find(nb);
+                    }
+                }
+            }
+
+            if (bestOther < 0)
+            {
+                // no neighbour in the star (flat tetrahedra in the crack plane, bounded by crack facets on both faces):
+                // the side is that of the tetrahedra across the faces opposite v, and the component joins the star
+                // component of that side
+                var sd = 0;
+                foreach (var g in _star)
+                {
+                    if (Find(g) != unsigned || sd != 0) continue;
+                    var row = M.Row(g);
+                    var nb = M.FacetNeighbour(g, row.IndexOf(v));
+                    if (nb >= 0) sd = SideOf(nb, bit, phiS);
+                }
+
+                if (sd != 0)
+                    foreach (var r in roots)
+                        if (r != unsigned && (sd > 0 ? plusCount[r] > 0 : minusCount[r] > 0))
+                        {
+                            bestOther = r;
+                            break;
+                        }
+            }
+
+            if (bestOther < 0)
+            {
+                if (Environment.GetEnvironmentVariable("STEP3_DEBUG") == "3")
+                {
+                    Console.WriteLine($"    unsigned component at node {v} (mask {_cm.Mask[v]}, canon {_cm.Canon[v]}, at {_cm.P(v)}, phi {phiS(_cm.P(v)):G3}), {roots.Count} components:");
+                    foreach (var g in _star)
+                    {
+                        if (Find(g) != unsigned) continue;
+                        var row = M.Row(g);
+                        var nodes = string.Join(" ", row.ToArray().Select(w => $"{w}[m{_cm.Mask[w]} s{Sign(w, bit, phiS)} phi {phiS(_cm.P(w)):G2}{(w >= _firstNew ? " new" : "")}{(_promoted.Contains(w) ? " prom" : "")}]"));
+                        var faces = string.Join(" ", Enumerable.Range(0, 4).Select(f => { var nb = M.FacetNeighbour(g, f); return nb < 0 ? "B" : !_comp.ContainsKey(nb) ? "out" : $"c{Find(nb)}"; }));
+                        Console.WriteLine($"      tet {g}: {nodes} faces {faces}");
+                    }
+                }
+
+                throw new InvalidOperationException($"node {v}: component without a signed node");
+            }
+            _comp[Math.Max(unsigned, bestOther)] = Math.Min(unsigned, bestOther);
+            var keepR = Math.Min(unsigned, bestOther);
+            var dropR = Math.Max(unsigned, bestOther);
+            plusCount[keepR] += plusCount[dropR];
+            minusCount[keepR] += minusCount[dropR];
+            roots.Remove(dropR);
+            if (roots.Count == 1) return plusCount[keepR] > 0 && minusCount[keepR] > 0 ? FrontNode : Interior;
+        }
+
         int nPlus = 0, nMinus = 0;
         foreach (var r in roots)
         {
             if (plusCount[r] > 0 && minusCount[r] > 0) return FrontNode;
-            if (plusCount[r] == 0 && minusCount[r] == 0)
-                throw new InvalidOperationException($"node {v}: component without a signed node");
             if (plusCount[r] > 0) nPlus++;
             else nMinus++;
         }
 
         if (nPlus == 0 || nMinus == 0)
         {
-            if (!AllowSameSide)
+            // every component lies on one side: the faces between them are not a crack through v (a chord across a
+            // kink, or the surface touching the star from one side); v is not split
+            if (RejectSameSide && !AllowSameSide)
                 throw new InvalidOperationException($"node {v}: {roots.Count} components on the same side of the surface");
+            if (!AllowSameSide) return Interior;
             sameSide++;
         }
         else if (roots.Count > 2) sameSide += roots.Count - 2;

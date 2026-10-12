@@ -64,12 +64,106 @@ public sealed class FrontCurve3
     /// <summary>Mean knot spacing.</summary>
     public double Spacing => Length / SegmentCount;
 
-    /// <summary>Equal-arc-length resampling of a chain into knots about <paramref name="spacing"/> apart (at least minKnots).</summary>
-    public static FrontCurve3 Resample(FrontChain c, double spacing, int minKnots = 8)
+    /// <summary>
+    ///     Equal-arc-length resampling of a chain into knots about <paramref name="spacing"/> apart (at least minKnots).
+    ///     The chain is first smoothed by a moving average over the arc-length window <paramref name="smoothWindow"/>
+    ///     (default: three spacings): the recovered mesh front bulges by a fraction of an element where the fit could
+    ///     not place a node on the wall, and the frames of the auxiliary fields, taken from the tangents of the
+    ///     evaluation curve, must not follow that zigzag. The ends of an open chain stay in place.
+    /// </summary>
+    public static FrontCurve3 Resample(FrontChain c, double spacing, int minKnots = 8, double smoothWindow = -1)
     {
         var m = Math.Max(minKnots, (int)Math.Round(c.Length / spacing) + (c.Closed ? 0 : 1));
-        var src = new FrontCurve3(c.P, c.N, c.B, c.Closed, c.Start, c.End);
-        return Resample(src, m);
+        var w = smoothWindow < 0 ? 3 * spacing : smoothWindow;
+        var n = c.Count;
+        var p = (V3[])c.P.Clone();
+        var nn = (V3[])c.N.Clone();
+        var b = (V3[])c.B.Clone();
+        if (w > 0 && n > 3)
+        {
+            var src = new FrontCurve3(c.P, c.N, c.B, c.Closed, c.Start, c.End);
+            for (var j = 0; j < n; j++)
+            {
+                if (!c.Closed && (j == 0 || j == n - 1)) continue;
+                var acc = V3.Zero;
+                var accN = V3.Zero;
+                var accB = V3.Zero;
+                var wsum = 0.0;
+                for (var k = 0; k < n; k++)
+                {
+                    var ds = Math.Abs(src.ArcDistance(c.S[k], c.S[j]));
+                    if (ds > w / 2) continue;
+                    var wk = 1 - ds / (w / 2); // triangular weights
+                    acc += wk * c.P[k];
+                    accN += wk * c.N[k];
+                    accB += wk * c.B[k];
+                    wsum += wk;
+                }
+
+                if (wsum <= 0) continue;
+                p[j] = acc / wsum;
+                nn[j] = accN.Unit();
+                b[j] = accB.Unit();
+            }
+        }
+
+        // frames of the smoothed curve: the tangent from the smoothed polyline (the mesh front zigzags by a fraction of an
+        // element, which would rotate the auxiliary field at the knots), B the smoothed surface normal, N = B x T with
+        // the sign of the chain's outward direction
+        for (var j = 0; j < n; j++)
+        {
+            var jm = j == 0 ? (c.Closed ? n - 1 : 0) : j - 1;
+            var jp = j == n - 1 ? (c.Closed ? 0 : n - 1) : j + 1;
+            var t = (p[jp] - p[jm]);
+            if (t.Norm2 <= 0) continue;
+            var nTan = V3.Cross(b[j], t.Unit());
+            if (V3.Dot(nTan, nn[j]) < 0) nTan = -nTan;
+            if (nTan.Norm2 > 0) nn[j] = nTan.Unit();
+        }
+
+        var smoothed = new FrontCurve3(p, nn, b, c.Closed, c.Start, c.End);
+        return Resample(smoothed, m);
+    }
+
+    /// <summary>
+    ///     Resampling of a chain snapped onto an intended smooth curve (the analytic initial front, or the advanced front
+    ///     of the previous step): every chain node within <paramref name="tol"/> of the curve takes its foot point and the
+    ///     frame there, the others keep their (smoothed) position; the chain's ordering and arc length are kept, so the
+    ///     advance can be mapped back to the chain nodes. Returns null when the chain does not follow the curve.
+    /// </summary>
+    public static FrontCurve3? ResampleOn(FrontChain c, FrontCurve3 intended, double spacing, int minKnots, double tol)
+    {
+        if (intended.Closed != c.Closed) return null;
+        var n = c.Count;
+        var p = new V3[n];
+        var nn = new V3[n];
+        var b = new V3[n];
+        double sum = 0, worst = 0;
+        for (var j = 0; j < n; j++)
+        {
+            var ft = intended.Foot(c.P[j]);
+            sum += ft.D;
+            worst = Math.Max(worst, ft.D);
+            if (ft.D <= tol)
+            {
+                p[j] = ft.F;
+                nn[j] = V3.Dot(ft.N, c.N[j]) >= 0 ? ft.N : -ft.N;
+                b[j] = V3.Dot(ft.B, c.B[j]) >= 0 ? ft.B : -ft.B;
+            }
+            else
+            {
+                p[j] = c.P[j];
+                nn[j] = c.N[j];
+                b[j] = c.B[j];
+            }
+        }
+
+        if (sum / n > tol || worst > 3 * tol) return null;
+        var S = new double[n];
+        for (var j = 1; j < n; j++) S[j] = S[j - 1] + V3.Dist(p[j], p[j - 1]);
+        var length = S[n - 1] + (c.Closed ? V3.Dist(p[n - 1], p[0]) : 0);
+        var snapped = new FrontChain { Nodes = c.Nodes, P = p, N = nn, B = b, T = c.T, S = S, Closed = c.Closed, Start = c.Start, End = c.End, Length = length, Sheet = c.Sheet, Bits = c.Bits };
+        return Resample(snapped, spacing, minKnots, spacing);
     }
 
     /// <summary>Equal-arc-length resampling into m knots (for a closed curve, m segments).</summary>
@@ -191,7 +285,12 @@ public sealed class FrontCurve3
         var sl = seg.Norm;
         f.S = S[k] + t * sl;
         f.F = P[k] + t * seg;
-        var tg = sl > 0 ? seg / sl : T[k];
+        // the tangent is interpolated between the node tangents, not the segment direction: the frame then varies
+        // continuously along the polyline, which the finite differences of the auxiliary field across a vertex need
+        // (a frame that jumps by the vertex angle gives derivatives hundreds of times too large at the points whose
+        // foot straddles the vertex, and those few points dominate the curvature term of the domain integral)
+        var tg = V3.Lerp(T[k], T[k1], t);
+        tg = tg.Norm > 1e-9 ? tg.Unit() : sl > 0 ? seg / sl : T[k];
         var n = V3.Lerp(N[k], N[k1], t);
         var b = V3.Lerp(B[k], B[k1], t);
         n = n.Perp(tg).Unit();

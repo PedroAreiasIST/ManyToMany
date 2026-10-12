@@ -22,6 +22,7 @@
 //
 // Inserts `cases` random disc cracks (random normal, centre and radius; some reach the
 // boundary, later ones cross earlier ones) into a Kuhn cube of n^3 cells, one bit each.
+// The growth test runs with one disc (cases = 1).
 // After every insertion: commit, recount, CrackChecker (geometric twins vs counted pairs,
 // edge classes, chains), Step2 Oracle (every maintained structure recomputed from the
 // rows), and a rollback test (the hash of the rolled-back version equals the hash before
@@ -100,11 +101,25 @@ public static class Verify
             }
         }
 
-        // growth of the first disc by walks from its front
+        // growth of the first disc by walks from its front (one disc only: a disc crossed by later discs is not one crack,
+        // and the increments of a crack that meets another end on it, which the slab and 3D examples test)
         var grown = 0;
-        if (discs.Count > 0 && steps > 0)
+        if (discs.Count == 1 && steps > 0)
         {
             var (cen, nrm, r) = discs[0];
+            Console.WriteLine("  chains before growth:");
+            foreach (var ch in cc.Chains)
+            {
+                double rmin = double.MaxValue, rmax = 0;
+                foreach (var p in ch.P)
+                {
+                    var rr = (p - cen).Perp(nrm).Norm;
+                    rmin = Math.Min(rmin, rr);
+                    rmax = Math.Max(rmax, rr);
+                }
+
+                Console.WriteLine($"   chain sheet {ch.Sheet} bits {ch.Bits} nodes {ch.Count} {(ch.Closed ? "closed" : ch.Start + "-" + ch.End)}: radius {rmin:F3}..{rmax:F3}");
+            }
             for (var k = 1; k <= steps; k++)
             {
                 var r1 = Math.Min(r + k * 1.5 * h, 0.95);
@@ -132,6 +147,16 @@ public static class Verify
                     }
 
                     Console.WriteLine($"   chain sheet {ch.Sheet} bits {ch.Bits} nodes {ch.Count} {(ch.Closed ? "closed" : ch.Start + "-" + ch.End)}: radius {rmin:F3}..{rmax:F3} (target {r1:F3})");
+                    if (ch.Count <= 15 && (ch.Start == EndKind.Free || ch.End == EndKind.Free || ch.Closed))
+                        foreach (var cn in ch.Nodes)
+                        {
+                            var v = cc.Rep[cn];
+                            var copies = 0;
+                            for (var w = 0; w < cm.NodeCount; w++)
+                                if (cm.Canon[w] == cn)
+                                    copies++;
+                            Console.WriteLine($"      node {v} canon {cn} copies {copies} mask {cm.Mask[v]} at {cm.P(v)} parents {cm.Parent1[v]},{cm.Parent2[v]} w {cm.Weight[v]:F3} rho {(cm.P(v) - cen).Perp(nrm).Norm:F3}");
+                        }
                 }
                 if (worst > 1.5 * h) throw new InvalidOperationException($"growth step {k}: front node {worst:G4} from the radius {r1:G4} (h {h:G4})");
                 Console.WriteLine($"growth {k}: r {r1:F3}, {res.Edges.Length} edges by a walk over {res.VisitedTets} tetrahedra, {res.Splits.Length} splits; front within {worst / h:F2} h of the radius; {cc.Summary().Split('\n')[0]}");

@@ -121,6 +121,32 @@ public sealed class CrackMesh : ICutObserver
 
     private static long Quantize(double t) => (long)Math.Round(t * 1e12);
 
+    /// <summary>
+    ///     Crack bits a node created on the edge (a, b) inherits: the bits common to a and b when the edge is an edge of a
+    ///     boundary facet (it lies on the crack surface); 0 for a chord edge between two surface nodes through the material.
+    ///     Called before the cutter replaces the elements, so the shell of the edge is still intact.
+    /// </summary>
+    public int InheritedBits(int a, int b)
+    {
+        var common = Mask[a] & Mask[b];
+        if (common == 0) return 0;
+        var ra = M.TransposePairs(a);
+        for (var q = 0; q < ra.Length; q += 2)
+        {
+            var e = ra[q];
+            var row = M.Row(e);
+            if (row.Length != 4) continue;
+            var pb = row.IndexOf(b);
+            if (pb < 0) continue;
+            var pa = row.IndexOf(a);
+            for (var f = 0; f < 4; f++)
+                if (f != pa && f != pb && M.FacetNeighbour(e, f) < 0)
+                    return common; // the facet opposite f contains a and b and is a boundary facet
+        }
+
+        return 0;
+    }
+
     /// <summary>Creates a node on the edge (a, b) at parameter t, with the canonical label of that geometric point.</summary>
     public int NodeOnEdge(int a, int b, double t, int mask)
     {
@@ -131,7 +157,7 @@ public sealed class CrackMesh : ICutObserver
         Parent1.Set(v, a);
         Parent2.Set(v, b);
         Weight.Set(v, t);
-        Mask.Set(v, mask | (Mask[a] & Mask[b])); // a node on an edge of a crack face lies on that crack
+        Mask.Set(v, mask | InheritedBits(a, b)); // a node on an edge of a crack face lies on that crack
         int ca = Canon[a], cb = Canon[b];
         var key = ca < cb ? (ca, cb, Quantize(t)) : (cb, ca, Quantize(1 - t));
         if (_canonOfEdgeNode.TryGetValue(key, out var c) && c < v && Canon[c] == c && c < M.NodeCount)
@@ -188,7 +214,7 @@ public sealed class CrackMesh : ICutObserver
         Parent1.Set(node, a);
         Parent2.Set(node, b);
         Weight.Set(node, t);
-        Mask.Set(node, PendingMask | (Mask[a] & Mask[b]));
+        Mask.Set(node, PendingMask | InheritedBits(a, b));
         int ca = Canon[a], cb = Canon[b];
         var key = ca < cb ? (ca, cb, Quantize(t)) : (cb, ca, Quantize(1 - t));
         if (_canonOfEdgeNode.TryGetValue(key, out var c) && c < node && c < M.NodeCount && Canon[c] == c)

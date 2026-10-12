@@ -37,7 +37,17 @@ namespace Step3.Bench;
 
 public static class Slab
 {
+    /// <summary>Maximum tangential stress equivalent factor of a plane state (the hoop factor at the MTS angle).</summary>
+    private static double MtsEquivalent(double ki, double kii)
+    {
+        var th = Math.Abs(kii) < 1e-12 * Math.Max(1, Math.Abs(ki)) ? 0 : 2 * Math.Atan((ki - Math.Sign(kii) * Math.Sqrt(ki * ki + 8 * kii * kii)) / (4 * kii));
+        var c = Math.Cos(th / 2);
+        return c * (ki * c * c - 1.5 * kii * Math.Sin(th));
+    }
+
     private static readonly CultureInfo Ci = CultureInfo.InvariantCulture;
+    private const double HoleX = -4.0, HoleR = 0.25;
+    private static readonly double[] HoleY = [2.75, 0.75, -1.25];
 
     public sealed class LineCrack
     {
@@ -92,9 +102,10 @@ public static class Slab
                 break;
             case "inclined":
             {
-                // crack of half-length a through the origin, angle beta between the crack and the load axis (y)
+                // crack of half-length a through the origin, angle beta between the crack and the load axis (y); the centre
+                // is offset so that the crack line avoids the lattice lines and diagonals
                 var e = new V3(Math.Sin(beta), Math.Cos(beta), 0);
-                var c = new V3(0.37 * hmin, yOff, 0);
+                var c = new V3(0.37 * hmin, 0.11 * hmin, 0);
                 cracks.Add(new LineCrack { P0 = c - aLen * e, P1 = c + aLen * e, Bit = 1, Name = "inclined" });
                 var r = aLen + pad;
                 bands.Add((new V3(-r, -0.75 * r, -1), new V3(r, 0.75 * r, 1)));
@@ -106,8 +117,8 @@ public static class Slab
                 // crack direction toward its normal) at the tip P1; static check against Cotterell and Rice (small kink)
                 var e = new V3(Math.Sin(beta), Math.Cos(beta), 0);
                 var nrm0 = V3.Cross(e, new V3(0, 0, 1)).Unit();
-                var c = new V3(0.37 * hmin, yOff, 0);
-                var kink = a.D("kink", -53.13) * Math.PI / 180;
+                var c = new V3(0.37 * hmin, 0.11 * hmin, 0);
+                var kink = a.D("kink", 53.13) * Math.PI / 180;
                 var ell = a.D("kl", 0.2) * aLen;
                 var d = (Math.Cos(kink) * e + Math.Sin(kink) * nrm0).Unit();
                 V3 p0 = c - aLen * e, p1 = c + aLen * e, p2 = p1 + ell * d;
@@ -122,15 +133,52 @@ public static class Slab
                 var y1 = a.D("y1", 0.5);
                 cracks.Add(new LineCrack { P0 = new V3(-bLen, y1 + yOff, 0), P1 = new V3(bLen, y1 + yOff, 0), Bit = 1, Name = "barrier" });
                 var e = new V3(Math.Sin(beta), Math.Cos(beta), 0);
-                var c = new V3(0.37 * hmin, yOff, 0);
+                var c = new V3(0.37 * hmin, 0.11 * hmin, 0);
                 cracks.Add(new LineCrack { P0 = c - aLen * e, P1 = c + aLen * e, Bit = 2, Name = "inclined" });
                 bands.Add((new V3(-bLen - pad, -aLen - pad, -1), new V3(bLen + pad, y1 + 0.3 * aLen + pad, 1)));
+                break;
+            }
+            case "beam":
+            {
+                // three-point-bending beam with three holes (Bittencourt et al. 1996; Ingraffea and Grigoriu): W = 20, H = 8 (in),
+                // supports at x = -+9 on the bottom face, load P at x = 0 on the top face, holes of radius 0.25 at x = -4,
+                // y = 2.75, 0.75, -1.25; notch of length a from the bottom face at x = -d (cases d = 5, a = 1.5 and d = 6, a = 1)
+                var d = a.D("d", 5.0);
+                var xN = -d + 0.37 * hmin;
+                cracks.Add(new LineCrack { P0 = new V3(xN, -H / 2 - 2 * h0, 0), P1 = new V3(xN, -H / 2 + aLen, 0), Bit = 1, Name = "notch" });
+                bands.Add((new V3(xN - 0.4 * aLen - pad, -H / 2, -1), new V3(-2.5, 3.6, 1)));
+                foreach (var hy in HoleY)
+                    bands.Add((new V3(HoleX - HoleR - 3 * hmin, hy - HoleR - 3 * hmin, -1), new V3(HoleX + HoleR + 3 * hmin, hy + HoleR + 3 * hmin, 1)));
+                break;
+            }
+            case "nooru":
+            {
+                // Nooru-Mohamed double-edge-notched panel (Areias et al. 2009, Sect. 4.6): W = H = 200, notches of depth a
+                // at mid-height from both faces; bit 1 left, bit 2 right; the load programme is in Bc (bc=nooru)
+                cracks.Add(new LineCrack { P0 = new V3(-W / 2 - 2 * h0, yOff, 0), P1 = new V3(-W / 2 + aLen, yOff, 0), Bit = 1, Name = "left" });
+                cracks.Add(new LineCrack { P0 = new V3(W / 2 - aLen, yOff, 0), P1 = new V3(W / 2 + 2 * h0, yOff, 0), Bit = 2, Name = "right" });
+                bands.Add((new V3(-W / 2, -0.25 * H, -1), new V3(W / 2, 0.25 * H, 1)));
+                break;
+            }
+            case "echelon":
+            {
+                // two parallel cracks of half-length a under tension (Baud and Reuschle 1997, Fig. 7): normal spacing c between
+                // the crack lines, longitudinal distance d between the inner tips; bit 1 lower left, bit 2 upper right
+                var c = a.D("c", 0.5 * aLen);
+                var d = a.D("d", aLen);
+                cracks.Add(new LineCrack { P0 = new V3(-2 * aLen - d / 2, -c / 2 + yOff, 0), P1 = new V3(-d / 2, -c / 2 + yOff, 0), Bit = 1, Name = "lower" });
+                cracks.Add(new LineCrack { P0 = new V3(d / 2, c / 2 + yOff, 0), P1 = new V3(2 * aLen + d / 2, c / 2 + yOff, 0), Bit = 2, Name = "upper" });
+                bands.Add((new V3(-2 * aLen - d / 2 - pad, -c / 2 - 0.6 * aLen - pad, -1), new V3(2 * aLen + d / 2 + pad, c / 2 + 0.6 * aLen + pad, 1)));
                 break;
             }
             default:
                 throw new ArgumentException($"unknown kind {kind}");
         }
 
+        var bc = a.S("bc", kind == "beam" ? "bend" : kind == "nooru" ? "nooru" : "tension");
+        var loadCase = 0; // nooru: 0 = unit frame displacement in x, 1 = unit frame displacement in y
+        var gap = a.D("gap", 5.0);
+        var useBands = grow || kind == "beam";
         var sw = Stopwatch.StartNew();
         var cm = KuhnMesh.Build(n, ny, 1, new V3(-W / 2, -H / 2, 0), new V3(W / 2, H / 2, h0));
         var refiner = new MaubachRefiner(cm);
@@ -159,12 +207,73 @@ public static class Slab
                 d = Math.Min(d, Math.Max(0, dd - rq));
             }
 
-            if (grow) d = Math.Min(d, Size(x) - hmin);
+            if (useBands) d = Math.Min(d, Size(x) - hmin);
             return hmin + 0.35 * d;
         }
 
         refiner.RefineToSize(SizeRq);
         var snap0 = cm.Commit();
+        if (kind == "beam")
+        {
+            // the holes: the nodes within half an element of a circle are moved radially onto it (star kept valid), then the
+            // tetrahedra whose centroid lies inside the circle are removed, which leaves a polygonal hole through the moved
+            // nodes (smooth=0 keeps the stair-step boundary of the plain removal)
+            var removed = 0;
+            var snapped = 0;
+            if (a.D("smooth", 1) > 0)
+            {
+                var m = cm.M;
+                for (var v = 0; v < snap0.NodeCount; v++)
+                {
+                    if (m.TransposePairs(v).Length == 0) continue;
+                    var p = cm.P(v);
+                    foreach (var hy in HoleY)
+                    {
+                        var r = Math.Sqrt((p.X - HoleX) * (p.X - HoleX) + (p.Y - hy) * (p.Y - hy));
+                        if (r < 1e-12 || Math.Abs(r - HoleR) > a.D("smooth", 1) * 0.5 * hmin) continue;
+                        var target = new V3(HoleX + (p.X - HoleX) * HoleR / r, hy + (p.Y - hy) * HoleR / r, p.Z);
+                        var ok = true;
+                        var tr = m.TransposePairs(v);
+                        for (var q = 0; q < tr.Length && ok; q += 2)
+                        {
+                            var row = m.Row(tr[q]);
+                            if (row.Length != 4) continue;
+                            V3[] pts = [cm.P(row[0]), cm.P(row[1]), cm.P(row[2]), cm.P(row[3])];
+                            var before = Geo.Volume6(pts[0], pts[1], pts[2], pts[3]);
+                            pts[row.IndexOf(v)] = target;
+                            var after = Geo.Volume6(pts[0], pts[1], pts[2], pts[3]);
+                            if (Math.Sign(after) != Math.Sign(before) || Math.Abs(after) < 0.15 * Math.Abs(before)) ok = false;
+                        }
+
+                        if (!ok) continue;
+                        cm.X.Set(v, target.X);
+                        cm.Y.Set(v, target.Y);
+                        snapped++;
+                        break;
+                    }
+                }
+
+                snap0 = cm.Commit();
+            }
+
+            for (var e = 0; e < snap0.ElementCount; e++)
+            {
+                var row = snap0.Row(e);
+                if (row.Length != 4) continue;
+                var c = V3.Zero;
+                foreach (var v in row) c += cm.P(v) / 4;
+                foreach (var hy in HoleY)
+                    if ((c.X - HoleX) * (c.X - HoleX) + (c.Y - hy) * (c.Y - hy) < HoleR * HoleR * (1 - 1e-9))
+                    {
+                        cm.M.RemoveElement(e);
+                        removed++;
+                        break;
+                    }
+            }
+
+            snap0 = cm.Commit();
+            Console.WriteLine($"holes: {snapped} nodes moved onto the circles, {removed} tetrahedra removed");
+        }
         Console.WriteLine($"slab {kind}: W {W} H {H} t {h0:G4} h0 {h0:G4} hmin {hmin:G5}; mesh {snap0.ElementCount} tets {snap0.NodeCount} nodes after {refiner.Bisections} bisections, {sw.ElapsedMilliseconds} ms");
 
         var opt = new GrowthOptions
@@ -174,7 +283,9 @@ public static class Slab
             Paris = new ParisLaw { M = a.D("m", 3), C = a.D("C", 0) }, Dct = !a.Flag("nodct"), SolverTol = a.D("stol", 1e-10)
         };
         opt.Sif.Plateau = a.D("plateau", 0.5);
-        opt.Sif.SurfaceFollowing = !a.Flag("planar");
+        opt.Sif.SurfaceFollowing = a.Flag("surf");
+        opt.RejectDefects = !a.Flag("nodefect"); // nodefect: the topological acceptance test of a step is off (as in Box3D)
+        opt.Advance.HermiteStrip = a.Flag("hermite");
         opt.Sif.FreeSurfaceTerm = !a.Flag("nofs");
         opt.Sif.CrackFaceTerm = !a.Flag("nocf");
         opt.Advance.Direction = a.S("crit", "mts") switch
@@ -183,7 +294,7 @@ public static class Slab
             _ => DirectionCriterion.MaximumTangentialStress
         };
         opt.Advance.KinkMax = a.D("kinkmax", 70) * Math.PI / 180;
-        opt.Advance.CurvatureElements = a.D("curv", 6);
+        opt.Advance.CurvatureElements = a.D("curv", 0);
         opt.Advance.SnapElements = a.D("snap", 1.0);
         opt.Advance.OvershootElements = a.D("over", 0.6);
 
@@ -193,28 +304,168 @@ public static class Slab
             var fixedDof = new bool[3 * s.NodeCount];
             var kinds = new Dictionary<int, FacetKind>();
             const double tol = 1e-9;
-            BoundaryConditions.Traction(s, X, (c, nrm) => Math.Abs(c.Y - H / 2) < tol, new V3(0, sigma, 0), f, kinds);
-            BoundaryConditions.Traction(s, X, (c, nrm) => Math.Abs(c.Y + H / 2) < tol, new V3(0, -sigma, 0), f, kinds);
             BoundaryConditions.Mark(s, X, (c, nrm) => Math.Abs(c.Z) < tol || Math.Abs(c.Z - h0) < tol, FacetKind.Symmetry, kinds);
-            int best1 = -1, best2 = -1;
-            double d1 = double.MaxValue, d2 = double.MaxValue;
-            for (var v = 0; v < s.NodeCount; v++)
+            switch (bc)
             {
-                if (s.TransposePairs(v).Length == 0) continue;
-                double z = X[3 * v + 2];
-                if (Math.Abs(z) < tol || Math.Abs(z - h0) < tol) fixedDof[3 * v + 2] = true;
-                var q1 = (X[3 * v] + W / 2) * (X[3 * v] + W / 2) + X[3 * v + 1] * X[3 * v + 1] + z * z;
-                var q2 = (X[3 * v] - W / 2) * (X[3 * v] - W / 2) + X[3 * v + 1] * X[3 * v + 1] + z * z;
-                if (q1 < d1) { d1 = q1; best1 = v; }
-                if (q2 < d2) { d2 = q2; best2 = v; }
+                case "shear":
+                    // bottom face clamped, shear traction tau = sigma along x on the top face (Yau et al.; Moes et al. 1999)
+                    BoundaryConditions.Traction(s, X, (c, nrm) => Math.Abs(c.Y - H / 2) < tol, new V3(sigma, 0, 0), f, kinds);
+                    for (var v = 0; v < s.NodeCount; v++)
+                    {
+                        if (s.TransposePairs(v).Length == 0) continue;
+                        double z = X[3 * v + 2];
+                        if (Math.Abs(z) < tol || Math.Abs(z - h0) < tol) fixedDof[3 * v + 2] = true;
+                        if (Math.Abs(X[3 * v + 1] + H / 2) < tol) fixedDof[3 * v] = fixedDof[3 * v + 1] = true;
+                    }
+
+                    break;
+                case "nooru":
+                {
+                    // bottom face and the lower part of the right face fixed; the top face and the upper part of the left face
+                    // are glued to a rigid frame (no rotation) whose displacement is prescribed: (1, 0) for load case 0,
+                    // (0, 1) for case 1; the shear force P and the vertical displacement v of the programme are combined
+                    // from the two cases in CombineNooru
+                    var pres = new double[3 * s.NodeCount];
+                    for (var v = 0; v < s.NodeCount; v++)
+                    {
+                        if (s.TransposePairs(v).Length == 0) continue;
+                        double x = X[3 * v], y = X[3 * v + 1], z = X[3 * v + 2];
+                        if (Math.Abs(z) < tol || Math.Abs(z - h0) < tol) fixedDof[3 * v + 2] = true;
+                        if (Math.Abs(y + H / 2) < tol || (Math.Abs(x - W / 2) < tol && y < -gap))
+                            fixedDof[3 * v] = fixedDof[3 * v + 1] = true;
+                        else if (Math.Abs(y - H / 2) < tol || (Math.Abs(x + W / 2) < tol && y > gap))
+                        {
+                            fixedDof[3 * v] = fixedDof[3 * v + 1] = true;
+                            pres[3 * v] = loadCase == 0 ? 1 : 0;
+                            pres[3 * v + 1] = loadCase == 0 ? 0 : 1;
+                        }
+                    }
+
+                    return new BoundaryConditions { Force = f, FixedDof = fixedDof, FacetKinds = kinds, Prescribed = pres };
+                }
+                case "bend":
+                {
+                    // three-point bending: load P = sigma spread over |x| <= 0.25 on the top face, supports (u_y = 0) over
+                    // |x -+ xs| <= h0/2 on the bottom face, u_x = 0 at the left support
+                    var xs = a.D("xs", 9.0);
+                    var pw = a.D("pw", 0.25);
+                    BoundaryConditions.Traction(s, X, (c, nrm) => Math.Abs(c.Y - H / 2) < tol && Math.Abs(c.X) <= pw, new V3(0, -sigma / (2 * pw * h0), 0), f, kinds);
+                    for (var v = 0; v < s.NodeCount; v++)
+                    {
+                        if (s.TransposePairs(v).Length == 0) continue;
+                        double x = X[3 * v], y = X[3 * v + 1], z = X[3 * v + 2];
+                        if (Math.Abs(z) < tol || Math.Abs(z - h0) < tol) fixedDof[3 * v + 2] = true;
+                        if (Math.Abs(y + H / 2) < tol && Math.Abs(Math.Abs(x) - xs) <= h0 / 2 + tol)
+                        {
+                            fixedDof[3 * v + 1] = true;
+                            if (x < 0) fixedDof[3 * v] = true;
+                        }
+                    }
+
+                    break;
+                }
+                default:
+                {
+                    BoundaryConditions.Traction(s, X, (c, nrm) => Math.Abs(c.Y - H / 2) < tol, new V3(0, sigma, 0), f, kinds);
+                    BoundaryConditions.Traction(s, X, (c, nrm) => Math.Abs(c.Y + H / 2) < tol, new V3(0, -sigma, 0), f, kinds);
+                    int best1 = -1, best2 = -1;
+                    double d1 = double.MaxValue, d2 = double.MaxValue;
+                    for (var v = 0; v < s.NodeCount; v++)
+                    {
+                        if (s.TransposePairs(v).Length == 0) continue;
+                        double z = X[3 * v + 2];
+                        if (Math.Abs(z) < tol || Math.Abs(z - h0) < tol) fixedDof[3 * v + 2] = true;
+                        var q1 = (X[3 * v] + W / 2) * (X[3 * v] + W / 2) + X[3 * v + 1] * X[3 * v + 1] + z * z;
+                        var q2 = (X[3 * v] - W / 2) * (X[3 * v] - W / 2) + X[3 * v + 1] * X[3 * v + 1] + z * z;
+                        if (q1 < d1) { d1 = q1; best1 = v; }
+                        if (q2 < d2) { d2 = q2; best2 = v; }
+                    }
+
+                    fixedDof[3 * best1] = fixedDof[3 * best1 + 1] = true;
+                    fixedDof[3 * best2 + 1] = true;
+                    break;
+                }
             }
 
-            fixedDof[3 * best1] = fixedDof[3 * best1 + 1] = true;
-            fixedDof[3 * best2 + 1] = true;
             return new BoundaryConditions { Force = f, FixedDof = fixedDof, FacetKinds = kinds };
         }
 
         var drv = new GrowthDriver(cm, mat, Bc, opt);
+        if (kind == "nooru")
+        {
+            drv.Bc2Func = (s, X) =>
+            {
+                loadCase = 1;
+                try { return Bc(s, X); }
+                finally { loadCase = 0; }
+            };
+            drv.Combine = CombineNooru;
+        }
+
+        // Load programme of the Nooru-Mohamed test: the shear force P on the frame is kept and the vertical displacement v
+        // grows until the maximum tangential stress factor of a tip reaches K_Ic. With u = u_x A + v B (A, B the unit
+        // cases), P = u_x R_A + v R_B with R the x-reactions of the frame, so u_x(v) = (P - v R_B) / R_A, and K at a tip
+        // is u_x K_A + v K_B; v is found by bisection, u_x follows.
+        (double cA, double cB) CombineNooru(GrowthDriver d)
+        {
+            var X = d.X;
+            var n = X.Length / 3;
+            double RA = 0, RB = 0;
+            for (var v = 0; v < n; v++)
+            {
+                double x = X[3 * v], y = X[3 * v + 1];
+                if (Math.Abs(y - H / 2) < 1e-9 || (Math.Abs(x + W / 2) < 1e-9 && y > gap))
+                {
+                    RA += d.Reaction[3 * v];
+                    RB += d.Reaction2[3 * v];
+                }
+            }
+
+            var P = a.D("P", 10000.0) / a.D("thick", 50.0) * h0; // force on the slab of thickness h0
+            var kic = a.D("kic", Math.Sqrt(mat.E * a.D("gf", 0.11) / (1 - mat.Nu * mat.Nu)));
+            double Keq(double v, out double ux)
+            {
+                ux = (P - v * RB) / RA;
+                var best = 0.0;
+                for (var i = 0; i < d.CaseFactors[0].Count; i++)
+                {
+                    var ka = d.CaseFactors[0][i].K;
+                    var kb = d.CaseFactors[1][i].K;
+                    double ki = 0, kii = 0;
+                    for (var j = 0; j < ka.Length; j++)
+                    {
+                        ki += (ux * ka[j].KI + v * kb[j].KI) / ka.Length;
+                        kii += (ux * ka[j].KII + v * kb[j].KII) / ka.Length;
+                    }
+
+                    best = Math.Max(best, MtsEquivalent(ki, kii));
+                }
+
+                return best;
+            }
+
+            var k0 = Keq(0, out _);
+            double vv;
+            if (k0 >= kic) vv = 0;
+            else
+            {
+                double lo = 0, hi = 1e-3;
+                while (Keq(hi, out _) < kic && hi < 1e6) hi *= 2;
+                for (var it = 0; it < 80; it++)
+                {
+                    var mid = 0.5 * (lo + hi);
+                    if (Keq(mid, out _) < kic) lo = mid;
+                    else hi = mid;
+                }
+
+                vv = hi;
+            }
+
+            var keq = Keq(vv, out var uxF);
+            Console.WriteLine($"  nooru: R_xA {RA:G5} R_xB {RB:G5} P {P:G5}: u_x {uxF:G5} v {vv:G5} Keq {keq:G5} (KIc {kic:G5}, shear alone {k0:G5})");
+            return (uxF, vv);
+        }
+        drv.Inserter.RejectSameSide = !a.Flag("samesideok"); // samesideok: a star whose components all lie on one side is not split instead of rejecting
         foreach (var cr in cracks)
         {
             var e = cr.Dir;
@@ -223,6 +474,7 @@ public static class Slab
             var half = 0.5 * cr.Length;
             var margin = hmin / 4;
             HashSet<int>? onWall = null;
+            HashSet<int>? nearWall = null;
             // polyline cracks: the extruded polyline as an oriented soup with the arc length as vertex value
             TriangleSoup? poly = null;
             var polyLength = 0.0;
@@ -261,7 +513,9 @@ public static class Slab
                     V3 p0 = new(tip.X, tip.Y, -h0), p1 = new(tip.X, tip.Y, 2 * h0);
                     var wall = FrontFitter.Wall([p0, p1], [nTip, nTip], wallHalf, false);
                     var fit = FrontFitter.Fit(cm, wall, hmin);
+                    drv.DebugWall = wall;
                     onWall.UnionWith(fit.WallNodes);
+                    (nearWall ??= new HashSet<int>()).UnionWith(fit.Unmoved);
                     Console.WriteLine($"fit tip ({tip.X:F3},{tip.Y:F3}): {fit.Moved}/{fit.Candidates} moved, {fit.Rejected} rejected, {fit.EdgesCut} edges cut");
                 }
 
@@ -274,12 +528,33 @@ public static class Slab
             {
                 var pl = poly;
                 var len = polyLength;
+                var pts = cr.Polyline!;
                 phiS = x => pl.SignedDistance(x).Phi;
+                // arc coordinate along the polyline (in the plane), extrapolated beyond the ends
                 phiR = x =>
                 {
-                    var (tri, cp, _, _) = pl.Nearest(x);
-                    var sv = pl.ValueAt(tri, cp);
-                    return Math.Max(sv - len, -sv) - margin;
+                    var best = double.MaxValue;
+                    var sBest = 0.0;
+                    var acc = 0.0;
+                    for (var k = 0; k + 1 < pts.Length; k++)
+                    {
+                        V3 q0 = new(pts[k].X, pts[k].Y, 0), q1 = new(pts[k + 1].X, pts[k + 1].Y, 0);
+                        var seg = q1 - q0;
+                        var l2 = seg.Norm2;
+                        var xp = new V3(x.X, x.Y, 0);
+                        var t = V3.Dot(xp - q0, seg) / l2;
+                        var tc = k == 0 ? Math.Min(t, 1) : k + 2 == pts.Length ? Math.Max(t, 0) : Math.Clamp(t, 0, 1);
+                        var dd = (xp - q0 - tc * seg).Norm;
+                        if (dd < best)
+                        {
+                            best = dd;
+                            sBest = acc + tc * Math.Sqrt(l2);
+                        }
+
+                        acc += Math.Sqrt(l2);
+                    }
+
+                    return Math.Max(sBest - len, -sBest) - margin;
                 };
                 refNormal = poly.Normal(0);
                 refPoint = 0.5 * (cr.Polyline![0] + cr.Polyline[1]);
@@ -290,7 +565,31 @@ public static class Slab
                 phiR = x => Math.Abs(V3.Dot(x - mid, e)) - half - margin;
             }
 
-            drv.InsertInitial(cr.Bit, phiS, phiR, refPoint, refNormal, onWall);
+            // intended fronts: straight lines through the thickness at the tips inside the plate
+            var intended = new List<FrontCurve3>();
+            {
+                var tipsI = cr.Polyline != null
+                    ? new[] { (cr.Polyline[0], (cr.Polyline[0] - cr.Polyline[1]).Unit()), (cr.Polyline[^1], (cr.Polyline[^1] - cr.Polyline[^2]).Unit()) }
+                    : new[] { (cr.P0, -e), (cr.P1, e) };
+                foreach (var (tip, outward) in tipsI)
+                {
+                    if (Math.Abs(tip.X) > W / 2 || Math.Abs(tip.Y) > H / 2) continue;
+                    var nTip = V3.Cross(outward, new V3(0, 0, 1)).Unit();
+                    var pts2 = new V3[9];
+                    var ns = new V3[9];
+                    var bs = new V3[9];
+                    for (var k = 0; k < 9; k++)
+                    {
+                        pts2[k] = new V3(tip.X, tip.Y, h0 * k / 8.0);
+                        ns[k] = outward;
+                        bs[k] = nTip;
+                    }
+
+                    intended.Add(new FrontCurve3(pts2, ns, bs, false, EndKind.Mouth, EndKind.Mouth));
+                }
+            }
+
+            drv.InsertInitial(cr.Bit, phiS, phiR, refPoint, refNormal, onWall, hmin, nearWall, intended);
         }
 
         if (a.Flag("check")) Check(drv);
@@ -384,6 +683,7 @@ public static class Slab
 
         drv.WriteFronts(Path.Combine(outDir, $"fronts_{step:D3}.txt"));
         drv.WriteFactors(Path.Combine(outDir, $"factors_{step:D3}.txt"));
+        drv.WriteCrackFacets(Path.Combine(outDir, $"facets_{step:D3}.txt"));
         if (rec != null)
             File.AppendAllText(Path.Combine(outDir, "events.txt"), $"{step} {string.Join("; ", rec.Events)}\n");
     }
@@ -407,6 +707,14 @@ public static class Slab
             case "edge":
             {
                 if (fronts.Count != 1) return null;
+                if (a.S("bc", "tension") == "shear")
+                {
+                    // edge crack a = 3.5 in the 7 x 16 plate, bottom clamped, unit shear on the top: K_I = 34.0, K_II = 4.55
+                    // (Yau, Wang and Corten 1980, as used by Moes, Dolbow and Belytschko 1999); the reference holds at the first front only
+                    list.Add((34.0 * sigma, 4.55 * sigma, "Yau et al. shear plate (first front)"));
+                    return list;
+                }
+
                 var len = fronts[0].Curve.P[fronts[0].M / 2].X + W / 2;
                 list.Add((sigma * Math.Sqrt(Math.PI * len) * Reference.EdgeCrackStrip(len, W), 0, $"Tada edge a/W={len / W:F3}"));
                 return list;
@@ -444,7 +752,7 @@ public static class Slab
                 // Cotterell and Rice (1980) first-order kinked-crack factors at the kinked tip (the front at larger x along the kink)
                 if (fronts.Count != 2) return null;
                 var beta = a.D("beta", 45) * Math.PI / 180;
-                var kink = a.D("kink", -53.13) * Math.PI / 180;
+                var kink = a.D("kink", 53.13) * Math.PI / 180;
                 var aMain = a.D("a", 0.2);
                 var (kI, kII) = Reference.InclinedCrack(aMain, sigma, beta);
                 // sign of K_II at the kinked tip P1 in the frame (N = e, B = normal): the inclined formula gives the magnitude;
@@ -459,7 +767,7 @@ public static class Slab
                 var kinkedFirst = fronts[0].Curve.P[fronts[0].M / 2].X > fronts[1].Curve.P[fronts[1].M / 2].X == (e.X > 0);
                 var s0 = Math.Sign(fronts[kinkedFirst ? 1 : 0].K[fronts[0].M / 2].KII);
                 var straight = (kI, (s0 == 0 ? 1 : s0) * kII, $"inclined tip beta={a.D("beta", 45)}");
-                var kinked = (kIk, kIIk, $"Cotterell-Rice kink={a.D("kink", -53.13)} l/a={a.D("kl", 0.2)}");
+                var kinked = (kIk, kIIk, $"Cotterell-Rice kink={a.D("kink", 53.13)} l/a={a.D("kl", 0.2)}");
                 list.Add(kinkedFirst ? kinked : straight);
                 list.Add(kinkedFirst ? straight : kinked);
                 return list;

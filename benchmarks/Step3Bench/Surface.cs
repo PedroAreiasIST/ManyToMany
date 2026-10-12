@@ -41,7 +41,7 @@ public static class Surface
         var h0 = 2.0 / n;
         var hmin = h0 / div;
         double aD = a.D("a", 0.2), cH = a.D("c", 0.2), t = a.D("t", 0.5), L = a.D("L", 1);
-        var rq = a.D("rq", Math.Max(aD / 3, 4 * hmin));
+        var rq = a.D("rq", aD / 3); // a/3 as for the penny: a tube of 4 h at a/8 reaches the vertex field and puts the surface point 13 % low
         var sigma = 1.0;
         var mat = new Material(1, 0.3);
         var steps = a.I("steps", 0);
@@ -64,9 +64,11 @@ public static class Surface
         Console.WriteLine($"surface: a {aD} c {cH} t {t} L {L} h0 {h0:G4} hmin {hmin:G5} rq {rq:G4}; mesh {cm.M.ElementCount} tets after {refiner.Bisections} bisections, {sw.ElapsedMilliseconds} ms");
         var opt = Box3D.Options(a, hmin, rq);
         var drv = new GrowthDriver(cm, mat, Box3D.TensionZ(lo, hi, sigma), opt);
+        drv.Inserter.RejectSameSide = !a.Flag("samesideok"); // samesideok: a star whose components all lie on one side is not split instead of rejecting
         var nrm = new V3(0, 0, 1);
         var margin = hmin / 4;
         HashSet<int>? onWall = null;
+        HashSet<int>? nearWall = null;
         if (opt.Fit)
         {
             const int m = 96;
@@ -82,6 +84,7 @@ public static class Surface
             var wall = FrontFitter.Wall(p, b, 2 * hmin, false);
             var fit = FrontFitter.Fit(cm, wall, hmin);
             onWall = fit.WallNodes;
+            nearWall = fit.Unmoved;
             margin = opt.FitMarginElements * hmin;
             Console.WriteLine($"fit: {fit.Moved}/{fit.Candidates} moved, {fit.Rejected} rejected, {fit.EdgesCut} edges cut");
         }
@@ -92,7 +95,22 @@ public static class Surface
             var rho = Math.Sqrt(x.X * x.X / (cH * cH) + (x.Y + t) * (x.Y + t) / (aD * aD));
             return (rho - 1) * Math.Min(aD, cH) - margin;
         };
-        drv.InsertInitial(1, phiS, phiR, new V3(0, -t + aD / 2, zOff), nrm, onWall);
+        {
+            // intended front: the semi-ellipse inside the plate, N the outward in-plane normal of the ellipse
+            const int mc = 192;
+            var pc = new V3[mc];
+            var nc = new V3[mc];
+            var bc = new V3[mc];
+            for (var k = 0; k < mc; k++)
+            {
+                var ph = Math.PI * k / (mc - 1);
+                pc[k] = new V3(cH * Math.Cos(ph), -t + aD * Math.Sin(ph), zOff);
+                nc[k] = new V3(aD * Math.Cos(ph), cH * Math.Sin(ph), 0).Unit();
+                bc[k] = nrm;
+            }
+
+            drv.InsertInitial(1, phiS, phiR, new V3(0, -t + aD / 2, zOff), nrm, onWall, hmin, nearWall, [new FrontCurve3(pc, nc, bc, false, EndKind.Mouth, EndKind.Mouth)]);
+        }
         if (a.Flag("check")) Check(drv);
         drv.Solve();
         drv.Current = drv.EvaluateFronts();
@@ -177,6 +195,7 @@ public static class Surface
         if (outDir.Length == 0) return;
         Box3D.WriteKnots(Path.Combine(outDir, "knots.txt"), step, drv, Ref);
         drv.WriteFronts(Path.Combine(outDir, $"fronts_{step:D3}.txt"));
+        drv.WriteCrackFacets(Path.Combine(outDir, $"facets_{step:D3}.txt"));
         if (rec != null)
             File.AppendAllText(Path.Combine(outDir, "steps.txt"),
                 $"{step} {rec.DaMax:G6} {aCur:G6} {cCur:G6} {rec.EnergyBefore:G10} {rec.EnergyAfter:G10} {rec.SweptWork:G8} {cc.SheetCount} {cc.Chains.Count} {cc.MouthEdges.Count} {drv.Snap.ElementCount} {rec.Iterations} {rec.MsSolve:F0} {string.Join(";", rec.Events)}\n");

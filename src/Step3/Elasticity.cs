@@ -348,6 +348,9 @@ public sealed class BoundaryConditions
     public required double[] Force;     // 3 per node
     public required bool[] FixedDof;    // 3 per node
 
+    /// <summary>Prescribed values of the fixed unknowns (3 per node, read where FixedDof is true); null: all zero.</summary>
+    public double[]? Prescribed;
+
     /// <summary>Kind of each boundary facet id (e * 4 + f) that is not free; absent ids are free.</summary>
     public required Dictionary<int, FacetKind> FacetKinds;
 

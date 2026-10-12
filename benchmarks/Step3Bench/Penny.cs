@@ -35,6 +35,8 @@ namespace Step3.Bench;
 
 public static class Penny
 {
+    private static readonly System.Globalization.CultureInfo Ci = System.Globalization.CultureInfo.InvariantCulture;
+
     public static void Run(Args a)
     {
         var kind = a.S("kind", "one");
@@ -58,11 +60,34 @@ public static class Penny
         // crack discs: centre, normal, radius; the region for the refinement is the disc plus the growth annulus
         var discs = new List<(V3 C, V3 N, double R, int Bit)>();
         if (kind == "one")
-            discs.Add((new V3(0, 0, zOff), new V3(Math.Sin(beta), 0, Math.Cos(beta)).Unit(), aR, 1));
+        {
+            // the centre (option centre=x,y,z in units of h_min) is 0.37 h above the lattice plane z = 0; an offset in x and y
+            // as well made the first increment fail at every retry (2026-10-12), so x = y = 0 is the default
+            var cs = a.S("centre", "0,0,0.37").Split(',');
+            var c0 = new V3(double.Parse(cs[0], Ci) * hmin, double.Parse(cs[1], Ci) * hmin, double.Parse(cs[2], Ci) * hmin);
+            discs.Add((c0, new V3(Math.Sin(beta), 0, Math.Cos(beta)).Unit(), aR, 1));
+        }
+        else if (kind == "list")
+        {
+            // any number of discs, inserted in order: discs=cx,cy,cz,nx,ny,nz,r:cx,... (":" or ";" between discs; absolute coordinates; a centre on a
+            // face gives an edge crack, a later disc crossing an earlier one a junction). 2026-10-12, crack interaction example.
+            var bit = 1;
+            foreach (var d in a.S("discs", "").Split(new[] { ';', ':' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var v = d.Split(',').Select(t => double.Parse(t.Trim(), Ci)).ToArray();
+                if (v.Length != 7) throw new ArgumentException("discs: each entry is cx,cy,cz,nx,ny,nz,r");
+                discs.Add((new V3(v[0], v[1], v[2]), new V3(v[3], v[4], v[5]).Unit(), v[6], bit++));
+            }
+
+            if (discs.Count == 0) throw new ArgumentException("kind=list needs discs=");
+        }
         else
         {
-            discs.Add((new V3(-(aR + gap / 2), 0, zOff), new V3(0, 0, 1), aR, 1));
-            discs.Add((new V3(aR + gap / 2, 0, zOff), new V3(0, 0, 1), aR, 2));
+            // second disc: radius a2 (default a) and centre offset dy along y (default 0): unequal, offset coalescence
+            var a2 = a.D("a2", aR);
+            var dy = a.D("dy", 0);
+            discs.Add((new V3(-(aR + gap / 2), -dy / 2, zOff), new V3(0, 0, 1), aR, 1));
+            discs.Add((new V3(a2 + gap / 2, dy / 2, zOff), new V3(0, 0, 1), a2, 2));
         }
 
         double Dist(V3 x)
@@ -86,10 +111,12 @@ public static class Penny
         Console.WriteLine($"penny {kind}: a {aR} beta {a.D("beta", 0)} gap {gap} h0 {h0:G4} hmin {hmin:G5} rq {rq:G4}; mesh {cm.M.ElementCount} tets after {refiner.Bisections} bisections, {sw.ElapsedMilliseconds} ms");
         var opt = Box3D.Options(a, hmin, rq);
         var drv = new GrowthDriver(cm, mat, Box3D.TensionZ(lo, hi, sigma), opt);
+        drv.Inserter.RejectSameSide = !a.Flag("samesideok"); // samesideok: a star whose components all lie on one side is not split instead of rejecting
         foreach (var (c, nrm, r, bit) in discs)
         {
             var margin = hmin / 4;
             HashSet<int>? onWall = null;
+            HashSet<int>? nearWall = null;
             if (opt.Fit)
             {
                 // wall: the cylinder rho = r around the disc axis, as a polygon of 128 segments
@@ -107,14 +134,33 @@ public static class Penny
 
                 var wall = FrontFitter.Wall(p, b, 2 * hmin, true);
                 var fit = FrontFitter.Fit(cm, wall, hmin);
+                drv.DebugWall = wall;
                 onWall = fit.WallNodes;
+                nearWall = fit.Unmoved;
                 margin = opt.FitMarginElements * hmin;
                 Console.WriteLine($"fit disc bit {bit}: {fit.Moved}/{fit.Candidates} moved, {fit.Rejected} rejected, {fit.EdgesCut} edges cut");
             }
 
             Field3 phiS = x => V3.Dot(x - c, nrm);
             Field3 phiR = x => (x - c).Perp(nrm).Norm - r - margin;
-            drv.InsertInitial(bit, phiS, phiR, c, nrm, onWall);
+            // intended front: the circle with outward N and the normal B
+            {
+                var e1 = Math.Abs(nrm.X) < 0.9 ? V3.Cross(nrm, new V3(1, 0, 0)).Unit() : V3.Cross(nrm, new V3(0, 1, 0)).Unit();
+                var e2 = V3.Cross(nrm, e1);
+                const int mc = 256;
+                var pc = new V3[mc];
+                var nc = new V3[mc];
+                var bc = new V3[mc];
+                for (var k = 0; k < mc; k++)
+                {
+                    var th = 2 * Math.PI * k / mc;
+                    nc[k] = Math.Cos(th) * e1 + Math.Sin(th) * e2;
+                    pc[k] = c + r * nc[k];
+                    bc[k] = nrm;
+                }
+
+                drv.InsertInitial(bit, phiS, phiR, c, nrm, onWall, hmin, nearWall, [new FrontCurve3(pc, nc, bc, true)]);
+            }
         }
 
         if (a.Flag("check")) Check(drv);
@@ -197,6 +243,7 @@ public static class Penny
         if (outDir.Length == 0) return;
         Box3D.WriteKnots(Path.Combine(outDir, "knots.txt"), step, drv, Ref);
         drv.WriteFronts(Path.Combine(outDir, $"fronts_{step:D3}.txt"));
+        drv.WriteCrackFacets(Path.Combine(outDir, $"facets_{step:D3}.txt"));
         if (rec != null)
             File.AppendAllText(Path.Combine(outDir, "steps.txt"),
                 $"{step} {rec.DaMax:G6} {rec.EnergyBefore:G10} {rec.EnergyAfter:G10} {rec.SweptWork:G8} {cc.SheetCount} {cc.Chains.Count} {cc.PairCount} {drv.Snap.ElementCount} {rec.Iterations} {rec.MsSolve:F0} {rec.MsFactors:F0} {rec.MsInsert:F0} {string.Join(";", rec.Events)}\n");

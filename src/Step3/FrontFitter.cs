@@ -40,6 +40,9 @@ public static class FrontFitter
 
         /// <summary>Nodes placed on the wall: moved nodes and the nodes created on the crossing edges.</summary>
         public HashSet<int> WallNodes = new();
+
+        /// <summary>Candidates within the move distance of the wall that could not be moved (rejected or blocked).</summary>
+        public HashSet<int> Unmoved = new();
     }
 
     /// <summary>
@@ -146,13 +149,16 @@ public static class FrontFitter
             res.WallNodes.Add(v);
         }
 
-        // ---- edges crossing the wall: both endpoints near, opposite signs, crossing parameter in [0.1, 0.9]; an edge at a
-        // candidate that could not move (rejected or blocked) is cut for any parameter in [0.02, 0.98], so the front stays on
-        // the wall there at the price of a small element
+        // ---- edges crossing the wall: both endpoints near, opposite signs, crossing parameter in [0.1, 0.9] (a smaller
+        // window leaves slivers that spoil the interaction integral near the front; the front then deviates from the
+        // wall by at most a tenth of an edge at a candidate that could not move)
         var unmoved = new bool[nN];
         for (var v = 0; v < nN; v++)
             if (near[v] && !moved[v] && phi[v] != 0 && Math.Abs(phi[v]) <= moveTol * h && cm.Mask[v] == 0)
+            {
                 unmoved[v] = true;
+                res.Unmoved.Add(v);
+            }
         var marked = new List<(int, int)>();
         var roots = new Dictionary<long, double>(EdgeKeyComparer.Instance);
         for (var v = 0; v < nN; v++)
@@ -165,7 +171,7 @@ public static class FrontFitter
                 var u = cols[q];
                 if (cnts[q] == 0 || u <= v || !near[u] || phi[u] == 0) continue;
                 if (phi[v] * phi[u] >= 0) continue;
-                var window = unmoved[v] || unmoved[u] ? 0.02 : 0.1;
+                var window = 0.1;
                 // root along the edge of the signed distance to the wall (bisection on the plane of the nearest triangle)
                 V3 pv = cm.P(v), pu = cm.P(u);
                 var t = CrackInserter3.RootOf(pv, pu, x =>
