@@ -858,40 +858,6 @@ Open an issue to discuss substantial changes before sending a pull request.
 
 ---
 
-## Citation
-
-ManyToMany is described in the following open-access paper. If you use the library in academic work, please cite it:
-
-> P. Areias, M. Sardinha, N. Silvestre. **A multi-level framework for type-safe topological structures with efficient connectivity queries.** *Advances in Engineering Software* **222** (2026) 104296. [doi:10.1016/j.advengsoft.2026.104296](https://doi.org/10.1016/j.advengsoft.2026.104296)
-
-```bibtex
-@article{Areias2026multilevel,
-  author  = {Areias, P. and Sardinha, M. and Silvestre, N.},
-  title   = {A multi-level framework for type-safe topological structures
-             with efficient connectivity queries},
-  journal = {Advances in Engineering Software},
-  volume  = {222},
-  pages   = {104296},
-  year    = {2026},
-  doi     = {10.1016/j.advengsoft.2026.104296}
-}
-```
-
-To refer to the software itself (for example a specific release or commit), you can additionally cite:
-
-```bibtex
-@software{areias_manytomany,
-  author = {Areias, Pedro},
-  title  = {ManyToMany: A High-Performance Scientific Computing and
-            Finite Element Library for .NET},
-  year   = {2026},
-  url    = {https://github.com/PedroAreiasIST/ManyToMany}
-}
-```
-
-A machine-readable [`CITATION.cff`](CITATION.cff) is included; GitHub's **Cite this repository** button exports APA and BibTeX from it.
-
----
 
 ## License
 
